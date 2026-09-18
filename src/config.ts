@@ -30,13 +30,16 @@ export const config = {
         `https://api.cloudflare.com/client/v4/accounts/${config.cloudflare.accountId}/ai/v1`
       );
     },
-    /** Chat completions, so openai.LLM (not openai.responses.LLM) drops straight in. */
+    /**
+     * In-call. Measured time-to-first-token: llama-3.3-70b 427ms, deepseek-v4-pro 2151ms,
+     * glm-5.3 1989ms. That gap is dead air the caller hears, and the persona talks over it.
+     */
     get model() {
       return opt('CLOUDFLARE_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast');
     },
-    /** The decider is one offline JSON call, so it can afford a slower, stronger model. */
+    /** Offline, one call, 24s of budget — so it runs the strongest model available. */
     get deciderModel() {
-      return opt('CLOUDFLARE_DECIDER_MODEL', config.cloudflare.model);
+      return opt('CLOUDFLARE_DECIDER_MODEL', '@cf/deepseek-ai/deepseek-v4-pro-0813');
     },
   },
   /**

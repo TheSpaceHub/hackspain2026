@@ -148,6 +148,15 @@ Checked against `@livekit/agents` 1.9.0 on this build:
 - **The floor holds.** With the model stack deliberately broken, every call still POSTed
   an accepted `no_action`. Submitting nothing scores identically to a crash.
 - **G.711** round-trips at 36.6 dB SNR, and `0xFF` ↔ digital zero.
+- **Model split by role**, measured time-to-first-token on the real system prompt:
+  llama-3.3-70b **427ms**, deepseek-v4-flash 1968ms, glm-5.3 1989ms, deepseek-v4-pro
+  **2151ms**, glm-5.3-flash 4991ms. On a call that gap is dead air the caller talks over —
+  at 2.1s the agent answered one turn in four. So the call runs llama-3.3-70b and the
+  decider, which is offline with 24s of budget, runs deepseek-v4-pro. Both are one env var.
+  (`kimi-k2.6` returns no assistant content over the OpenAI-compatible surface; unusable here.)
+- **The frontier models are plan-gated, not credit-gated.** Workers AI 403s them on the Free
+  plan regardless of Startup credit balance; Workers Paid unlocks them, and unlock
+  propagates per-model over several minutes.
 - **Deepgram loop**, with live keys: Aura-2 → our transport → nova-3 returns
   9.7 s of speech as 486 frames and transcribes it, with `Arenal Norte` and `Adeslas`
   both recovered by the keyterm list.
