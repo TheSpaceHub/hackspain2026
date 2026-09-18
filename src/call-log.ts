@@ -6,12 +6,8 @@ import type { SubmitResult } from './submit.js';
 import type { TranscriptTurn } from './transcript.js';
 
 /**
- * One JSON line per call: the call id, the transcript, what the decider was given
- * and what it returned, every POST body and status, and the timings.
- *
- * This file is the evaluation harness. It goes in on day one rather than being
- * retrofitted, because "why did it say that?" is a question only a record can
- * answer, and the jury marks engineering rigour on exactly this.
+ * One JSON line per call. This is the evaluation harness: "why did it say that?" is a
+ * question only a record answers, which is why it goes in on day one.
  */
 
 export interface CallLog {
@@ -25,7 +21,7 @@ export interface CallLog {
     session_start_ms?: number;
     decider_ms?: number;
     submit_ms?: number;
-    /** Time from socket close to the last POST returning — the 30 s window. */
+    /** Socket close to last POST returning — the 30 s window. */
     close_to_submitted_ms?: number;
   };
   audio: {
@@ -54,7 +50,7 @@ export async function writeCallLog(entry: CallLog): Promise<void> {
     const day = entry.started_at.slice(0, 10);
     await appendFile(join(config.logDir, `calls-${day}.jsonl`), `${JSON.stringify(entry)}\n`, 'utf8');
   } catch (err) {
-    // A log that cannot be written must never take a call down with it.
+    // Never take a call down over a log.
     console.error(`[log] failed to write call log for ${entry.call_id}: ${String(err)}`);
   }
 }

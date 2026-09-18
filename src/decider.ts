@@ -4,13 +4,10 @@ import { deciderOutputSchema, type Action, type DeciderOutput } from './schema.j
 import { formatTranscript, type TranscriptTurn } from './transcript.js';
 
 /**
- * One LLM call, one action, on the transcript alone. Budget is the submission
- * window minus the POST.
+ * One LLM call, one action, on the transcript alone.
  *
- * v0 does no clinic lookup, so there is no patient_id to book against and no real
- * slot to name: almost every call correctly ends in no_action. Two endings it can
- * genuinely get right from a transcript are a published red-flag symptom
- * (escalate / medical_emergency) and an out-of-scope caller.
+ * With no lookups there is no patient_id or slot, so almost every call correctly ends in
+ * no_action. Only a red-flag symptom and an out-of-scope caller are decidable here.
  */
 
 export interface DeciderInput {
@@ -28,10 +25,7 @@ export interface DeciderResult {
   usedFloor: boolean;
 }
 
-/**
- * Submitting nothing is always wrong and scores identically to a crash, so every
- * path out of here produces an action. This is that action.
- */
+/** Submitting nothing scores identically to a crash, so every path produces an action. */
 export const FLOOR_ACTION: Action = { action: 'no_action', reason: 'out_of_scope' };
 
 const SYSTEM_PROMPT = `You are the post-call decision step for a medical clinic's phone agent. You read the transcript of one finished call and output exactly one action as JSON.
@@ -121,7 +115,7 @@ export async function decide(input: DeciderInput, budgetMs: number): Promise<Dec
   }
 }
 
-/** Models fence JSON, prefix it, or trail it. Take the first balanced object. */
+/** Models fence, prefix and trail their JSON; take the first balanced object. */
 function extractJson(text: string): unknown {
   const start = text.indexOf('{');
   if (start === -1) return null;

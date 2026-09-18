@@ -1,10 +1,6 @@
 /**
- * The paced sender and local barge-in, checked without a network.
- *
- * These two behaviours are the whole reason the audio output is hand-written,
- * and neither is observable from a normal call log: an unpaced flush sounds fine
- * until someone interrupts, and a barge-in that leaves a segment unreported
- * hangs the session rather than erroring. Run with `pnpm test:audio`.
+ * Paced sender and local barge-in, no network. Neither shows up in a call log: an unpaced
+ * flush sounds fine until someone interrupts, and an unreported segment hangs the session.
  */
 import { AudioFrame } from '@livekit/rtc-node';
 import { initializeLogger } from '@livekit/agents';
@@ -15,7 +11,7 @@ initializeLogger({ pretty: false, level: 'error' });
 const sent: string[] = [];
 const out = new MediaStreamAudioOutput('MZtest', (d) => sent.push(d));
 
-// One second of audio, handed over in a single burst the way a TTS stream does.
+// One second, handed over in a burst the way a TTS stream does.
 const oneSecond = new Int16Array(8000);
 for (let i = 0; i < 8000; i++) oneSecond[i] = Math.round(8000 * Math.sin((2 * Math.PI * 300 * i) / 8000));
 

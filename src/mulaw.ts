@@ -1,12 +1,9 @@
-/**
- * G.711 µ-law <-> PCM16. The only place in the build that touches raw sample bytes.
- * Table-driven both ways: a call is 50 frames a second across twenty sockets.
- */
+/** G.711 µ-law <-> PCM16, table-driven: 50 frames a second across twenty sockets. */
 
 const BIAS = 0x84;
 const CLIP = 32635;
 
-/** µ-law byte -> PCM16 sample. 256 entries, built once. */
+/** 256 entries, built once. */
 const DECODE = new Int16Array(256);
 for (let i = 0; i < 256; i++) {
   const u = ~i & 0xff;
@@ -18,7 +15,7 @@ for (let i = 0; i < 256; i++) {
   DECODE[i] = sign ? -sample : sample;
 }
 
-/** PCM16 sample (offset by 32768) -> µ-law byte. 65536 entries, ~64 KB, built once. */
+/** 65536 entries, ~64 KB, built once. */
 const ENCODE = new Uint8Array(65536);
 for (let i = 0; i < 65536; i++) {
   let sample = i - 32768;

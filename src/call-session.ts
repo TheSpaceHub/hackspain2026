@@ -21,14 +21,8 @@ export interface Shared {
 }
 
 /**
- * One call. Created in the connection handler, rooted there, and unreachable from
- * anywhere else — the AgentSession, the agent, both audio ends, the STT and TTS
- * streams, the transcript, the call_id, the streamSid, the timers, the decider
- * call and the submission all live here.
- *
- * A module-level `let currentCall` is the bug this challenge looks for: it passes
- * every single-call test and fails every burst. There is no module state in this
- * file.
+ * One call, rooted in the connection handler and unreachable elsewhere. Everything the
+ * call owns lives here; there is no module state in this file.
  */
 export class CallSession {
   readonly #ws: WebSocket;
@@ -93,7 +87,7 @@ export class CallSession {
         break;
       case 'stop':
         this.#endedBy = 'stop';
-        // The socket close is imminent; the window is at least this long.
+        // Close is imminent, so the window is at least this long.
         this.#deadlineAt = Math.min(this.#deadlineAt, Date.now() + config.submitWindowMs);
         void this.finish('stop');
         break;
@@ -105,7 +99,7 @@ export class CallSession {
   #onStart(msg: StartMessage): void {
     if (this.#callId) return;
 
-    // start.callSid is the call_id. Never mint one.
+    // start.callSid is the call_id; never mint one.
     this.#callId = msg.start?.callSid ?? msg.start?.streamSid ?? '';
     this.#streamSid = msg.start?.streamSid ?? msg.streamSid ?? '';
     this.#fromNumber = msg.start?.customParameters?.from_number;
@@ -115,7 +109,7 @@ export class CallSession {
       `[call ${this.#callId}] start · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
     );
 
-    // Never let a call run past three minutes.
+    // Never run past three minutes.
     this.#wallClock = setTimeout(() => {
       this.#endedBy = 'wall_clock';
       void this.finish('wall_clock');
@@ -154,14 +148,13 @@ export class CallSession {
         llm: createLLM(),
         tts: createTTS(),
         turnHandling: {
-          // Explicit: left unset, the session auto-provisions LiveKit's hosted
-          // turn detector, which we have no credentials for.
+          // Unset, the session auto-provisions LiveKit's hosted turn detector.
           turnDetection: 'vad',
           endpointing: { minDelay: 400, maxDelay: 2500 },
           interruption: { enabled: true, minWords: 1 },
           preemptiveGeneration: { enabled: true },
         },
-        // There is no room and therefore no echo path to warm up against.
+        // No room, so no echo path to warm up against.
         aecWarmupDuration: null,
         userAwayTimeout: null,
       });
@@ -170,24 +163,23 @@ export class CallSession {
       session.input.audio = this.#input;
       session.output.audio = this.#output;
 
-      // No room: the whole voice loop runs against our own transport.
+      // No room: the voice loop runs against our own transport.
       await session.start({ agent: new ReceptionistAgent() });
       this.#sessionStartMs = Date.now() - t0;
 
-      // The agent speaks first, immediately. A silent open burns the three-minute
-      // clock, and the harness cuts a call with no audible audio from us.
+      // Speak first: the harness cuts a call with no audible audio from us.
       session.say(GREETING, { allowInterruptions: true });
     } catch (err) {
       this.#errors.push(`session start: ${String(err)}`);
       console.error(`[call ${this.#callId}] session start failed: ${String(err)}`);
-      // The call is lost, but the submission is not: finish() still posts.
+      // The call is lost; the submission is not.
       void this.finish('session_start_failed');
     }
   }
 
   // --- ending -------------------------------------------------------------
 
-  /** Idempotent. Reached from `stop`, from socket close, from the wall clock, or from a failure. */
+  /** Idempotent; reached from stop, socket close, the wall clock, or a failure. */
   finish(trigger: string): Promise<void> {
     this.#finishing ??= this.#finish(trigger);
     return this.#finishing;
@@ -206,13 +198,12 @@ export class CallSession {
       this.#errors.push(`transcript: ${String(err)}`);
     }
 
-    // Close the socket before deciding: the 30 s clock starts at close, and a
-    // decision made against a still-open socket only shortens our own window.
+    // Close before deciding: the 30 s clock starts at close.
     if (this.#ws.readyState === this.#ws.OPEN) {
       try {
         this.#ws.close();
       } catch {
-        // Already going.
+        // already going
       }
     }
     this.#closedAt ??= Date.now();
@@ -220,8 +211,7 @@ export class CallSession {
       this.#deadlineAt = this.#closedAt + config.submitWindowMs;
     }
 
-    // Shut the session down alongside the decision rather than before it — its
-    // teardown talks to Deepgram and we do not owe that any of the window.
+    // Tear down alongside the decision: it talks to Deepgram and we owe it no window.
     const closing = this.#session
       ?.close()
       .catch((err: unknown) => this.#errors.push(`session close: ${String(err)}`));
@@ -255,11 +245,7 @@ export class CallSession {
     );
   }
 
-  /**
-   * Past the deadline nothing can be accepted, so a late POST is a 410 however
-   * right it is — but we submit anyway, because a 410 in the log is evidence and
-   * a skipped POST is not.
-   */
+  /** Always yields at least one action. */
   #actionsFor(decided: DeciderResult): Action[] {
     if (decided.output.actions.length > 0) return decided.output.actions;
     this.#errors.push('decider returned no actions');

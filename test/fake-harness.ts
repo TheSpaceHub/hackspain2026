@@ -1,11 +1,6 @@
 /**
- * A local stand-in for the Prosper harness.
- *
- * It dials your own /ws speaking the same Twilio Media Streams messages the real
- * harness speaks, plays a scripted caller at 20 ms per frame, records whatever
- * the agent says back, and reports the timings. Nothing here runs in production —
- * it exists so turn-taking, barge-in and concurrency can be debugged without
- * spending a practice call, which is rate-limited to one per thirty seconds.
+ * A local stand-in for the Prosper harness: dials your own /ws on the same wire, plays a
+ * scripted caller, records what comes back. Debug here, not on rate-limited practice calls.
  *
  *   pnpm harness                              scripted booking call, one socket
  *   pnpm harness -- --n 10                    ten concurrent calls, the Run All shape
@@ -73,18 +68,13 @@ function parseArgs(argv: string[]): Options {
   return opts;
 }
 
-/**
- * Turn a line into 8 kHz mono PCM using macOS `say` and `afconvert`, both of
- * which ship with the OS. On anything else, fall back to silence of a plausible
- * length so the pacing and concurrency paths can still be exercised.
- */
+/** macOS `say`; elsewhere, silence of a plausible length still exercises pacing. */
 async function synthesise(line: string, dir: string, index: number): Promise<Int16Array> {
   if (process.platform !== 'darwin') {
     return new Int16Array(Math.round((SAMPLE_RATE * (1.5 + line.length / 15)) | 0));
   }
   const wav = join(dir, `line-${index}.wav`);
-  // CoreAudio downsamples properly on the way out, so this is already the
-  // 8 kHz band-limited audio a real phone line would deliver.
+  // CoreAudio downsamples properly, giving real phone-line band-limiting.
   await exec('say', ['-o', wav, '--file-format=WAVE', '--data-format=LEI16@8000', line]);
   return toMono(await readWav(wav), SAMPLE_RATE);
 }
@@ -167,9 +157,8 @@ async function runCall(opts: Options, turns: Int16Array[], index: number): Promi
     },
   });
 
-  // A phone line is always sending. Between turns the caller is silent, but the
-  // frames keep coming, and STT endpointing depends on hearing that silence —
-  // a harness that simply stops sending never lets an utterance close.
+  // A phone line always sends. STT endpointing needs to hear the silence between
+  // turns; a harness that just stops sending never lets an utterance close.
   const SILENCE = new Int16Array(FRAME_SAMPLES);
   let pending: Int16Array[] = [];
 
@@ -189,7 +178,7 @@ async function runCall(opts: Options, turns: Int16Array[], index: number): Promi
     report.framesSent++;
   };
 
-  /** Start the line and return the way to stop it. */
+  /** Starts the line; returns its stop. */
   const startPump = (): (() => void) => {
     let nextAt = Date.now();
     let timer: NodeJS.Timeout | undefined;
@@ -204,7 +193,7 @@ async function runCall(opts: Options, turns: Int16Array[], index: number): Promi
   };
   let pumpStop = (): void => {};
 
-  /** Queue one turn and wait for it to finish going out at real time. */
+  /** Queue a turn and wait for it to go out at real time. */
   const playTurn = async (pcm: Int16Array): Promise<void> => {
     const frames: Int16Array[] = [];
     for (let off = 0; off < pcm.length; off += FRAME_SAMPLES) {
@@ -214,15 +203,11 @@ async function runCall(opts: Options, turns: Int16Array[], index: number): Promi
     }
     pending = frames;
     while (pending.length > 0 && ws.readyState === WebSocket.OPEN) await sleep(20);
-    // Let the tail of the last frame actually leave.
+    // Let the last frame's tail leave.
     await sleep(FRAME_MS * 2);
   };
 
-  /**
-   * Wait until the agent has been quiet for `gapMs`. If it never says anything at
-   * all, give up quickly rather than holding the turn open — a mute agent is the
-   * failure we are trying to see, not something to wait out.
-   */
+  /** Wait for `gapMs` of quiet. A mute agent is the failure we want to see, not wait out. */
   const waitForQuiet = async (): Promise<void> => {
     const startedAt = Date.now();
     const deadline = startedAt + 20_000;
@@ -240,8 +225,7 @@ async function runCall(opts: Options, turns: Int16Array[], index: number): Promi
   try {
     pumpStop = startPump();
     if (opts.bargeIn) {
-      // Talk over the greeting on purpose: the agent should stop mid-word and
-      // the queued frames it had not sent yet should never arrive.
+      // Talk over the greeting: queued frames should never arrive.
       await sleep(600);
       await playTurn(turns[0]!);
       const before = report.framesReceived;
@@ -251,7 +235,7 @@ async function runCall(opts: Options, turns: Int16Array[], index: number): Promi
       );
       turns = turns.slice(1);
     } else {
-      // Let the agent get its greeting out first.
+      // Let the greeting out first.
       await waitForQuiet();
     }
 
@@ -311,8 +295,7 @@ async function main(): Promise<void> {
 
     const silent = reports.filter((r) => r.framesReceived === 0);
     if (silent.length > 0) {
-      // The harness cuts a call with no audible audio from the agent and
-      // attributes the failure to us, so this is the one that must be zero.
+      // The harness cuts a silent call and blames us, so this must be zero.
       console.log(`\nFAIL: ${silent.length}/${reports.length} call(s) produced no agent audio`);
       process.exitCode = 1;
     } else {

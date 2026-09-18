@@ -1,7 +1,4 @@
-/**
- * The wire the harness speaks: Twilio Media Streams, camelCase, with
- * sequenceNumber / chunk / timestamp arriving as strings rather than numbers.
- */
+/** Twilio Media Streams: camelCase, with sequenceNumber/chunk/timestamp as strings. */
 
 export interface ConnectedMessage {
   event: 'connected';
@@ -16,7 +13,7 @@ export interface StartMessage {
   start: {
     streamSid: string;
     accountSid?: string;
-    /** This is the call_id. Never mint one. */
+    /** The call_id; never mint one. */
     callSid: string;
     tracks?: string[];
     customParameters?: Record<string, string>;
@@ -62,10 +59,7 @@ export function outboundMedia(streamSid: string, payload: string): string {
   return JSON.stringify({ event: 'media', streamSid, media: { payload } });
 }
 
-/**
- * The harness documents `clear` as having no effect on its side today. We send it
- * because it is free and may start working; barge-in is handled locally regardless.
- */
+/** A no-op on their side today; free to send, and barge-in is local regardless. */
 export function outboundClear(streamSid: string): string {
   return JSON.stringify({ event: 'clear', streamSid });
 }

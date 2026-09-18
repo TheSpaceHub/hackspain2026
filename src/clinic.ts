@@ -1,13 +1,10 @@
 import { config } from './config.js';
 
 /**
- * The catalogue. Generated once, identical for every team and every call for the
- * whole event, so it is fetched once at boot and cached forever — one of the two
- * things deliberately shared across sockets (the other is the VAD model).
+ * The catalogue: generated once and identical all event, so fetched once and shared.
  *
- * v0 does no clinic lookup during a call. The catalogue is here for exactly one
- * purpose: keyterm biasing for STT, which is the single highest-leverage speech
- * setting in the build. A misheard surname or insurer is a lost case.
+ * v0 does no lookups during a call. This exists solely for STT keyterm biasing — a
+ * misheard surname or insurer is a lost case.
  */
 
 export interface Clinic {
@@ -16,12 +13,9 @@ export interface Clinic {
   source: 'api' | 'fallback';
 }
 
-/**
- * What the documentation names outright, used when /api/v1/clinic is unreachable
- * at boot so a missing key degrades the call rather than preventing it.
- */
+/** Used when /api/v1/clinic is unreachable, so a missing key degrades rather than blocks. */
 const FALLBACK_KEYTERMS = [
-  // The two near-miss provider pairs are the whole point of keyterms.
+  // The two near-miss pairs are the whole point of keyterms.
   'Sáez', 'Sáenz', 'Iglesias', 'Iglesia', 'Requena', 'Ortiz', 'Vilar', 'Cid',
   // Sites.
   'Arenal', 'Arenal Centro', 'Arenal Norte', 'Arenal Sur',
@@ -56,10 +50,7 @@ async function fetchClinic(): Promise<Clinic> {
   }
 }
 
-/**
- * Walk the catalogue for the names a caller says out loud. The response shape is
- * read defensively — a renamed field costs us a few keyterms, never a boot.
- */
+/** Read defensively: a renamed field costs a few keyterms, never a boot. */
 function buildKeyterms(raw: unknown): string[] {
   const terms = new Set<string>();
   const seen = new Set<unknown>();
@@ -83,8 +74,7 @@ function buildKeyterms(raw: unknown): string[] {
     if (collection) {
       for (const field of NAME_FIELDS) {
         const value = obj[field];
-        // Only a provider's name is worth breaking apart: the surname is what a
-        // caller says on its own, and it is where the near-miss pairs live.
+        // Only provider names split: the surname is what a caller says alone.
         if (typeof value === 'string') addName(terms, value, collection === 'providers');
       }
     }
@@ -95,28 +85,24 @@ function buildKeyterms(raw: unknown): string[] {
 
   walk(raw, null);
   for (const term of FALLBACK_KEYTERMS) terms.add(term);
-  // Deepgram takes a bounded list; the long tail is noise.
+  // Bounded list; the long tail is noise.
   return [...terms].slice(0, 100);
 }
 
-/**
- * Ordinary English that happens to appear in a catalogue name. Boosting these
- * would bias the STT toward words it already recognises perfectly, at the
- * expense of the surnames we actually care about.
- */
+/** Boosting these biases STT toward words it already gets right. */
 const COMMON_WORDS = new Set([
   'first', 'visit', 'review', 'session', 'assessment', 'practice', 'general',
   'clinic', 'centre', 'center', 'care', 'health', 'salud', 'plan', 'de', 'la', 'del',
 ]);
 
-/** "Dra. Carmen Iglesias" contributes both the full name and the surname that gets misheard. */
+/** Contributes the full name and the surname that gets misheard. */
 function addName(terms: Set<string>, value: string, splitParts: boolean): void {
   const cleaned = value.replace(/^(Dr\.?|Dra\.?|D\.?|Dña\.?)\s+/i, '').trim();
   if (cleaned.length < 2 || cleaned.length > 60) return;
   terms.add(cleaned);
   if (!splitParts) return;
 
-  // Skip the given name: callers say "Doctor Sáenz", not "Doctor Marta".
+  // Callers say "Doctor Sáenz", not "Doctor Marta".
   for (const part of cleaned.split(/\s+/).slice(1)) {
     if (part.length >= 3 && !COMMON_WORDS.has(part.toLowerCase())) terms.add(part);
   }

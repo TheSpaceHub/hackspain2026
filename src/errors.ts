@@ -1,8 +1,4 @@
-/**
- * Node's fetch throws a bare `TypeError: fetch failed` and hides the real reason
- * (DNS, refused connection, TLS) in `cause`. A call log that only says "fetch
- * failed" cannot be debugged after the fact, so unwrap the chain.
- */
+/** Node's fetch hides the real reason (DNS, refused, TLS) behind "fetch failed". */
 export function describeError(err: unknown): string {
   const parts: string[] = [];
   let current: unknown = err;

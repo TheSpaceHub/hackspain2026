@@ -4,17 +4,11 @@ export const GREETING =
   "Good morning, Clínica Arenal, this is Ana speaking. How can I help you today?";
 
 /**
- * One agent, one static system prompt, zero tools.
+ * One agent, one static prompt, zero tools.
  *
- * v0 performs no clinic lookup during the call, so the agent genuinely cannot
- * quote a real slot, doctor or price — and the prompt's main job is to stop it
- * pretending otherwise. An inventing agent is marked down hard, and a fabricated
- * appointment also poisons the transcript the decider reads afterwards. So the
- * agent takes the request, confirms it back, and says the clinic will come back
- * to confirm.
- *
- * Everything the decider will need has to be said out loud during the call,
- * because the transcript is the only thing that survives it.
+ * With no lookups the agent cannot quote a real slot, and the prompt's main job is to
+ * stop it pretending otherwise: an invented appointment poisons the transcript the
+ * decider reads. Everything the decider needs must be said out loud.
  */
 const INSTRUCTIONS = `You are Ana, a receptionist at Clínica Arenal, a clinic in Madrid with three sites (Centro, Norte and Sur). You are answering the telephone. You speak English.
 

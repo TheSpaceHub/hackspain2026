@@ -3,31 +3,22 @@ import { voice } from '@livekit/agents';
 import { pcm16ToMulaw } from './mulaw.js';
 import { FRAME_BYTES, FRAME_MS, SAMPLE_RATE, outboundClear, outboundMedia } from './twilio.js';
 
-/** One utterance. LiveKit segments these with flush() and clearBuffer(). */
+/** One utterance; LiveKit segments these with flush() and clearBuffer(). */
 interface Segment {
   chunks: Uint8Array[];
-  /** flush() has been called: no more audio is coming for this segment. */
   closed: boolean;
-  /** Frames of this segment already on the wire, for the playback position report. */
+  /** Frames already on the wire, for the playback position report. */
   sent: number;
   started: boolean;
   createdAt: number;
 }
 
 /**
- * Agent audio, from the AgentSession out to the socket.
+ * Agent audio out. One per socket.
  *
- * Two things matter here and only here:
- *
- *  - **Pacing.** Frames go out one per 20 ms of wall clock, not flushed in a
- *    burst. An unpaced flush makes barge-in impossible, because by the time the
- *    caller interrupts, the audio they are interrupting has already left.
- *  - **Local barge-in.** The harness implements no server-side barge-in and says
- *    `clear` has no effect on its side today, so clearBuffer() has to drop our
- *    own queued frames and stop sending. We send `clear` too — it is free and may
- *    start working — but nothing depends on it.
- *
- * One instance per socket.
+ * Paced at one frame per 20 ms: an unpaced flush makes barge-in impossible, since the
+ * audio being interrupted has already left. The harness does no server-side barge-in and
+ * `clear` is a no-op there, so clearBuffer() drops our own queue.
  */
 export class MediaStreamAudioOutput extends voice.AudioOutput {
   #send: (data: string) => void;
@@ -55,14 +46,14 @@ export class MediaStreamAudioOutput extends voice.AudioOutput {
       segment = { chunks: [], closed: false, sent: 0, started: false, createdAt: Date.now() };
       this.#segments.push(segment);
     }
-    // Aura-2 hands us whole utterances; the wire wants exactly 160 bytes per message.
+    // The wire wants exactly 160 bytes per message.
     for (let off = 0; off < mulaw.length; off += FRAME_BYTES) {
       segment.chunks.push(mulaw.subarray(off, Math.min(off + FRAME_BYTES, mulaw.length)));
     }
     this.#startPump();
   }
 
-  /** End of utterance. The segment finishes when the last queued frame is actually sent. */
+  /** The segment finishes when its last queued frame is actually sent. */
   override flush(): void {
     super.flush();
     const segment = this.#segments.at(-1);
@@ -70,7 +61,7 @@ export class MediaStreamAudioOutput extends voice.AudioOutput {
     this.#drainFinished();
   }
 
-  /** Interruption. Drop everything we have not sent and report what did play. */
+  /** Drop what we have not sent; report what did play. */
   override clearBuffer(): void {
     const dropped = this.#segments;
     this.#segments = [];
@@ -79,8 +70,7 @@ export class MediaStreamAudioOutput extends voice.AudioOutput {
 
     if (!this.#closed) this.#send(outboundClear(this.#streamSid));
 
-    // Every captured-but-unfinished segment has to be reported, or the session
-    // waits forever on a playout that will never arrive.
+    // Unreported segments hang the session on a playout that never arrives.
     let pending = this.pendingPlayoutSegments;
     let i = 0;
     while (pending > 0) {
@@ -91,7 +81,7 @@ export class MediaStreamAudioOutput extends voice.AudioOutput {
     }
   }
 
-  /** Socket is gone. Stop sending and release any segment the session is waiting on. */
+  /** Socket gone: stop sending, release any segment the session awaits. */
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
@@ -122,8 +112,7 @@ export class MediaStreamAudioOutput extends voice.AudioOutput {
     if (this.#closed) return;
 
     const now = Date.now();
-    // Drift-corrected: catch up if the event loop held us up, rather than
-    // letting a few milliseconds per frame accumulate into audible lag.
+    // Drift-corrected, or a few ms per frame accumulates into audible lag.
     if (this.#nextSendAt < now - FRAME_MS * 10) this.#nextSendAt = now;
 
     let budget = 10;
@@ -137,7 +126,7 @@ export class MediaStreamAudioOutput extends voice.AudioOutput {
     this.#timer = setTimeout(this.#tick, Math.max(0, this.#nextSendAt - Date.now()));
   };
 
-  /** Send a single 20 ms frame. Returns false when there is nothing to send. */
+  /** Returns false when there is nothing to send. */
   #sendOne(): boolean {
     const segment = this.#segments[0];
     if (!segment) return false;
@@ -153,7 +142,7 @@ export class MediaStreamAudioOutput extends voice.AudioOutput {
     return true;
   }
 
-  /** Retire segments that are closed and fully on the wire. */
+  /** Retire segments closed and fully on the wire. */
   #drainFinished(): void {
     while (this.#segments.length > 0) {
       const segment = this.#segments[0]!;
@@ -167,11 +156,7 @@ export class MediaStreamAudioOutput extends voice.AudioOutput {
   }
 }
 
-/**
- * Deepgram is configured at mulaw/8000 so frames should already arrive mono at
- * 8 kHz. This is the insurance policy for when they do not: average the channels
- * and linearly resample. It is a no-op on the expected path.
- */
+/** No-op on the expected path (mono 8 kHz); insurance for anything else. */
 function toMono8k(frame: AudioFrame): Int16Array {
   const { data, channels, sampleRate, samplesPerChannel } = frame;
 

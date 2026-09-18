@@ -5,10 +5,7 @@ export interface TranscriptTurn {
   text: string;
 }
 
-/**
- * Flatten the session's ChatContext into what the decider reads: caller and agent
- * turns only, tool noise and system prompts dropped.
- */
+/** Caller and agent turns only; tool noise and system prompts dropped. */
 export function buildCallTranscript(chatCtx: llm.ChatContext): TranscriptTurn[] {
   const turns: TranscriptTurn[] = [];
   for (const item of chatCtx.items) {

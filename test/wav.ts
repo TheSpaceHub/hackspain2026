@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 
-/** Minimal RIFF/WAVE read and write: PCM16 only, which is all the harness needs. */
+/** Minimal RIFF/WAVE, PCM16 only. */
 
 export interface Wav {
   samples: Int16Array;
@@ -60,7 +60,7 @@ export async function writeWav(path: string, samples: Int16Array, sampleRate: nu
   await writeFile(path, Buffer.concat([header, Buffer.from(samples.buffer, samples.byteOffset, bytes)]));
 }
 
-/** Fold to mono and resample to the target rate. Linear, which is fine for 8 kHz speech. */
+/** Fold to mono and resample; linear is fine for 8 kHz speech. */
 export function toMono(wav: Wav, targetRate: number): Int16Array {
   let mono: Int16Array;
   if (wav.channels === 1) {
