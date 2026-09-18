@@ -19,6 +19,8 @@ const cases: [string, unknown][] = [
   ['notes as an object', { actions: [{ action: 'no_action', reason: 'out_of_scope' }], notes: { why: 'x' } }],
   ['register missing dob/email', { actions: [{ action: 'register', given_name: 'Carmen', first_surname: 'Delgado', second_surname: 'Ruiz', national_id: '12345678Z' }] }],
   ['register with nulls', { actions: [{ action: 'register', given_name: 'A', first_surname: 'B', second_surname: null, national_id: '12345678Z', date_of_birth: null, phone: null, email: null, insurer: null }] }],
+  ['register nested under "fields"', { actions: [{ action: 'register', fields: { given_name: 'Joaquin', first_surname: 'Gonzalez', second_surname: 'Ortega', national_id: '18921027P', date_of_birth: '1979-07-02', phone: '34783869132', email: 'j@example.com', insurer: 'cigna' } }] }],
+  ['register nested under "new_patient", bare action', { action: 'register', new_patient: { given_name: 'A', first_surname: 'B', national_id: '12345678Z', date_of_birth: '1985-03-14', phone: '600', email: '', insurer: 'dkv' } }],
   ['two actions (problem 18)', { actions: [{ action: 'cancel', appointment_id: 'A1' }, { action: 'cancel', appointment_id: 'A2' }] }],
   ['REJECT: reason outside the vocabulary', { actions: [{ action: 'no_action', reason: 'because_i_said_so' }] }],
   ['REJECT: empty actions', { actions: [] }],

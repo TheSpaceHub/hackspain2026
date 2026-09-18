@@ -2,7 +2,7 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { config } from './config.js';
 import { describeError } from './errors.js';
 import { createAnthropicClient } from './models.js';
-import { deciderOutputSchema, type Action, type DeciderOutput } from './schema.js';
+import { deciderJsonSchema, deciderOutputSchema, type Action, type DeciderOutput } from './schema.js';
 import { formatTranscript, type TranscriptTurn } from './transcript.js';
 
 /**
@@ -53,7 +53,8 @@ Fields: given_name, first_surname, second_surname, national_id, date_of_birth, p
   - date_of_birth is YYYY-MM-DD; the caller will say it in words ("fourteenth of March 1985" is "1985-03-14").
   - phone is digits only, no spaces: what the caller gave, else the number they are calling from.
   - Normalise every field the same way. The transcript is speech, so spacing, punctuation and spelled-out words are expected — convert them, never reject over them.
-  - Use null for a field the caller genuinely never gave. Do not guess one.
+  - insurer is the plan's id from the list below, lowercase with underscores — "cigna", not "Cigna"; "nueva_mutua", not "Nueva Mutua Sanitaria". A spoken name is rejected.
+  - The clinic rejects the whole submission if date_of_birth is not a real date or email is not a string, and a rejected submission records nothing at all. So: never send null for those two. If the transcript truly lacks a date of birth, do not register — return no_action and say which field was missing in notes. If it lacks only an email, send "" for it.
 
 ## "escalate" with reason "medical_emergency"
 The caller described one of these, in these words or close to them:
@@ -145,25 +146,37 @@ export async function decide(input: DeciderInput, budgetMs: number): Promise<Dec
       };
     }
 
-    const res = await fetch(`${config.cloudflare.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.cloudflare.apiToken}`,
-      },
-      body: JSON.stringify({
-        model: config.cloudflare.deciderModel,
-        temperature: 0,
-        // A reasoning model spends most of this thinking; too low and `content`
-        // comes back empty with the whole budget burned on reasoning.
-        max_tokens: 8000,
-        messages: [
-          { role: 'system', content: systemPrompt(input) },
-          { role: 'user', content: userPrompt },
-        ],
-      }),
-      signal: AbortSignal.timeout(budgetMs),
-    });
+    const started = Date.now();
+    const ask = (schema: boolean): Promise<Response> =>
+      fetch(`${config.cloudflare.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config.cloudflare.apiToken}`,
+        },
+        body: JSON.stringify({
+          model: config.cloudflare.deciderModel,
+          temperature: 0,
+          // A reasoning model spends most of this thinking; too low and `content`
+          // comes back empty with the whole budget burned on reasoning.
+          max_tokens: 8000,
+          // Workers AI JSON Mode. Where the model supports it the shape is enforced
+          // rather than hoped for, which is what the tolerant parser exists to survive.
+          ...(schema
+            ? { response_format: { type: 'json_schema', json_schema: deciderJsonSchema } }
+            : {}),
+          messages: [
+            { role: 'system', content: systemPrompt(input) },
+            { role: 'user', content: userPrompt },
+          ],
+        }),
+        signal: AbortSignal.timeout(Math.max(1_000, budgetMs - (Date.now() - started))),
+      });
+
+    let res = await ask(true);
+    // Not every model takes a schema, and a schema it cannot meet is an error rather
+    // than a bad answer. Either way, one plain retry beats flooring the call.
+    if (!res.ok) res = await ask(false);
 
     if (!res.ok) return floor(`decider http ${res.status}: ${await res.text().catch(() => '')}`);
 

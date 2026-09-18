@@ -148,6 +148,15 @@ function buildBriefing(raw: unknown): string {
     );
   }
 
+  const plans = (c.plans as Named[] | undefined) ?? [];
+  if (plans.length > 0) {
+    lines.push(
+      `Insurance plan ids — submit the id, never the spoken name: ${plans
+        .map((p) => `${p.name} = ${p.id}`)
+        .join('; ')}`,
+    );
+  }
+
   const restrictions = (c.restrictions as Named[] | undefined) ?? [];
   if (restrictions.length > 0) {
     lines.push(
