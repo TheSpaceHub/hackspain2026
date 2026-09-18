@@ -87,14 +87,35 @@ const deciderShape = z.object({
   notes: z.preprocess((v) => (typeof v === 'string' ? v : undefined), z.string().optional()).optional(),
 });
 
-/** Accepts a bare action, or a bare array, as well as the documented envelope. */
+/**
+ * Models nest an action's payload under a wrapper about as often as they send it flat —
+ * the contract's own readback nests REGISTER under `new_patient`, so it is a fair guess.
+ * A nested payload is a correct decision in the wrong shape; discarding it costs a record.
+ */
+const WRAPPERS = ['fields', 'new_patient', 'data', 'payload', 'parameters', 'args'];
+
+function flattenAction(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw;
+  const action = { ...(raw as Record<string, unknown>) };
+  for (const key of WRAPPERS) {
+    const nested = action[key];
+    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+      delete action[key];
+      Object.assign(action, nested);
+    }
+  }
+  return action;
+}
+
+/** Accepts a bare action, a bare array, or a nested payload, as well as the documented envelope. */
 export const deciderOutputSchema = z.preprocess((raw) => {
-  if (Array.isArray(raw)) return { actions: raw };
+  if (Array.isArray(raw)) return { actions: raw.map(flattenAction) };
   if (raw && typeof raw === 'object') {
     const o = raw as Record<string, unknown>;
-    if (!o.actions && typeof o.action === 'string') {
+    if (Array.isArray(o.actions)) return { ...o, actions: o.actions.map(flattenAction) };
+    if (typeof o.action === 'string') {
       const { confidence, notes, ...action } = o;
-      return { actions: [action], confidence, notes };
+      return { actions: [flattenAction(action)], confidence, notes };
     }
   }
   return raw;
@@ -111,3 +132,10 @@ export const ROUTES: Record<Action['action'], string> = {
   no_action: 'no-action',
   escalate: 'escalate',
 };
+
+/**
+ * The same contract as a JSON Schema, for Workers AI JSON Mode. The tolerant preprocess
+ * above stays regardless: JSON Mode is unsupported on some models and can fail on a
+ * complex schema, and a decision in the wrong shape is still a decision.
+ */
+export const deciderJsonSchema = z.toJSONSchema(deciderShape, { io: 'input' });
