@@ -274,6 +274,19 @@ export class CallSession {
     let submissions: SubmitResult[] = [];
     if (this.#callId) {
       submissions = await submitActions(this.#callId, actions);
+
+      // A 422 records nothing at all, so a rejected body leaves the call with no record —
+      // which scores exactly like never answering. Only 422 is worth retrying: 404 is the
+      // wrong call_id and 410 is the closed window, and neither is fixed by a new body.
+      const accepted = submissions.some((s) => s.ok);
+      const malformed = submissions.some((s) => s.status === 422);
+      const alreadyNoAction = actions.some((a) => a.action === 'no_action');
+      if (!accepted && malformed && !alreadyNoAction && Date.now() < this.#deadlineAt - 1_000) {
+        this.#errors.push(
+          `submission rejected (${submissions.map((s) => `${s.action}=${s.status}`).join(' ')}); falling back to no_action`,
+        );
+        submissions = submissions.concat(await submitActions(this.#callId, [FLOOR_ACTION]));
+      }
     } else {
       this.#errors.push('no call_id: never received a start message, nothing to submit against');
     }
