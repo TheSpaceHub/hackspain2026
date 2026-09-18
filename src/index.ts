@@ -5,6 +5,7 @@ import { CallSession, type Shared } from './call-session.js';
 import { loadClinic } from './clinic.js';
 import { config } from './config.js';
 import { loadVad } from './models.js';
+import { openStore } from './store/index.js';
 
 /** One process, one WebSocket server, one headless AgentSession per socket. */
 async function main(): Promise<void> {
@@ -15,7 +16,13 @@ async function main(): Promise<void> {
 
   // Shared on purpose: one copy of the VAD weights, one catalogue.
   const [vad, clinic] = await Promise.all([loadVad(), loadClinic()]);
-  const shared: Shared = { vad, keyterms: clinic.keyterms };
+  const store = openStore();
+  const shared: Shared = {
+    vad,
+    keyterms: clinic.keyterms,
+    clinicBriefing: clinic.briefing,
+    store,
+  };
 
   console.log(`[boot] clinic catalogue from ${clinic.source}, ${clinic.keyterms.length} keyterms`);
   console.log(
@@ -25,10 +32,57 @@ async function main(): Promise<void> {
   );
 
   const server = createServer((req, res) => {
-    // A plain GET is a health check, ours or a tunnel's.
-    if (req.url === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, calls: wss.clients.size }));
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const json = (body: unknown, code = 200): void => {
+      res.writeHead(code, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.end(JSON.stringify(body, null, 2));
+    };
+
+    if (url.pathname === '/health') return json({ ok: true, live: wss.clients.size });
+
+    // Realtime feed for a dashboard: one SSE event per row the store writes, as it is
+    // written. EventSource in the browser, no dependency, and CORS-open so the dashboard
+    // can be served from anywhere.
+    if (url.pathname === '/events') {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'X-Accel-Buffering': 'no',
+      });
+      res.write(`event: hello\ndata: ${JSON.stringify({ live: wss.clients.size })}\n\n`);
+
+      const onRow = (row: unknown): void => {
+        res.write(`event: ${(row as { type: string }).type}\ndata: ${JSON.stringify(row)}\n\n`);
+      };
+      store.on('row', onRow);
+      // Proxies and tunnels drop an idle stream; this also surfaces the live call count.
+      const beat = setInterval(() => {
+        res.write(`event: heartbeat\ndata: ${JSON.stringify({ live: wss.clients.size, at: Date.now() })}\n\n`);
+      }, 15_000);
+      const stop = (): void => {
+        clearInterval(beat);
+        store.off('row', onRow);
+      };
+      req.on('close', stop);
+      res.on('error', stop);
+      return;
+    }
+
+    // Read-only console: what happened on a call, and why it decided what it did.
+    if (url.pathname === '/calls') {
+      void store
+        .query('recent', { limit: Number(url.searchParams.get('limit') ?? 50) })
+        .then((rows) => json({ live: wss.clients.size, calls: rows }));
+      return;
+    }
+    if (url.pathname.startsWith('/calls/')) {
+      const callId = decodeURIComponent(url.pathname.slice('/calls/'.length));
+      void store.query('call', { call_id: callId }).then((rows) => json(rows ?? {}, rows ? 200 : 404));
       return;
     }
     res.writeHead(426).end('upgrade required');

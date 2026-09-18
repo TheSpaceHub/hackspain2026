@@ -1,0 +1,67 @@
+/** Messages between a CallSession and the store worker. Structured-cloned, so keep them small. */
+
+export interface CallStarted {
+  type: 'call_started';
+  call_id: string;
+  stream_sid?: string;
+  from_number?: string;
+  started_at: string;
+}
+
+export interface TurnRow {
+  type: 'turn';
+  call_id: string;
+  seq: number;
+  role: 'user' | 'assistant';
+  text: string;
+  at: string;
+}
+
+export interface CallEnded {
+  type: 'call_ended';
+  call_id: string;
+  ended_at: string;
+  ended_by: string;
+  call_ms: number;
+  frames_in: number;
+  frames_out: number;
+  session_start_ms?: number;
+  decider_ms?: number;
+  close_to_submitted_ms?: number;
+  decider_model?: string;
+  decider_raw?: string;
+  decider_notes?: string;
+  decider_conf?: number;
+  used_floor: boolean;
+  errors: string[];
+}
+
+export interface SubmissionRow {
+  type: 'submission';
+  call_id: string;
+  seq: number;
+  action: string;
+  route: string;
+  body: string;
+  status: number;
+  response?: string;
+  attempts: number;
+  duration_ms: number;
+  error?: string;
+}
+
+export interface Query {
+  type: 'query';
+  id: number;
+  name: 'recent' | 'call';
+  call_id?: string;
+  limit?: number;
+}
+
+export type StoreMessage = CallStarted | TurnRow | CallEnded | SubmissionRow | Query;
+export interface QueryResult {
+  type: 'query_result';
+  id: number;
+  rows: unknown;
+  error?: string;
+}

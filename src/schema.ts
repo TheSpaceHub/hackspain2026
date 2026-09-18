@@ -27,16 +27,18 @@ export type Reason = z.infer<typeof reasonSchema>;
 
 /** One variant per route. `call_id` is attached by the submit client, which owns it. */
 export const actionSchema = z.discriminatedUnion('action', [
+  // Nullable where a caller may genuinely never have said it: a partial record that
+  // lands and logs beats a floored no_action that hides what was missing.
   z.object({
     action: z.literal('register'),
     given_name: z.string(),
     first_surname: z.string(),
     second_surname: z.string().nullable().optional(),
     national_id: z.string(),
-    date_of_birth: z.string(),
-    phone: z.string(),
+    date_of_birth: z.string().nullable().optional(),
+    phone: z.string().nullable().optional(),
     email: z.string().nullable().optional(),
-    insurer: z.string(),
+    insurer: z.string().nullable().optional(),
   }),
   z.object({
     action: z.literal('book'),
@@ -72,13 +74,27 @@ export const actionSchema = z.discriminatedUnion('action', [
 export type Action = z.infer<typeof actionSchema>;
 
 /** `confidence` and `notes` go in the call log, never on the wire. */
-export const deciderOutputSchema = z.object({
+const deciderShape = z.object({
   actions: z.array(actionSchema).min(1),
-  confidence: z.number().min(0).max(1).optional(),
+  // Models return this as a string often enough that rejecting it costs real records.
+  confidence: z.coerce.number().min(0).max(1).optional(),
   notes: z.string().optional(),
 });
 
-export type DeciderOutput = z.infer<typeof deciderOutputSchema>;
+/** Accepts a bare action, or a bare array, as well as the documented envelope. */
+export const deciderOutputSchema = z.preprocess((raw) => {
+  if (Array.isArray(raw)) return { actions: raw };
+  if (raw && typeof raw === 'object') {
+    const o = raw as Record<string, unknown>;
+    if (!o.actions && typeof o.action === 'string') {
+      const { confidence, notes, ...action } = o;
+      return { actions: [action], confidence, notes };
+    }
+  }
+  return raw;
+}, deciderShape);
+
+export type DeciderOutput = z.infer<typeof deciderShape>;
 
 /** Note the hyphen: `no_action` -> `/submit/no-action`. */
 export const ROUTES: Record<Action['action'], string> = {

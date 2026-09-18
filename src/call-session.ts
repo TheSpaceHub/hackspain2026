@@ -11,6 +11,7 @@ import { mulawToPcm16 } from './mulaw.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
 import { submitActions, type SubmitResult } from './submit.js';
+import type { Store } from './store/index.js';
 import { buildCallTranscript, type TranscriptTurn } from './transcript.js';
 import { SAMPLE_RATE, type InboundMessage, type StartMessage } from './twilio.js';
 
@@ -18,6 +19,8 @@ import { SAMPLE_RATE, type InboundMessage, type StartMessage } from './twilio.js
 export interface Shared {
   vad: SharedVad;
   keyterms: string[];
+  clinicBriefing: string;
+  store: Store;
 }
 
 /**
@@ -49,6 +52,8 @@ export class CallSession {
   #finishing: Promise<void> | null = null;
   #endedBy = 'unknown';
   #transcript: TranscriptTurn[] = [];
+  /** Turns already handed to the store, so a live flush never re-sends one. */
+  #turnsWritten = 0;
 
   constructor(ws: WebSocket, shared: Shared) {
     this.#ws = ws;
@@ -108,6 +113,14 @@ export class CallSession {
     console.log(
       `[call ${this.#callId}] start · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
     );
+
+    this.#shared.store.write({
+      type: 'call_started',
+      call_id: this.#callId,
+      stream_sid: this.#streamSid,
+      from_number: this.#fromNumber,
+      started_at: new Date(this.#startedAt).toISOString(),
+    });
 
     // Never run past three minutes.
     this.#wallClock = setTimeout(() => {
@@ -169,12 +182,40 @@ export class CallSession {
 
       // Speak first: the harness cuts a call with no audible audio from us.
       session.say(GREETING, { allowInterruptions: true });
+
+      // A turn lands in the store as soon as it is final, so a crash mid-call still
+      // leaves the conversation on disk. The write crosses to the worker thread.
+      session.on(voice.AgentSessionEventTypes.ConversationItemAdded, () => this.#flushTurns());
     } catch (err) {
       this.#errors.push(`session start: ${String(err)}`);
       console.error(`[call ${this.#callId}] session start failed: ${String(err)}`);
       // The call is lost; the submission is not.
       void this.finish('session_start_failed');
     }
+  }
+
+  /** Hand the store every turn it has not seen yet. Cheap, and never throws into the call. */
+  #flushTurns(): void {
+    if (!this.#session || !this.#callId) return;
+    let turns: TranscriptTurn[];
+    try {
+      turns = buildCallTranscript(this.#session.history);
+    } catch {
+      return;
+    }
+    const at = new Date().toISOString();
+    for (let i = this.#turnsWritten; i < turns.length; i++) {
+      const turn = turns[i]!;
+      this.#shared.store.write({
+        type: 'turn',
+        call_id: this.#callId,
+        seq: i,
+        role: turn.role === 'assistant' ? 'assistant' : 'user',
+        text: turn.text,
+        at,
+      });
+    }
+    this.#turnsWritten = Math.max(this.#turnsWritten, turns.length);
   }
 
   // --- ending -------------------------------------------------------------
@@ -223,6 +264,7 @@ export class CallSession {
         transcript: this.#transcript,
         fromNumber: this.#fromNumber,
         now: new Date(),
+        clinicBriefing: this.#shared.clinicBriefing,
       },
       budget,
     );
@@ -237,6 +279,8 @@ export class CallSession {
     }
 
     await closing;
+    this.#flushTurns();
+    this.#writeStore(decided, submissions, submitStartedAt);
     await this.#writeLog(decided, submissions, submitStartedAt);
 
     const verdict = submissions.map((s) => `${s.action}=${s.status}`).join(' ') || 'none';
@@ -250,6 +294,50 @@ export class CallSession {
     if (decided.output.actions.length > 0) return decided.output.actions;
     this.#errors.push('decider returned no actions');
     return [FLOOR_ACTION];
+  }
+
+  #writeStore(
+    decided: DeciderResult,
+    submissions: SubmitResult[],
+    _submitStartedAt: number,
+  ): void {
+    if (!this.#callId) return;
+    const endedAt = Date.now();
+    this.#shared.store.write({
+      type: 'call_ended',
+      call_id: this.#callId,
+      ended_at: new Date(endedAt).toISOString(),
+      ended_by: this.#endedBy,
+      call_ms: (this.#closedAt ?? endedAt) - this.#startedAt,
+      frames_in: this.#framesIn,
+      frames_out: this.#framesOut,
+      session_start_ms: this.#sessionStartMs,
+      decider_ms: decided.durationMs,
+      close_to_submitted_ms: this.#closedAt ? endedAt - this.#closedAt : undefined,
+      decider_model: config.provider === 'anthropic'
+        ? config.anthropic.deciderModel
+        : config.cloudflare.deciderModel,
+      decider_raw: decided.raw,
+      decider_notes: decided.output.notes,
+      decider_conf: decided.output.confidence,
+      used_floor: decided.usedFloor,
+      errors: this.#errors,
+    });
+    for (const [i, s] of submissions.entries()) {
+      this.#shared.store.write({
+        type: 'submission',
+        call_id: this.#callId,
+        seq: i,
+        action: s.action,
+        route: s.route,
+        body: JSON.stringify(s.body),
+        status: s.status,
+        response: s.response === undefined ? undefined : JSON.stringify(s.response),
+        attempts: s.attempts,
+        duration_ms: s.durationMs,
+        error: s.error,
+      });
+    }
   }
 
   async #writeLog(

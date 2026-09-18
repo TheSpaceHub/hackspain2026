@@ -9,6 +9,8 @@ import { config } from './config.js';
 
 export interface Clinic {
   keyterms: string[];
+  /** Compact standing facts for the decider. Static all event, so it costs one fetch. */
+  briefing: string;
   raw: unknown;
   source: 'api' | 'fallback';
 }
@@ -43,10 +45,15 @@ async function fetchClinic(): Promise<Clinic> {
     if (!res.ok) throw new Error(`clinic ${res.status}`);
     const raw = await res.json();
     const keyterms = buildKeyterms(raw);
-    return { keyterms: keyterms.length > 0 ? keyterms : FALLBACK_KEYTERMS, raw, source: 'api' };
+    return {
+      keyterms: keyterms.length > 0 ? keyterms : FALLBACK_KEYTERMS,
+      briefing: buildBriefing(raw),
+      raw,
+      source: 'api',
+    };
   } catch (err) {
-    console.warn(`[clinic] fetch failed (${String(err)}); using documented keyterms`);
-    return { keyterms: FALLBACK_KEYTERMS, raw: null, source: 'fallback' };
+    console.warn(`[clinic] fetch failed (${String(err)}); using documented facts`);
+    return { keyterms: FALLBACK_KEYTERMS, briefing: '', raw: null, source: 'fallback' };
   }
 }
 
@@ -106,4 +113,49 @@ function addName(terms: Set<string>, value: string, splitParts: boolean): void {
   for (const part of cleaned.split(/\s+/).slice(1)) {
     if (part.length >= 3 && !COMMON_WORDS.has(part.toLowerCase())) terms.add(part);
   }
+}
+
+interface Named { id?: string; name?: string; [k: string]: unknown }
+
+/** The standing rules a transcript can be judged against without any per-call lookup. */
+function buildBriefing(raw: unknown): string {
+  const c = (raw ?? {}) as Record<string, unknown>;
+  const lines: string[] = [];
+
+  const calendar = c.calendar as Record<string, unknown> | undefined;
+  if (calendar) {
+    lines.push(
+      `Calendar: bookable ${String(calendar.starts)} to ${String(calendar.ends)}, ` +
+        `${String(calendar.slot_minutes)}-minute slots. Closed: ${JSON.stringify(calendar.closure_days)}. ` +
+        `Nothing opens on a Sunday, and only Arenal Centro opens on a Saturday. Nothing is booked same-day.`,
+    );
+  }
+
+  const providers = (c.providers as Named[] | undefined) ?? [];
+  const onLeave = providers.filter((p) => Array.isArray(p.leave) && (p.leave as unknown[]).length > 0);
+  if (onLeave.length > 0) {
+    lines.push(
+      `Providers on leave: ${onLeave.map((p) => `${p.name} ${JSON.stringify(p.leave)}`).join('; ')}`,
+    );
+  }
+
+  const specialties = (c.specialties as Named[] | undefined) ?? [];
+  if (specialties.length > 0) {
+    lines.push(
+      `Specialties: ${specialties
+        .map((s) => `${s.id} (${s.name}${s.min_age_months !== undefined || s.max_age_months !== undefined ? `, ages ${String(s.min_age_months ?? 0)}-${String(s.max_age_months ?? '')} months` : ''}${s.referral_required ? ', referral required' : ''})`)
+        .join('; ')}`,
+    );
+  }
+
+  const restrictions = (c.restrictions as Named[] | undefined) ?? [];
+  if (restrictions.length > 0) {
+    lines.push(
+      `Standing restrictions, each with the reason code it maps to:\n${restrictions
+        .map((r) => `  - ${r.id}: ${String(r.explanation ?? r.title ?? '')}`)
+        .join('\n')}`,
+    );
+  }
+
+  return lines.join('\n');
 }
