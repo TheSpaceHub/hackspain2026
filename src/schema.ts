@@ -25,6 +25,45 @@ export const REASONS = [
 export const reasonSchema = z.enum(REASONS);
 export type Reason = z.infer<typeof reasonSchema>;
 
+/**
+ * A patient record as the directory returns it. Read defensively: everything but the
+ * id is nullable, because a row that parses with a missing field still books.
+ */
+export const patientSchema = z.object({
+  /** e.g. `P00042` — the only identifier `book` accepts. */
+  patient_id: z.string(),
+  given_name: z.string().nullable().optional(),
+  /** Two surnames, Spanish-style. */
+  first_surname: z.string().nullable().optional(),
+  second_surname: z.string().nullable().optional(),
+  /** DNI or NIE. */
+  national_id: z.string().nullable().optional(),
+  /** The age boundary for specialty routing — the 14th birthday, in months. */
+  date_of_birth: z.string().nullable().optional(),
+  /** The line the clinic holds for them. */
+  phone: z.string().nullable().optional(),
+  sex: z.string().nullable().optional(),
+  /** Decides `first_visit` vs `review`: the appointment type follows this, never the conversation. */
+  has_visited_before: z.boolean().nullable().optional(),
+  /**
+   * Only the first plan. A second can exist in the data and appears nowhere on the
+   * record — asking on the call is the only way to find it (problem 17).
+   */
+  insurer: z.string().nullable().optional(),
+  /** Which referrals they hold, for the referral-gated specialties. */
+  referrals: z.array(z.string()).nullable().optional(),
+  /**
+   * The receptionist's free-text note: recency, visit count, usual doctor, usual site,
+   * and how to talk to them ("hard of hearing — speak slowly").
+   */
+  note: z.string().nullable().optional(),
+  /** How this row was found, not part of the chart. */
+  match_score: z.number().nullable().optional(),
+  matched_fields: z.array(z.string()).nullable().optional(),
+});
+
+export type Patient = z.infer<typeof patientSchema>;
+
 /** One variant per route. `call_id` is attached by the submit client, which owns it. */
 export const actionSchema = z.discriminatedUnion('action', [
   // Nullable where a caller may genuinely never have said it: a partial record that
