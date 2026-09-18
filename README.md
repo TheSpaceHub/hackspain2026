@@ -148,6 +148,16 @@ Checked against `@livekit/agents` 1.9.0 on this build:
 - **The floor holds.** With the model stack deliberately broken, every call still POSTed
   an accepted `no_action`. Submitting nothing scores identically to a crash.
 - **G.711** round-trips at 36.6 dB SNR, and `0xFF` ↔ digital zero.
+- **Deepgram loop**, with live keys: Aura-2 → our transport → nova-3 returns
+  9.7 s of speech as 486 frames and transcribes it, with `Arenal Norte` and `Adeslas`
+  both recovered by the keyterm list.
+
+### Known for v1
+
+`numerals: true` returns a DNI as spaced digits — `"2 4 8 2 4 6 1 0 c"`, not
+`"24824610C"`. v0 never submits a `national_id`, but `register` and the directory lookup
+both compare it exactly and re-derive its check letter, so whitespace stripping and
+upper-casing belong in the first v1 commit.
 
 ## Deliberately not in v0
 
@@ -164,6 +174,12 @@ The submission client takes an **array** of actions from day one, so problem 18
 
 ## Notes and traps
 
+- **TTS must be `linear16`, not `mulaw`**, despite µ-law being the wire format. The
+  Deepgram plugin pipes response bytes straight into an `AudioByteStream` that always
+  reads them as PCM16 — it never decodes µ-law, so asking for mulaw yields noise at half
+  duration. `MediaStreamAudioOutput` does the µ-law encoding instead. Verified at 1.9.0.
+- `stt.SpeechEventType` is a **numeric** enum. Comparing it to a string silently matches
+  nothing, which looks exactly like an STT that heard nothing.
 - `openai.LLM`, **never** `openai.responses.LLM` — Workers AI speaks chat completions,
   not the Responses API.
 - `turnDetection: 'vad'` is set explicitly. Left unset, the session auto-provisions

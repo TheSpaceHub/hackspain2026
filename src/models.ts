@@ -47,12 +47,23 @@ export function createSTT(keyterms: string[]): deepgram.STT {
   });
 }
 
-/** Aura-2 emits the wire format directly: µ-law at 8 kHz, no resampling on the way out. */
+/**
+ * Aura-2 at 8 kHz, which is the wire's rate, so nothing is resampled on the way out.
+ *
+ * Linear16 rather than mulaw, despite mulaw being the wire format. The plugin
+ * pipes Deepgram's response bytes straight into an `AudioByteStream`, which
+ * always interprets them as PCM16 — it never decodes µ-law. Asking for mulaw
+ * therefore yields frames of µ-law bytes read as linear16: noise, at half the
+ * duration. Verified against the plugin at 1.9.0.
+ *
+ * So we take real PCM16 here and `MediaStreamAudioOutput` does the µ-law
+ * encoding itself, which it has to be able to do anyway.
+ */
 export function createTTS(): deepgram.TTS {
   return new deepgram.TTS({
     apiKey: config.deepgram.apiKey,
     model: config.deepgram.ttsModel,
-    encoding: 'mulaw',
+    encoding: 'linear16',
     sampleRate: 8000,
   });
 }

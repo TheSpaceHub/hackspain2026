@@ -70,42 +70,54 @@ function buildKeyterms(raw: unknown): string[] {
     'appointment_types', 'sites', 'plans',
   ];
 
-  const walk = (node: unknown, inCollection: boolean): void => {
+  const walk = (node: unknown, collection: string | null): void => {
     if (node === null || typeof node !== 'object' || seen.has(node)) return;
     seen.add(node);
 
     if (Array.isArray(node)) {
-      for (const item of node) walk(item, inCollection);
+      for (const item of node) walk(item, collection);
       return;
     }
 
     const obj = node as Record<string, unknown>;
-    if (inCollection) {
+    if (collection) {
       for (const field of NAME_FIELDS) {
         const value = obj[field];
-        if (typeof value === 'string') addName(terms, value);
+        // Only a provider's name is worth breaking apart: the surname is what a
+        // caller says on its own, and it is where the near-miss pairs live.
+        if (typeof value === 'string') addName(terms, value, collection === 'providers');
       }
     }
     for (const [key, value] of Object.entries(obj)) {
-      walk(value, inCollection || COLLECTIONS.includes(key));
+      walk(value, COLLECTIONS.includes(key) ? key : collection);
     }
   };
 
-  walk(raw, false);
+  walk(raw, null);
   for (const term of FALLBACK_KEYTERMS) terms.add(term);
   // Deepgram takes a bounded list; the long tail is noise.
   return [...terms].slice(0, 100);
 }
 
+/**
+ * Ordinary English that happens to appear in a catalogue name. Boosting these
+ * would bias the STT toward words it already recognises perfectly, at the
+ * expense of the surnames we actually care about.
+ */
+const COMMON_WORDS = new Set([
+  'first', 'visit', 'review', 'session', 'assessment', 'practice', 'general',
+  'clinic', 'centre', 'center', 'care', 'health', 'salud', 'plan', 'de', 'la', 'del',
+]);
+
 /** "Dra. Carmen Iglesias" contributes both the full name and the surname that gets misheard. */
-function addName(terms: Set<string>, value: string): void {
+function addName(terms: Set<string>, value: string, splitParts: boolean): void {
   const cleaned = value.replace(/^(Dr\.?|Dra\.?|D\.?|Dña\.?)\s+/i, '').trim();
   if (cleaned.length < 2 || cleaned.length > 60) return;
   terms.add(cleaned);
-  const parts = cleaned.split(/\s+/);
-  if (parts.length > 1) {
-    for (const part of parts.slice(1)) {
-      if (part.length >= 3) terms.add(part);
-    }
+  if (!splitParts) return;
+
+  // Skip the given name: callers say "Doctor Sáenz", not "Doctor Marta".
+  for (const part of cleaned.split(/\s+/).slice(1)) {
+    if (part.length >= 3 && !COMMON_WORDS.has(part.toLowerCase())) terms.add(part);
   }
 }
