@@ -151,6 +151,9 @@ Checked against `@livekit/agents` 1.9.0 on this build:
 - **Deepgram loop**, with live keys: Aura-2 → our transport → nova-3 returns
   9.7 s of speech as 486 frames and transcribes it, with `Arenal Norte` and `Adeslas`
   both recovered by the keyterm list.
+- **A whole call**, all four keys live: greeting at 883 ms, the agent elicits who is
+  calling, reads a DNI back digit by digit, confirms the request, and the decider returns
+  a valid action that is POSTed inside the window.
 
 ### Known for v1
 
@@ -180,6 +183,16 @@ The submission client takes an **array** of actions from day one, so problem 18
   duration. `MediaStreamAudioOutput` does the µ-law encoding instead. Verified at 1.9.0.
 - `stt.SpeechEventType` is a **numeric** enum. Comparing it to a string silently matches
   nothing, which looks exactly like an STT that heard nothing.
+- **Workers AI rejects `tools: []`** — "must not be an empty array. Either provide at
+  least one tool or omit the field entirely." The plugin sends it on every turn when the
+  agent has no tools, which in v0 is always, so every reply 400'd and the session closed
+  on an unrecoverable LLM error. `createLLM` injects an OpenAI client whose `fetch`
+  strips the empty array; it becomes a no-op the moment v1 adds real tools. The `openai`
+  package must stay pinned to the version the plugin resolves, or the `client` option
+  fails to typecheck.
+- A caller's line is **always sending**, silence included. STT endpointing needs to hear
+  that silence to close an utterance, so the fake harness streams continuously rather
+  than only while the caller talks — and `utteranceEndMs` is set as a second net.
 - `openai.LLM`, **never** `openai.responses.LLM` — Workers AI speaks chat completions,
   not the Responses API.
 - `turnDetection: 'vad'` is set explicitly. Left unset, the session auto-provisions

@@ -23,6 +23,9 @@ importers:
       '@livekit/rtc-node':
         specifier: ^1.0.0
         version: 1.0.0
+      openai:
+        specifier: ^6.49.0
+        version: 6.49.0(ws@8.21.3)(zod@4.6.5)
       ws:
         specifier: ^8.21.3
         version: 8.21.3

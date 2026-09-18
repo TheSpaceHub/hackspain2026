@@ -1,6 +1,7 @@
 import * as deepgram from '@livekit/agents-plugin-deepgram';
 import * as openai from '@livekit/agents-plugin-openai';
 import * as silero from '@livekit/agents-plugin-silero';
+import { OpenAI } from 'openai';
 import { config } from './config.js';
 
 /**
@@ -17,6 +18,38 @@ export async function loadVad(): Promise<SharedVad> {
 }
 
 /**
+ * Workers AI rejects `tools: []` outright:
+ *
+ *   `tools` must not be an empty array. Either provide at least one tool or
+ *   omit the field entirely.
+ *
+ * The plugin sends the empty array whenever the agent has no tools, which in v0
+ * is every single turn — so every reply came back 400 and the session closed on
+ * an unrecoverable LLM error. OpenAI itself tolerates it, so this is a Workers AI
+ * strictness rather than a plugin bug.
+ *
+ * Stripping it in the client is the narrow fix: no invented placeholder tool, and
+ * the moment v1 gives the agent real tools the array stops being empty and this
+ * stops doing anything.
+ */
+const stripEmptyTools: typeof fetch = async (input, init) => {
+  if (init?.method === 'POST' && typeof init.body === 'string') {
+    try {
+      const body = JSON.parse(init.body) as Record<string, unknown>;
+      if (Array.isArray(body.tools) && body.tools.length === 0) {
+        delete body.tools;
+        delete body.tool_choice;
+        delete body.parallel_tool_calls;
+        init = { ...init, body: JSON.stringify(body) };
+      }
+    } catch {
+      // Not JSON we understand; pass it through untouched.
+    }
+  }
+  return fetch(input, init);
+};
+
+/**
  * Workers AI exposes an OpenAI-compatible surface, so the OpenAI plugin drops in
  * with a base URL swap. It speaks chat completions, not the Responses API — this
  * must be `openai.LLM`, never `openai.responses.LLM`.
@@ -24,9 +57,12 @@ export async function loadVad(): Promise<SharedVad> {
 export function createLLM(): openai.LLM {
   return new openai.LLM({
     model: config.cloudflare.model,
-    apiKey: config.cloudflare.apiToken,
-    baseURL: config.cloudflare.baseURL,
     temperature: 0.3,
+    client: new OpenAI({
+      apiKey: config.cloudflare.apiToken,
+      baseURL: config.cloudflare.baseURL,
+      fetch: stripEmptyTools,
+    }),
   });
 }
 
@@ -43,6 +79,10 @@ export function createSTT(keyterms: string[]): deepgram.STT {
     smartFormat: true,
     // Digits come back as digits, which is what a DNI needs.
     numerals: true,
+    // Close an utterance on a gap in the words, not only on silence detection.
+    // Without it, a caller who stops mid-thought can leave a final transcript
+    // unemitted until the next thing they say.
+    utteranceEndMs: 1000,
     keyterm: keyterms,
   });
 }

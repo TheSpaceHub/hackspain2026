@@ -167,28 +167,55 @@ async function runCall(opts: Options, turns: Int16Array[], index: number): Promi
     },
   });
 
-  /** Send one turn at real time: one 160-byte frame per 20 ms, drift corrected. */
-  const playTurn = async (pcm: Int16Array): Promise<void> => {
+  // A phone line is always sending. Between turns the caller is silent, but the
+  // frames keep coming, and STT endpointing depends on hearing that silence —
+  // a harness that simply stops sending never lets an utterance close.
+  const SILENCE = new Int16Array(FRAME_SAMPLES);
+  let pending: Int16Array[] = [];
+
+  const pumpFrame = (): void => {
+    const frame = pending.shift() ?? SILENCE;
+    send({
+      event: 'media',
+      sequenceNumber: String(seq++),
+      streamSid,
+      media: {
+        track: 'inbound',
+        chunk: String(seq),
+        timestamp: String(report.framesSent * FRAME_MS),
+        payload: Buffer.from(pcm16ToMulaw(frame)).toString('base64'),
+      },
+    });
+    report.framesSent++;
+  };
+
+  /** Start the line and return the way to stop it. */
+  const startPump = (): (() => void) => {
     let nextAt = Date.now();
-    for (let off = 0; off < pcm.length; off += FRAME_SAMPLES) {
-      const slice = pcm.subarray(off, Math.min(off + FRAME_SAMPLES, pcm.length));
-      const frame = new Int16Array(FRAME_SAMPLES);
-      frame.set(slice);
-      send({
-        event: 'media',
-        sequenceNumber: String(seq++),
-        streamSid,
-        media: {
-          track: 'inbound',
-          chunk: String(seq),
-          timestamp: String(report.framesSent * FRAME_MS),
-          payload: Buffer.from(pcm16ToMulaw(frame)).toString('base64'),
-        },
-      });
-      report.framesSent++;
+    let timer: NodeJS.Timeout | undefined;
+    const tick = (): void => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      pumpFrame();
       nextAt += FRAME_MS;
-      await sleep(Math.max(0, nextAt - Date.now()));
+      timer = setTimeout(tick, Math.max(0, nextAt - Date.now()));
+    };
+    tick();
+    return () => clearTimeout(timer);
+  };
+  let pumpStop = (): void => {};
+
+  /** Queue one turn and wait for it to finish going out at real time. */
+  const playTurn = async (pcm: Int16Array): Promise<void> => {
+    const frames: Int16Array[] = [];
+    for (let off = 0; off < pcm.length; off += FRAME_SAMPLES) {
+      const frame = new Int16Array(FRAME_SAMPLES);
+      frame.set(pcm.subarray(off, Math.min(off + FRAME_SAMPLES, pcm.length)));
+      frames.push(frame);
     }
+    pending = frames;
+    while (pending.length > 0 && ws.readyState === WebSocket.OPEN) await sleep(20);
+    // Let the tail of the last frame actually leave.
+    await sleep(FRAME_MS * 2);
   };
 
   /**
@@ -211,6 +238,7 @@ async function runCall(opts: Options, turns: Int16Array[], index: number): Promi
   };
 
   try {
+    pumpStop = startPump();
     if (opts.bargeIn) {
       // Talk over the greeting on purpose: the agent should stop mid-word and
       // the queued frames it had not sent yet should never arrive.
@@ -233,12 +261,14 @@ async function runCall(opts: Options, turns: Int16Array[], index: number): Promi
       await waitForQuiet();
     }
 
+    pumpStop();
     send({ event: 'stop', sequenceNumber: String(seq++), streamSid, stop: { callSid: callId } });
     await sleep(300);
     ws.close();
     report.ok = true;
   } catch (err) {
     report.error = String(err);
+    pumpStop();
     ws.close();
   }
 

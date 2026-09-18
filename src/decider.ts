@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import { describeError } from './errors.js';
 import { deciderOutputSchema, type Action, type DeciderOutput } from './schema.js';
 import { formatTranscript, type TranscriptTurn } from './transcript.js';
 
@@ -116,7 +117,7 @@ export async function decide(input: DeciderInput, budgetMs: number): Promise<Dec
 
     return { output: parsed.data, raw, durationMs: Date.now() - startedAt, usedFloor: false };
   } catch (err) {
-    return floor(String(err), raw);
+    return floor(describeError(err), raw);
   }
 }
 

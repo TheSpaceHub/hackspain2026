@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import { describeError } from './errors.js';
 import { ROUTES, type Action } from './schema.js';
 
 /**
@@ -81,7 +82,7 @@ async function submitOne(callId: string, action: Action): Promise<SubmitResult> 
         durationMs: Date.now() - startedAt,
       };
     } catch (err) {
-      lastError = String(err);
+      lastError = describeError(err);
       if (attempts >= 2) break;
     }
   }

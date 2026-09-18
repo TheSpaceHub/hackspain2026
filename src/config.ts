@@ -24,7 +24,12 @@ export const config = {
     accountId: req('CLOUDFLARE_ACCOUNT_ID'),
     apiToken: req('CLOUDFLARE_API_TOKEN'),
     get baseURL() {
-      return `https://api.cloudflare.com/client/v4/accounts/${config.cloudflare.accountId}/ai/v1`;
+      // Overridable so the whole LLM path can be pointed at a logging proxy or an
+      // AI Gateway without touching code.
+      return (
+        process.env.CLOUDFLARE_AI_BASE_URL ||
+        `https://api.cloudflare.com/client/v4/accounts/${config.cloudflare.accountId}/ai/v1`
+      );
     },
     /** Workers AI speaks chat completions, so openai.LLM (not openai.responses.LLM) drops straight in. */
     model: opt('CLOUDFLARE_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'),
