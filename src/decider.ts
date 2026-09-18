@@ -1,5 +1,7 @@
+import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { config } from './config.js';
 import { describeError } from './errors.js';
+import { createAnthropicClient } from './models.js';
 import { deciderOutputSchema, type Action, type DeciderOutput } from './schema.js';
 import { formatTranscript, type TranscriptTurn } from './transcript.js';
 
@@ -83,6 +85,31 @@ export async function decide(input: DeciderInput, budgetMs: number): Promise<Dec
 
   let raw: string | undefined;
   try {
+    if (config.provider === 'anthropic') {
+      // Structured outputs: the schema is enforced server-side, so there is no prose to
+      // scrape and no half-valid JSON to recover from.
+      const client = createAnthropicClient(config.anthropic.deciderEffort);
+      const message = await client.messages.parse(
+        {
+          model: config.anthropic.deciderModel,
+          max_tokens: 4000,
+          system: SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: userPrompt }],
+          output_config: { format: zodOutputFormat(deciderOutputSchema) },
+        },
+        { timeout: budgetMs },
+      );
+      raw = JSON.stringify(message.parsed_output ?? null);
+      if (message.stop_reason === 'refusal') return floor('decider refused', raw);
+      if (!message.parsed_output) return floor('decider returned no parsed output', raw);
+      return {
+        output: message.parsed_output,
+        raw,
+        durationMs: Date.now() - startedAt,
+        usedFloor: false,
+      };
+    }
+
     const res = await fetch(`${config.cloudflare.baseURL}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -90,7 +117,7 @@ export async function decide(input: DeciderInput, budgetMs: number): Promise<Dec
         Authorization: `Bearer ${config.cloudflare.apiToken}`,
       },
       body: JSON.stringify({
-        model: config.cloudflare.model,
+        model: config.cloudflare.deciderModel,
         temperature: 0,
         max_tokens: 400,
         messages: [

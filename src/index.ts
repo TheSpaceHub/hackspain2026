@@ -18,6 +18,11 @@ async function main(): Promise<void> {
   const shared: Shared = { vad, keyterms: clinic.keyterms };
 
   console.log(`[boot] clinic catalogue from ${clinic.source}, ${clinic.keyterms.length} keyterms`);
+  console.log(
+    config.provider === 'anthropic'
+      ? `[boot] llm ${config.anthropic.model} (call effort ${config.anthropic.callEffort}) · decider ${config.anthropic.deciderModel} (effort ${config.anthropic.deciderEffort})`
+      : `[boot] llm ${config.cloudflare.model} · decider ${config.cloudflare.deciderModel}`,
+  );
 
   const server = createServer((req, res) => {
     // A plain GET is a health check, ours or a tunnel's.

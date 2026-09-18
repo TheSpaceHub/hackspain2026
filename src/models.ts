@@ -1,6 +1,9 @@
+import type { llm } from '@livekit/agents';
 import * as deepgram from '@livekit/agents-plugin-deepgram';
 import * as openai from '@livekit/agents-plugin-openai';
 import * as silero from '@livekit/agents-plugin-silero';
+import * as anthropicPlugin from '@livekit/agents-plugin-anthropic';
+import Anthropic from '@anthropic-ai/sdk';
 import { OpenAI } from 'openai';
 import { config } from './config.js';
 
@@ -33,8 +36,39 @@ const stripEmptyTools: typeof fetch = async (input, init) => {
   return fetch(input, init);
 };
 
-/** Workers AI speaks chat completions: `openai.LLM`, never `openai.responses.LLM`. */
-export function createLLM(): openai.LLM {
+/**
+ * The plugin has no `output_config`, so effort is injected here. Without it a voice turn
+ * runs at default effort and the caller hears dead air while the model thinks.
+ */
+function withEffort(effort: string): typeof fetch {
+  return async (input, init) => {
+    if (init?.method === 'POST' && typeof init.body === 'string') {
+      try {
+        const body = JSON.parse(init.body) as Record<string, unknown>;
+        body.output_config = { ...(body.output_config as object), effort };
+        init = { ...init, body: JSON.stringify(body) };
+      } catch {
+        // not ours to touch
+      }
+    }
+    return fetch(input, init);
+  };
+}
+
+export function createAnthropicClient(effort: string): Anthropic {
+  return new Anthropic({ apiKey: config.anthropic.apiKey, fetch: withEffort(effort) });
+}
+
+/** Claude when a key is present; Workers AI otherwise. */
+export function createLLM(): llm.LLM {
+  if (config.provider === 'anthropic') {
+    return new anthropicPlugin.LLM({
+      model: config.anthropic.model,
+      temperature: 0.3,
+      maxTokens: 300,
+      client: createAnthropicClient(config.anthropic.callEffort),
+    });
+  }
   return new openai.LLM({
     model: config.cloudflare.model,
     temperature: 0.3,

@@ -31,7 +31,28 @@ export const config = {
       );
     },
     /** Chat completions, so openai.LLM (not openai.responses.LLM) drops straight in. */
-    model: opt('CLOUDFLARE_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'),
+    get model() {
+      return opt('CLOUDFLARE_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast');
+    },
+    /** The decider is one offline JSON call, so it can afford a slower, stronger model. */
+    get deciderModel() {
+      return opt('CLOUDFLARE_DECIDER_MODEL', config.cloudflare.model);
+    },
+  },
+  /**
+   * Claude when a key is present, Cloudflare otherwise. The decider is one offline
+   * call against a 24s budget, so it runs at full effort; a voice turn is judged on
+   * time-to-first-word, so it runs low.
+   */
+  anthropic: {
+    apiKey: process.env.ANTHROPIC_API_KEY ?? '',
+    model: opt('ANTHROPIC_MODEL', 'claude-opus-5'),
+    deciderModel: opt('ANTHROPIC_DECIDER_MODEL', 'claude-opus-5'),
+    callEffort: opt('ANTHROPIC_CALL_EFFORT', 'low') as 'low' | 'medium' | 'high' | 'xhigh' | 'max',
+    deciderEffort: opt('ANTHROPIC_DECIDER_EFFORT', 'high') as 'low' | 'medium' | 'high' | 'xhigh' | 'max',
+  },
+  get provider(): 'anthropic' | 'cloudflare' {
+    return config.anthropic.apiKey ? 'anthropic' : 'cloudflare';
   },
   deepgram: {
     apiKey: req('DEEPGRAM_API_KEY'),
