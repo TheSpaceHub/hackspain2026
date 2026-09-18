@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "harness": "tsx test/fake-harness.ts",
     "test:audio": "tsx test/audio-output.test.ts",
-    "bench": "tsx test/decider-bench.ts"
+    "bench": "tsx test/decider-bench.ts",
+    "test:schema": "tsx test/schema.test.ts",
+    "test": "tsx test/schema.test.ts && tsx test/audio-output.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",
