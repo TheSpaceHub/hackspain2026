@@ -37,9 +37,14 @@ export const config = {
     get model() {
       return opt('CLOUDFLARE_MODEL', '@cf/meta/llama-3.3-70b-instruct-fp8-fast');
     },
-    /** Offline, one call, 24s of budget — so it runs the strongest model available. */
+    /**
+     * Offline, one call, ~24s of budget. Measured on the decider prompt: nemotron 2-8s,
+     * deepseek-v4-pro 17-25s+, deepseek-v4-flash 78s — both deepseeks spend the budget
+     * thinking and return nothing, so they floor every call regardless of how good the
+     * reasoning would have been.
+     */
     get deciderModel() {
-      return opt('CLOUDFLARE_DECIDER_MODEL', '@cf/deepseek-ai/deepseek-v4-pro-0813');
+      return opt('CLOUDFLARE_DECIDER_MODEL', '@cf/nvidia/nemotron-3-120b-a12b');
     },
   },
   /**

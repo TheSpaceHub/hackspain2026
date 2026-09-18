@@ -76,9 +76,15 @@ export type Action = z.infer<typeof actionSchema>;
 /** `confidence` and `notes` go in the call log, never on the wire. */
 const deciderShape = z.object({
   actions: z.array(actionSchema).min(1),
-  // Models return this as a string often enough that rejecting it costs real records.
-  confidence: z.coerce.number().min(0).max(1).optional(),
-  notes: z.string().optional(),
+  // Advisory only, and never a reason to reject an otherwise valid action: anything
+  // unparseable becomes undefined rather than failing the whole decision.
+  confidence: z
+    .preprocess((v) => {
+      const n = typeof v === 'string' ? Number(v) : v;
+      return typeof n === 'number' && Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : undefined;
+    }, z.number().min(0).max(1).optional())
+    .optional(),
+  notes: z.preprocess((v) => (typeof v === 'string' ? v : undefined), z.string().optional()).optional(),
 });
 
 /** Accepts a bare action, or a bare array, as well as the documented envelope. */

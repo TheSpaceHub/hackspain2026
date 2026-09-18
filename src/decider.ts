@@ -48,8 +48,11 @@ Everything else is reachable from the transcript, and you should use it:
 This needs NO lookup. The demographics the caller gave you on the call ARE the answer. Emit it when the transcript shows the clinic does not already know them — they say they are new, have never been seen, are not registered, or are registering a relative who is not on file.
 Fields: given_name, first_surname, second_surname, national_id, date_of_birth, phone, email, insurer.
   - Spanish names carry two surnames. "Josefa Dominguez Navarro" is given_name "Josefa", first_surname "Dominguez", second_surname "Navarro".
-  - national_id is eight digits then one letter, uppercase, no spaces or hyphens: "48064716Y". The letter is checked against the digits, so a missing or wrong letter is rejected outright. If the transcript never contains the letter, you cannot register — say so in notes and fall back to no_action.
-  - date_of_birth is YYYY-MM-DD. phone is what the caller gave, else the caller's number.
+  - national_id: speech-to-text writes spoken digits out one at a time, so the transcript will read "4 8 0 6 4 7 1 6 y" or "4 8 0 6 4 7 1 6, Y". That is normal and correct input, NOT a malformed id. Join the digits, uppercase the letter, strip every space and hyphen, and output "48064716Y". Never refuse a registration over spacing or punctuation in the transcript — normalise it.
+    The letter is checked against the digits by the clinic, so it must be the one the caller actually said. If the transcript genuinely never contains a letter at all, you cannot register — say so in notes and fall back to no_action.
+  - date_of_birth is YYYY-MM-DD; the caller will say it in words ("fourteenth of March 1985" is "1985-03-14").
+  - phone is digits only, no spaces: what the caller gave, else the number they are calling from.
+  - Normalise every field the same way. The transcript is speech, so spacing, punctuation and spelled-out words are expected — convert them, never reject over them.
   - Use null for a field the caller genuinely never gave. Do not guess one.
 
 ## "escalate" with reason "medical_emergency"
