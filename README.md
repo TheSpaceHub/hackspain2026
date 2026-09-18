@@ -1,0 +1,180 @@
+# El Turno — voice agent v0
+
+HackSpain '26 · Prosper track · headless LiveKit Agents + Cloudflare Workers AI
+
+A phone call that works end to end and **submits something every time**. The Prosper
+harness dials our socket, a persona talks to us for up to three minutes, and within
+30 seconds of the socket closing we have POSTed an action.
+
+This is v0 deliberately. There are **no clinic lookups during the call** — the agent
+talks from a system prompt alone, so it cannot quote a real slot and will fail most
+cases on the record. That is accepted. The point is that the pipeline never returns
+silence, which the scoring page calls out as always wrong and never cheaper than a
+wrong answer.
+
+## Architecture
+
+One Node process, one WebSocket server, one headless `AgentSession` per socket. No
+LiveKit server, no SIP, no rooms.
+
+The unlock is that `AgentSession.start({ agent, room? })` takes `room` as optional, and
+`session.input.audio` / `session.output.audio` accept custom `AudioInput` / `AudioOutput`
+subclasses. So the whole LiveKit voice loop — VAD, endpointing, preemptive generation,
+interruption, the STT/LLM/TTS plumbing — runs against our own audio transport.
+
+```
+Prosper harness  ──wss, Twilio Media Streams──▶  ws server
+                                                    │ one per socket
+                                                    ▼
+                                               CallSession
+                                    ┌───────────────┴───────────────┐
+                        MediaStreamAudioInput           MediaStreamAudioOutput
+                                    └───────────────┬───────────────┘
+                                                    ▼
+                                            LiveKit AgentSession
+                                          (Deepgram / Workers AI)
+                                                    │ on stop
+                                                    ▼
+                                                 Decider
+                                                    │
+                                                    ▼
+                                        POST /api/v1/submit/*
+```
+
+| File | What it owns |
+| --- | --- |
+| `src/index.ts` | Boot: VAD, catalogue, WebSocket server, one `CallSession` per connection |
+| `src/call-session.ts` | **One call.** The whole per-socket object graph and the ending |
+| `src/audio-input.ts` | µ-law frames off the wire into the session |
+| `src/audio-output.ts` | Session audio out, paced at 20 ms, with local barge-in |
+| `src/mulaw.ts` | G.711 µ-law ↔ PCM16, table-driven both ways |
+| `src/twilio.ts` | The wire message shapes |
+| `src/agent.ts` | One `Agent`, one system prompt, zero tools |
+| `src/models.ts` | Deepgram STT/TTS, Workers AI LLM, shared Silero VAD |
+| `src/clinic.ts` | Catalogue fetched once, cached forever, turned into STT keyterms |
+| `src/decider.ts` | Transcript → one action, with a floor that always produces one |
+| `src/schema.ts` | The Zod discriminated union and the closed reason vocabulary |
+| `src/submit.ts` | Six routes, one action each |
+| `src/call-log.ts` | One JSON line per call — the v1 evaluation harness |
+
+## Run book
+
+```bash
+pnpm install
+cp .env.example .env     # fill in the four keys
+pnpm dev                 # listens on :7860, path /ws
+```
+
+Check the key and the clinic **before** touching audio:
+
+```bash
+curl -sS "$PROSPER_API_BASE_URL/api/v1/health"
+curl -sS -H "X-Api-Key: $PROSPER_API_KEY" \
+  "$PROSPER_API_BASE_URL/api/v1/directory?name=Marta%20Ruiz"
+```
+
+Expose it with a claimed static domain, in a European region — audio is 20 ms frames
+and a transatlantic hop taxes every one:
+
+```bash
+ngrok http --url=our-team.ngrok-free.app 7860
+wscat -c wss://our-team.ngrok-free.app/ws    # must connect before handing it over
+```
+
+Then set the endpoint **yourself**, on the dashboard under **Settings → Integration**.
+The desk does not do this and every team starts on a placeholder. The value is
+`wss://our-team.ngrok-free.app/ws` — **scheme and path included**; forgetting the path
+is the commonest mistake in the docs' own words. Saving replaces the whole
+configuration, and a run snapshots its endpoint when it is admitted, so a queued run
+still dials the old one.
+
+**First call.** Problems → problem 1 → *Call* beside a published case. Practice scores
+nothing, gives you the transcript, the recording and which fields your record lost, and
+is rate-limited to one per 30 seconds. Debug here; never spend a Run All on debugging.
+
+**Run All discipline.** One queued or active run at a time, 15 minutes of cooldown after
+the last finished, about 18 minutes per run — roughly one every 33 minutes. The
+leaderboard takes your **best** run, not the latest, so a bad experiment costs nothing
+but the slot.
+
+## Testing locally
+
+`test/fake-harness.ts` is a stand-in for the Prosper harness: it dials your own `/ws`
+speaking the same Twilio Media Streams messages, plays a scripted caller at 20 ms per
+frame (synthesised with macOS `say`), records what the agent says back to a WAV, and
+reports the timings. Use it instead of practice calls, which are rate-limited.
+
+```bash
+pnpm harness                       # one scripted booking call
+pnpm harness -- --n 10             # ten concurrent calls — the Run All shape
+pnpm harness -- --n 20             # the Switchboard burst
+pnpm harness -- --barge-in         # talk over the greeting
+pnpm harness -- --wav caller.wav   # play a real recording instead
+pnpm harness -- --say "line one" --say "line two"
+```
+
+It fails loudly if any call produced no agent audio, which is the failure the harness
+attributes to us and cuts the call for.
+
+```bash
+pnpm test:audio    # pacing and barge-in, no network needed
+pnpm typecheck
+```
+
+### Reading the call log
+
+One JSON line per call in `$LOG_DIR`. This is the v1 evaluation harness and the seed of
+everything the jury marks that the leaderboard cannot reach.
+
+```bash
+# did every call submit, and how late?
+python3 -c "import json,glob;[print(r['call_id'], r['submissions'][0]['status'], \
+  r['timings']['close_to_submitted_ms'],'ms') for f in glob.glob('calls/*.jsonl') for r in map(json.loads,open(f))]"
+```
+
+## Verified behaviour
+
+Checked against `@livekit/agents` 1.9.0 on this build:
+
+- **Pacing.** One 160-byte frame per 20 ms, not a burst — 5 frames at 100 ms, 26 at
+  500 ms. An unpaced flush makes barge-in impossible, because the audio the caller is
+  interrupting has already left.
+- **Barge-in is ours.** The harness implements no server-side barge-in and says `clear`
+  has no effect on its side today, so `clearBuffer()` drops our own queued frames
+  locally and stops sending. We send `clear` anyway — free, and may start working.
+- **Ten concurrent sockets** each hold their own `call_id`, `streamSid`, `from_number`,
+  transcript and submission, and each POSTs under its own id exactly once, ~100 ms after
+  close against a 30 s window.
+- **The floor holds.** With the model stack deliberately broken, every call still POSTed
+  an accepted `no_action`. Submitting nothing scores identically to a crash.
+- **G.711** round-trips at 36.6 dB SNR, and `0xFF` ↔ digital zero.
+
+## Deliberately not in v0
+
+Any clinic lookup during the call, the flow graph, multi-action calls, languages beyond
+English, the nearest-site geometry, a console of our own, recordings.
+
+Because of that, v0 emits `no_action` on almost every call: with no lookups there is no
+`patient_id` to book against and no real slot. Two endings it can genuinely get right
+today are a published red-flag symptom → `escalate(medical_emergency)`, and an injection
+attempt, sales call or request for someone else's data → `no_action(out_of_scope)`.
+
+The submission client takes an **array** of actions from day one, so problem 18
+(multi-action calls) needs no rewrite.
+
+## Notes and traps
+
+- `openai.LLM`, **never** `openai.responses.LLM` — Workers AI speaks chat completions,
+  not the Responses API.
+- `turnDetection: 'vad'` is set explicitly. Left unset, the session auto-provisions
+  LiveKit's hosted turn detector, which we have no credentials for.
+- `initializeLogger()` must be called at boot. Its CLI worker normally does this; we do
+  not run that worker, and without it every plugin throws on first use.
+- `/submit/*` JSON is plain snake_case. camelCase applies only to the Twilio-shaped
+  handshake — where `sequenceNumber`, `chunk` and `timestamp` are **strings**.
+- The `call_id` is exactly `start.callSid`. Never mint one.
+- `no_action` posts to `/submit/no-action` — hyphen, not underscore.
+- 409 is a retry landing twice, not a bug. 410 is the closed window and is never retried.
+- The only things shared across sockets are the Silero VAD model, the clinic catalogue
+  and the stateless submit client. `grep -n "^let \|^var " src/*.ts` should only ever
+  show write-once memoisation.

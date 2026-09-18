@@ -1,0 +1,28 @@
+{
+  "name": "el-turno",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "harness": "tsx test/fake-harness.ts",
+    "test:audio": "tsx test/audio-output.test.ts"
+  },
+  "dependencies": {
+    "@livekit/agents": "^1.9.0",
+    "@livekit/agents-plugin-deepgram": "^1.9.0",
+    "@livekit/agents-plugin-openai": "^1.9.0",
+    "@livekit/agents-plugin-silero": "^1.9.0",
+    "@livekit/rtc-node": "^1.0.0",
+    "ws": "^8.21.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.1",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}
