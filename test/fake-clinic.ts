@@ -53,6 +53,16 @@ const CATALOGUE = {
       leave: { start: '2026-10-19', end: '2026-10-26' },
     },
     {
+      id: 'prov_iglesias',
+      name: 'Dra. Elena Iglesias',
+      specialty_id: 'spec_derm',
+      specialty_name: 'dermatology',
+      languages: ['Spanish'],
+      location_names: ['Arenal Norte'],
+      refused_insurers: [],
+      leave: null,
+    },
+    {
       id: 'prov_cid',
       name: 'D. Álvaro Cid',
       specialty_id: 'spec_physio',
@@ -83,7 +93,7 @@ const CATALOGUE = {
       latitude: 40.4631,
       longitude: -3.7038,
       hours: [{ weekday: 'monday', intervals: ['08:00-20:00'] }],
-      provider_names: ['Dr. Julio Sáenz'],
+      provider_names: ['Dr. Julio Sáenz', 'Dra. Elena Iglesias'],
     },
     {
       id: 'loc_sur',
@@ -233,11 +243,17 @@ export class FakeClinic {
     const patientId = query.patient_id?.[0];
     const insurers = query.insurer ?? [];
 
-    if (this.#options.restriction) {
+    if (
+      this.#options.restriction &&
+      (!this.#options.restriction.provider_id || this.#options.restriction.provider_id === providerId)
+    ) {
       return { providers: [], appointment_type: null, slots: [], blocked: [this.#options.restriction] };
     }
 
     let providers = CATALOGUE.providers;
+    if (this.#options.restriction?.provider_id && providerId !== this.#options.restriction.provider_id) {
+      providers = providers.filter((p) => p.id !== this.#options.restriction!.provider_id);
+    }
     if (providerId) providers = providers.filter((p) => p.id === providerId);
     if (specialtyId) providers = providers.filter((p) => p.specialty_id === specialtyId);
     if (locationId) {

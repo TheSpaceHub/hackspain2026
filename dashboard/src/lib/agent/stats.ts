@@ -1,9 +1,11 @@
+import { agentOrigin, type AgentMode } from './origin';
+
+export type { AgentMode };
+
 /**
  * The overview's numbers, aggregated by the agent's store (GET /stats) — never
  * counted from the feed, which only holds the most recent calls.
  */
-
-import { AGENT_ORIGIN } from './origin';
 
 export interface Distribution {
   p50: number | null;
@@ -71,18 +73,14 @@ export const RANGES: Range[] = [
   { id: 'all', label: 'All time', phrase: 'all time', bucketMs: 60 * 60_000, since: () => null },
 ];
 
-const ORIGIN = AGENT_ORIGIN;
-
-export async function fetchStats(range: Range, now: number, signal?: AbortSignal): Promise<Stats> {
+export async function fetchStats(mode: AgentMode, range: Range, now: number, signal?: AbortSignal): Promise<Stats> {
   const q = new URLSearchParams({ bucket_ms: String(range.bucketMs) });
   const since = range.since(now);
   if (since) q.set('since', since);
-  const res = await fetch(`${ORIGIN}/stats?${q}`, { signal });
+  const res = await fetch(`${agentOrigin(mode)}/stats?${q}`, { signal });
   if (!res.ok) throw new Error(`GET /stats → ${res.status}`);
   return (await res.json()) as Stats;
 }
-
-export type AgentMode = 'live' | 'simulation';
 
 export interface AgentHealth {
   ok: boolean;
@@ -94,19 +92,8 @@ export interface AgentHealth {
   clinics?: Record<AgentMode, string>;
 }
 
-export async function fetchHealth(signal?: AbortSignal): Promise<AgentHealth> {
-  const res = await fetch(`${ORIGIN}/health`, { signal, cache: 'no-store' });
+export async function fetchHealth(mode: AgentMode, signal?: AbortSignal): Promise<AgentHealth> {
+  const res = await fetch(`${agentOrigin(mode)}/health`, { signal, cache: 'no-store' });
   if (!res.ok) throw new Error(`GET /health → ${res.status}`);
-  return (await res.json()) as AgentHealth;
-}
-
-/** Switch the agent's clinic for new calls; the ones open keep theirs. */
-export async function setAgentMode(mode: AgentMode): Promise<AgentHealth> {
-  const res = await fetch(`${ORIGIN}/mode`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode }),
-  });
-  if (!res.ok) throw new Error(`POST /mode → ${res.status}`);
   return (await res.json()) as AgentHealth;
 }

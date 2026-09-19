@@ -32,7 +32,7 @@ export interface Normalized {
 
 /**
  * DNI (8 digits + letter) or NIE (X/Y/Z + 7 digits + letter), with the check letter
- * re-derived. A letter that disagrees with the digits is reported rather than silently
+ * re-derived. A letter that disagrees with the digits is dropped rather than silently
  * corrected: one of the two was misheard and only the caller knows which.
  */
 export function normalizeNationalId(spoken: string): Normalized {
@@ -41,7 +41,7 @@ export function normalizeNationalId(spoken: string): Normalized {
   const nie = /^([XYZ])(\d{7})([A-Z])$/.exec(raw);
   if (!dni && !nie) {
     const digitsOnly = /^[XYZ]?\d{7,8}$/.test(raw);
-    return { value: raw, problem: digitsOnly ? 'missing the check letter' : 'not a DNI or NIE' };
+    return { value: '', problem: digitsOnly ? 'missing the check letter' : 'not a DNI or NIE' };
   }
 
   const digits = dni ? dni[1]! : `${NIE_PREFIX[nie![1]!]!}${nie![2]!}`;
@@ -49,7 +49,7 @@ export function normalizeNationalId(spoken: string): Normalized {
   const expected = CHECK_LETTERS[Number(digits) % 23]!;
   return stated === expected
     ? { value: raw }
-    : { value: raw, problem: `check letter should be ${expected} for those digits, not ${stated}` };
+    : { value: '', problem: `check letter should be ${expected} for those digits, not ${stated}` };
 }
 
 /**

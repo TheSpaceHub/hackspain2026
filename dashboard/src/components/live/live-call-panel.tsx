@@ -8,12 +8,14 @@ import { TimelineEvent, Transcript } from '@/components/calls/transcript';
 import { Badge, BadgeDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { type Call, callStatus } from '@/lib/agent/model';
+import type { AgentMode } from '@/lib/agent/origin';
 import { formatClock, formatDuration, formatPhone, shortId } from '@/lib/format';
 import { elapsedMs } from '@/lib/live';
 import { recordingUrl } from '@/lib/agent/client';
 import { ListenButton } from './listen-button';
 
 interface LiveCallPanelProps {
+  mode: AgentMode;
   call: Call;
   now: number;
   onClose: () => void;
@@ -27,7 +29,7 @@ const FOLLOW_SLACK_PX = 96;
  * One call, followed as it happens. New lines scroll into view only while you are
  * already at the bottom — scroll up to reread something and it stays put.
  */
-export function LiveCallPanel({ call, now, onClose, onOpenFinished }: LiveCallPanelProps) {
+export function LiveCallPanel({ mode, call, now, onClose, onOpenFinished }: LiveCallPanelProps) {
   const status = callStatus(call, now);
   const live = status === 'live';
   const scroller = useRef<HTMLDivElement>(null);
@@ -72,8 +74,8 @@ export function LiveCallPanel({ call, now, onClose, onOpenFinished }: LiveCallPa
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {live ? <ListenButton id={call.id} live={live} /> : call.recording.available ? (
-            <audio controls preload="none" src={recordingUrl(call.id)} className="h-8 w-full max-w-xs" />
+            {live ? <ListenButton mode={mode} id={call.id} live={live} /> : call.recording.available ? (
+            <audio controls preload="none" src={recordingUrl(mode, call.id)} className="h-8 w-full max-w-xs" />
           ) : null}
         </div>
         <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close" className="-mr-1 text-muted-foreground">

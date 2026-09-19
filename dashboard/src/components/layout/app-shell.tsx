@@ -1,8 +1,8 @@
-import { ArrowLeftRight, FlaskConical, Globe, Hospital, Phone, Unplug } from 'lucide-react';
-import { useEffect, type ReactNode } from 'react';
+import { Check, ChevronDown, FlaskConical, Globe, Hospital, Phone, Unplug } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNow } from '@/hooks/use-now';
 import { formatClock, formatDay } from '@/lib/format';
-import type { AgentMode } from '@/lib/agent/stats';
+import type { AgentMode } from '@/lib/agent/origin';
 import { MODE_LABEL, type ConsoleMode } from '@/lib/mode';
 import { AgentOriginControl } from './agent-origin';
 import { cn } from '@/lib/utils';
@@ -19,14 +19,12 @@ interface AppShellProps {
   nav: NavItem[];
   active: string;
   onNavigate: (id: string) => void;
-  /** The clinic API the agent is wired to, from its /health. */
+  /** The clinic API the selected agent is wired to, from its /health. */
   clinicApi: string | null;
-  mode: ConsoleMode;
-  /** Flip the agent between the real clinic and the sim. Absent on agents that cannot. */
-  onMode?: (mode: AgentMode) => void;
-  switching: boolean;
-  /** Why the last switch failed; shown in red next to the pill. */
-  switchError?: string | null;
+  mode: AgentMode;
+  /** The clinic mode reported by the selected agent, or unknown when unavailable. */
+  consoleMode: ConsoleMode;
+  onMode: (mode: AgentMode) => void;
   children: ReactNode;
 }
 
@@ -98,56 +96,101 @@ const MODE_PILL: Record<ConsoleMode, string> = {
   unknown: 'border-border bg-muted text-muted-foreground',
 };
 
+const MODE_HINT: Record<AgentMode, string> = {
+  live: 'New calls book into the real clinic',
+  simulation: 'Nothing reaches Prosper',
+};
+
 /**
- * Which world the agent submits to. Worth having in sight at all times: a test run
- * against the real board leaves real records. Click to switch: new calls go to the
- * other clinic, calls already open finish where they started.
+ * Which agent the console reads. The actual clinic reported by that agent stays visible
+ * in the pill when it differs from the selected mode.
  */
 function ModePill({
   mode,
+  consoleMode,
   url,
   onMode,
-  switching,
-  switchError,
 }: {
-  mode: ConsoleMode;
+  mode: AgentMode;
+  consoleMode: ConsoleMode;
   url: string | null;
-  onMode?: (mode: AgentMode) => void;
-  switching: boolean;
-  switchError?: string | null;
+  onMode: (mode: AgentMode) => void;
 }) {
-  const Icon = MODE_ICON[mode];
-  const next: AgentMode | null = mode === 'simulation' ? 'live' : mode === 'live' ? 'simulation' : null;
+  const shownMode = consoleMode === mode ? mode : consoleMode;
+  const Icon = MODE_ICON[shownMode];
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [open]);
   const classes = cn(
     'flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide',
-    MODE_PILL[mode],
+    MODE_PILL[shownMode],
   );
-  if (!onMode || !next) {
-    return (
-      <span className={classes} title={url ? `Clinic API · ${url}` : 'The agent did not answer /health'}>
-        <Icon className="size-3.5" />
-        {MODE_LABEL[mode]}
-      </span>
-    );
-  }
+  const options: AgentMode[] = ['live', 'simulation'];
   return (
-    <span className="flex items-center gap-2">
-      {switchError && (
-        <span className="text-xs text-destructive" title={switchError}>
-          Switch failed
-        </span>
-      )}
+    <span ref={root} className="relative flex items-center gap-2">
       <button
         type="button"
-        onClick={() => onMode(next)}
-        disabled={switching}
-        className={cn(classes, 'group cursor-pointer transition-opacity hover:opacity-80 disabled:cursor-wait disabled:opacity-60')}
-        title={`New calls book into ${url}${mode === 'simulation' ? ' — nothing reaches Prosper' : ' — the real clinic'}.\nClick to switch to ${MODE_LABEL[next]}; calls already open finish where they started.`}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={cn(classes, 'cursor-pointer transition-opacity hover:opacity-80')}
+        title={url ? `Clinic API · ${url}` : undefined}
       >
         <Icon className="size-3.5" />
-        {switching ? 'Switching…' : MODE_LABEL[mode]}
-        <ArrowLeftRight className="size-3 opacity-50 group-hover:opacity-100" />
+        {MODE_LABEL[shownMode]}
+        <ChevronDown className={cn('size-3 opacity-60 transition-transform', open && 'rotate-180')} />
       </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-50 mt-1.5 w-64 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+        >
+          {options.map((option) => {
+            const OptionIcon = MODE_ICON[option];
+            const selected = option === mode;
+            return (
+              <button
+                key={option}
+                type="button"
+                role="menuitemradio"
+                aria-checked={selected}
+                onClick={() => {
+                  setOpen(false);
+                  if (!selected) onMode(option);
+                }}
+                className={cn(
+                  'flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
+                  selected && 'font-medium',
+                )}
+              >
+                <OptionIcon className="mt-0.5 size-3.5 shrink-0" />
+                <span className="flex-1">
+                  {MODE_LABEL[option]}
+                  <span className="block text-xs font-normal text-muted-foreground">{MODE_HINT[option]}</span>
+                </span>
+                {selected && <Check className="mt-0.5 size-3.5 shrink-0" />}
+              </button>
+            );
+          })}
+          <p className="px-2 pb-1 pt-1.5 text-[11px] leading-snug text-muted-foreground">
+            Calls already open finish where they started.
+          </p>
+        </div>
+      )}
     </span>
   );
 }
@@ -163,9 +206,9 @@ function Clock() {
   );
 }
 
-export function AppShell({ nav, active, onNavigate, clinicApi, mode, onMode, switching, switchError, children }: AppShellProps) {
+export function AppShell({ nav, active, onNavigate, clinicApi, mode, consoleMode, onMode, children }: AppShellProps) {
   useEffect(() => {
-    document.title = mode === 'simulation' ? '[SIM] Agent la L' : mode === 'live' ? '[LIVE] Agent la L' : 'Agent la L';
+    document.title = mode === 'simulation' ? '[SIM] Agent la L' : '[LIVE] Agent la L';
   }, [mode]);
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background">
@@ -176,10 +219,10 @@ export function AppShell({ nav, active, onNavigate, clinicApi, mode, onMode, swi
           {/* Deployed, the console has no proxy: it names the agent it reads, and can switch. */}
           {import.meta.env.PROD && (
             <span className="hidden md:contents">
-              <AgentOriginControl />
+              <AgentOriginControl mode={mode} />
             </span>
           )}
-          <ModePill mode={mode} url={clinicApi} onMode={onMode} switching={switching} switchError={switchError} />
+          <ModePill mode={mode} consoleMode={consoleMode} url={clinicApi} onMode={onMode} />
           {/* The console is a desktop tool; on a phone, the clock gives way to the tabs. */}
           <span className="hidden h-4 w-px bg-border md:block" />
           <span className="hidden md:contents">

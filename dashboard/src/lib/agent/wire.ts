@@ -13,6 +13,7 @@
 import type { CallAlerts, CallEnded, CallStarted, SubmissionRow, TurnRow } from '@agent/store/protocol';
 
 export type { CallEnded, CallStarted, SubmissionRow, TurnRow };
+export type ClinicMode = 'live' | 'simulation';
 
 /** The `calls` table, as `SELECT *` returns it. */
 export interface CallRecord {
@@ -40,6 +41,7 @@ export interface CallRecord {
   alerts: string | null;
   recording_path: string | null;
   recording_ms: number | null;
+  clinic_mode?: ClinicMode | null;
 }
 
 /** A row of `GET /calls`: the call plus two columns the query derives. */

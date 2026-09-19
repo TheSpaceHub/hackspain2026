@@ -28,6 +28,8 @@ import {
   recordAccepted,
   recordMatch,
   recordQuote,
+  callerSilentSinceQuote,
+  callerAccepted,
   recordRequest,
   retract,
   saidTimes,
@@ -66,6 +68,11 @@ export interface ToolDeps {
 export const DEFAULT_TOOL_TIMEOUT_MS = 4_000;
 
 const SLOW = 'That is taking too long to come back. Tell them the system is slow, and either try again or take their number.';
+
+function alternateSpecialtyLabel(name: string): string {
+  if (name.toLowerCase() === 'dermatology') return 'dermatologist';
+  return `${name.replace(/\b\w/g, (letter) => letter.toUpperCase())} doctor`;
+}
 
 async function capped<T>(name: string, ms: number, work: Promise<T> | T): Promise<T | string> {
   let timer: NodeJS.Timeout | undefined;
@@ -164,7 +171,10 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           .describe('The caller\'s words for when they want to come, e.g. "next Tuesday afternoon" or "as soon as possible"'),
         specialty_id: z.string().optional(),
         provider_name: z.string().optional(),
-        location_id: z.string().optional(),
+        location_id: z
+          .string()
+          .optional()
+          .describe('The site exactly as the caller said it, every word, even if it sounds garbled ("Adrenal Source", "Arnal sir"); the diary works out which site is meant'),
       }),
       execute: async (args) => {
         // The model says "general practice" and "Centro"; the diary takes
@@ -186,19 +196,21 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         });
 
         let providerId = request.provider_id;
+        let namedProvider: Catalogue['providers'][number] | undefined;
         if (args.provider_name && catalogue) {
           const found = providersByName(catalogue, args.provider_name);
           if (found.length > 1) {
             return `More than one doctor answers to that name: ${found.map((p) => `${p.name} in ${p.specialty_name ?? 'unknown'}`).join(', ')}. Ask which one they mean.`;
           }
           if (found.length === 1) {
-            providerId = found[0]!.id;
+            namedProvider = found[0]!;
+            providerId = namedProvider.id;
             recordRequest(state, { provider_id: providerId });
             // A doctor has one department; the diary answers `no matching provider` to
             // any other, so the doctor's own department is the one we ask for.
-            const own = found[0]!.specialty_id ?? undefined;
+            const own = namedProvider.specialty_id ?? undefined;
             if (own && specialty && own !== specialty) {
-              specialtyNote = ` Note: ${found[0]!.name} works in ${found[0]!.specialty_name ?? own}, not ${specialty}; tell the caller if that is not what they expected.`;
+              specialtyNote = ` Note: ${namedProvider.name} works in ${namedProvider.specialty_name ?? own}, not ${specialty}; tell the caller if that is not what they expected.`;
             }
             if (own) {
               specialty = own;
@@ -233,7 +245,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         });
         if (window.part_of_day) recordRequest(state, { part_of_day: window.part_of_day });
 
-        const availability = await api.findAvailability({
+        let availability = await api.findAvailability({
           date_from: window.date_from,
           date_to: window.date_to,
           provider_id: providerId,
@@ -245,6 +257,38 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           insurer: plans.length > 0 ? plans : undefined,
         });
         deps.onAvailability?.(availability);
+
+        let restrictionNote = '';
+        const providerRestriction = namedProvider && providerId && availability.slots.length === 0
+          ? availability.blocked.find((entry) =>
+            (entry.provider_id === providerId || /provider_not_(?:in_network|found)/i.test(entry.restriction)) &&
+            /provider_not_|does not (?:accept|take)|not in network/i.test(entry.restriction),
+          )
+          : undefined;
+        if (providerRestriction && namedProvider) {
+          const fallbackSpecialty = namedProvider.specialty_id ?? specialty;
+          const fallback = await api.findAvailability({
+            date_from: window.date_from,
+            date_to: window.date_to,
+            specialty_id: fallbackSpecialty,
+            location_id: location,
+            patient_id: state.matched?.patient_id,
+            insurer: plans.length > 0 ? plans : undefined,
+          });
+          deps.onAvailability?.(fallback);
+          if (fallback.slots.length > 0) {
+            availability = fallback;
+            specialty = fallbackSpecialty;
+            restrictionNote = `${namedProvider.name} is not available with ${plans.join(', ') || 'that plan'}. `;
+          } else {
+            const blocked = availability.blocked.map((entry) => entry.restriction).join('; ');
+            if (blocked) {
+              recordRequest(state, { blocked_by: blocked });
+              clog.warn(`[find_slots] blocked: ${blocked}`);
+            }
+            return `Nothing bookable: ${blocked || providerRestriction.restriction}. Tell the caller plainly and do not offer a time.${specialtyNote}`;
+          }
+        }
 
         if (availability.slots.length === 0) {
           const blocked = availability.blocked.map((entry) => entry.restriction).join('; ');
@@ -276,6 +320,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           location_id: s.location_id,
           appointment_type_id: s.appointment_type_id,
           start_time: s.start_time,
+          for_patient_id: state.matched?.patient_id,
           payable_with: s.payable_with ?? undefined,
         }));
         recordQuote(state, quoted);
@@ -285,8 +330,11 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           (s, i) =>
             `${i + 1}. ${speakTime(s.start_time)} with ${s.provider_name ?? s.provider_id} at ${siteName(catalogue, s.location_id)}`,
         );
-        return (window.earliest
-          ? `${moved}The soonest there is: ${lines[0]}. Offer that one and no other. When they say yes, call accept_slot. Only if they turn it down, ask which day would suit and look again.`
+        const soonestIntro = restrictionNote
+          ? `The soonest with another ${alternateSpecialtyLabel(namedProvider?.specialty_name ?? specialty ?? 'doctor')} is:`
+          : 'The soonest there is:';
+        return restrictionNote + (window.earliest
+          ? `${moved}${soonestIntro} ${lines[0]}. Offer that one and no other. When they say yes, call accept_slot. Only if they turn it down, ask which day would suit and look again.`
           : `${moved}Offer these, and nothing else: ${lines.join('; ')}. When they pick one, call accept_slot.`) + specialtyNote;
       },
     }),
@@ -298,8 +346,26 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
       execute: async (args) => {
         let slot = state.quoted[args.choice - 1];
         if (!slot) return 'That is not one of the times you offered. Read the list again or call find_slots.';
+        if (state.matched && slot.for_patient_id !== state.matched.patient_id) {
+          clog.warn('[accept_slot] refused: slot was quoted before the patient was identified');
+          return 'That time was looked up before we knew who the patient is, so the appointment type may be wrong — call find_slots again now and offer what it returns.';
+        }
+        if (!state.quoted_spoken) {
+          clog.warn('[accept_slot] refused: the quoted time was not spoken');
+          return 'You have not read that time to the caller yet — offer it first (day and time), then wait for their answer.';
+        }
+        if (callerSilentSinceQuote(state)) {
+          clog.warn(`[accept_slot] refused: caller has not spoken since the quote`);
+          return 'The caller has not answered yet — nothing has been accepted. Do not hold anything; ask again whether that time suits and wait for their answer.';
+        }
         const callerText = deps.lastCallerText?.();
+        const callerDecision = callerText ? callerAccepted(callerText) : 'unclear';
         const spoken = callerText ? saidTimes(callerText) : [];
+        if (callerDecision === 'no' || (spoken.length === 0 && callerDecision !== 'yes')) {
+          const offered = speakTime(slot.start_time);
+          clog.warn(`[accept_slot] refused: caller did not clearly accept ${offered}`);
+          return `The caller has not clearly accepted that time — ask plainly whether ${offered} suits and wait for a yes.`;
+        }
         if (spoken.length > 0) {
           const matches = [...new Set(
             spoken.flatMap((said) =>
@@ -433,7 +499,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
   return tools;
 }
 
-function siteName(catalogue: Catalogue | null, locationId: string): string {
+export function siteName(catalogue: Catalogue | null, locationId: string): string {
   if (!catalogue) return locationId;
   return locationById(catalogue, locationId)?.name ?? locationId;
 }

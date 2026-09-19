@@ -11,6 +11,7 @@ import type {
   CallEnded,
   CallRecord,
   CallStarted,
+  ClinicMode,
   RecentCallRecord,
   SubmissionRecord,
   SubmissionRow,
@@ -51,6 +52,7 @@ export interface Outcome {
 
 export interface Call {
   id: string;
+  clinicMode: ClinicMode;
   streamSid: string | null;
   fromNumber: string | null;
   startedAt: string;
@@ -122,6 +124,7 @@ export function parseOutcome(outcome: string | null): Outcome[] {
 export function emptyCall(id: string, startedAt: string): Call {
   return {
     id,
+    clinicMode: 'live',
     streamSid: null,
     fromNumber: null,
     startedAt,
@@ -145,6 +148,7 @@ export function emptyCall(id: string, startedAt: string): Call {
 export function fromCallRecord(r: CallRecord): Call {
   return {
     ...emptyCall(r.call_id, r.started_at),
+    clinicMode: r.clinic_mode ?? 'live',
     streamSid: r.stream_sid,
     fromNumber: r.from_number,
     endedAt: r.ended_at,
@@ -194,6 +198,7 @@ export function fromDetail(d: CallDetailResponse): Call | null {
 export function fromCallStarted(m: CallStarted): Call {
   return {
     ...emptyCall(m.call_id, m.started_at),
+    clinicMode: m.clinic_mode ?? 'live',
     streamSid: m.stream_sid ?? null,
     fromNumber: m.from_number ?? null,
   };
