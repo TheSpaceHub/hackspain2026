@@ -35,7 +35,7 @@ export class CallRecorder extends EventEmitter {
   readonly #flushEveryMs: number;
   readonly #lagMs: number;
   readonly #stream: ReturnType<typeof createWriteStream> | null;
-  readonly #pending = [new Map<number, number>(), new Map<number, number>()];
+  #pending = [new Int16Array(160), new Int16Array(160)];
   #timer: NodeJS.Timeout | null = null;
   #nextFlushSample = 0;
   #latestSample = 0;
@@ -84,9 +84,10 @@ export class CallRecorder extends EventEmitter {
   #add(channel: 0 | 1, mulaw: Uint8Array, at: number): void {
     try {
       if (!this.#stream || mulaw.length === 0) return;
-      const pending = this.#pending[channel]!;
       const start = Math.round((at - this.#startedAt) * 8);
       const pcm = mulawToPcm16(mulaw);
+      this.#ensureCapacity(start + pcm.length);
+      const pending = this.#pending[channel]!;
       let late = false;
       for (let i = 0; i < pcm.length; i++) {
         const position = start + i;
@@ -94,7 +95,7 @@ export class CallRecorder extends EventEmitter {
           late = true;
           continue;
         }
-        pending.set(position, pcm[i]!);
+        pending[position - this.#nextFlushSample] = pcm[i]!;
         this.#latestSample = Math.max(this.#latestSample, position + 1);
       }
       if (late) this.#lateFrames++;
@@ -123,18 +124,32 @@ export class CallRecorder extends EventEmitter {
     if (!this.#stream || end <= this.#nextFlushSample) return;
     const stream = this.#stream;
     const frames = end - this.#nextFlushSample;
+    this.#ensureCapacity(end);
     const chunk = Buffer.alloc(frames * 4);
     for (let i = 0; i < frames; i++) {
-      const position = this.#nextFlushSample + i;
-      chunk.writeInt16LE(this.#pending[0]!.get(position) ?? 0, i * 4);
-      chunk.writeInt16LE(this.#pending[1]!.get(position) ?? 0, i * 4 + 2);
-      this.#pending[0]!.delete(position);
-      this.#pending[1]!.delete(position);
+      chunk.writeInt16LE(this.#pending[0]![i]!, i * 4);
+      chunk.writeInt16LE(this.#pending[1]![i]!, i * 4 + 2);
+    }
+    for (const pending of this.#pending) {
+      pending.copyWithin(0, frames);
+      pending.fill(0, pending.length - frames);
     }
     this.#nextFlushSample = end;
     this.#flushed += chunk.length;
     stream.write(chunk);
     this.emit('chunk', chunk);
+  }
+
+  #ensureCapacity(end: number): void {
+    const required = end - this.#nextFlushSample;
+    if (required <= this.#pending[0]!.length) return;
+    let capacity = this.#pending[0]!.length;
+    while (capacity < required) capacity *= 2;
+    const left = new Int16Array(capacity);
+    const right = new Int16Array(capacity);
+    left.set(this.#pending[0]!);
+    right.set(this.#pending[1]!);
+    this.#pending = [left, right];
   }
 
   async #finish(): Promise<RecordingSummary> {

@@ -5,14 +5,15 @@ import { Button } from '@/components/ui/button';
 
 interface ListenButtonProps {
   id: string;
+  live?: boolean;
 }
 
-export function ListenButton({ id }: ListenButtonProps) {
+export function ListenButton({ id, live = true }: ListenButtonProps) {
   const [listening, setListening] = useState(false);
 
   useEffect(() => {
     setListening(false);
-  }, [id]);
+  }, [id, live]);
 
   return (
     <div className="flex items-center gap-1.5">

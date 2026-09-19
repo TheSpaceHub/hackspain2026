@@ -70,12 +70,14 @@ export function LiveCallPanel({ call, now, onClose, onOpenFinished }: LiveCallPa
             <span className="font-mono text-xs">{shortId(call.id)}</span>
           </p>
         </div>
+        <div className="flex items-center gap-2">
+          {live ? <ListenButton id={call.id} live={live} /> : call.recording.available ? (
+            <audio controls preload="none" src={recordingUrl(call.id)} className="h-8 w-full max-w-xs" />
+          ) : null}
+        </div>
         <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close" className="-mr-1 text-muted-foreground">
           <X />
         </Button>
-        {live ? <ListenButton id={call.id} /> : call.recording.available ? (
-          <audio controls preload="none" src={recordingUrl(call.id)} className="h-8 w-full max-w-xs" />
-        ) : null}
       </header>
 
       <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto bg-muted/40">
