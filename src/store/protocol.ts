@@ -34,6 +34,8 @@ export interface CallEnded {
   decider_raw?: string;
   decider_notes?: string;
   decider_conf?: number;
+  recording_path?: string;
+  recording_ms?: number;
   used_floor: boolean;
   errors: string[];
 }

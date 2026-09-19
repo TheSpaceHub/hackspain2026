@@ -38,6 +38,8 @@ export interface CallRecord {
   errors: string | null;
   /** JSON Alert[], derived by the store worker; null until it has run. */
   alerts: string | null;
+  recording_path: string | null;
+  recording_ms: number | null;
 }
 
 /** A row of `GET /calls`: the call plus two columns the query derives. */

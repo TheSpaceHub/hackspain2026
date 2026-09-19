@@ -34,6 +34,8 @@ db.exec(`
     decider_raw   TEXT,
     decider_notes TEXT,
     decider_conf  REAL,
+    recording_path TEXT,
+    recording_ms   INTEGER,
     used_floor    INTEGER NOT NULL DEFAULT 0,
     errors        TEXT
   );
@@ -68,6 +70,9 @@ db.exec(`
 // Added after the first calls were stored; an older database gains the column in place.
 const hasAlerts = (db.prepare(`PRAGMA table_info(calls)`).all() as { name: string }[]).some((c) => c.name === 'alerts');
 if (!hasAlerts) db.exec(`ALTER TABLE calls ADD COLUMN alerts TEXT`);
+const callColumns = db.prepare(`PRAGMA table_info(calls)`).all() as { name: string }[];
+if (!callColumns.some((c) => c.name === 'recording_path')) db.exec(`ALTER TABLE calls ADD COLUMN recording_path TEXT`);
+if (!callColumns.some((c) => c.name === 'recording_ms')) db.exec(`ALTER TABLE calls ADD COLUMN recording_ms INTEGER`);
 
 const insertCall = db.prepare(
   `INSERT INTO calls (call_id, stream_sid, from_number, started_at) VALUES (?, ?, ?, ?)
@@ -80,7 +85,7 @@ const insertTurn = db.prepare(
 const endCall = db.prepare(
   `UPDATE calls SET ended_at=?, ended_by=?, call_ms=?, frames_in=?, frames_out=?,
      session_start_ms=?, decider_ms=?, close_to_submitted_ms=?, decider_model=?,
-     decider_raw=?, decider_notes=?, decider_conf=?, used_floor=?, errors=?
+     decider_raw=?, decider_notes=?, decider_conf=?, recording_path=?, recording_ms=?, used_floor=?, errors=?
    WHERE call_id=?`,
 );
 const insertSubmission = db.prepare(
@@ -183,7 +188,8 @@ parentPort?.on('message', (msg: StoreMessage) => {
           m.ended_at, m.ended_by, m.call_ms, m.frames_in, m.frames_out,
           m.session_start_ms ?? null, m.decider_ms ?? null, m.close_to_submitted_ms ?? null,
           m.decider_model ?? null, m.decider_raw ?? null, m.decider_notes ?? null,
-          m.decider_conf ?? null, m.used_floor ? 1 : 0, JSON.stringify(m.errors), m.call_id,
+          m.decider_conf ?? null, m.recording_path ?? null, m.recording_ms ?? null,
+          m.used_floor ? 1 : 0, JSON.stringify(m.errors), m.call_id,
         ),
       );
       // The end is written a beat before the call's submission rows land; judging "no

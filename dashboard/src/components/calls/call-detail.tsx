@@ -1,7 +1,9 @@
 import { PhoneIncoming, PhoneOff } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { type Call, callStatus } from '@/lib/agent/model';
+import { recordingUrl } from '@/lib/agent/client';
 import { formatClock, formatDay, formatDuration, formatPhone, shortId } from '@/lib/format';
+import { ClinicTrace } from '@/components/clinic/clinic-trace';
 import { AlertsPanel, flaggedSeqs } from './alerts';
 import { OutcomeBadge } from './outcome-badge';
 import { RecordCard } from './record-card';
@@ -62,6 +64,7 @@ export function CallDetail({ call, loading, now }: CallDetailProps) {
       <div className="min-h-0 flex-1 overflow-y-auto bg-muted/40">
         <div className="mx-auto max-w-3xl space-y-5 px-4 py-5">
           <AlertsPanel alerts={call.alerts} />
+          <ClinicTrace callId={call.id} now={now} />
           <TimelineEvent>
             <PhoneIncoming className="size-3.5" />
             Call connected · {formatClock(call.startedAt, true)}
@@ -77,7 +80,14 @@ export function CallDetail({ call, loading, now }: CallDetailProps) {
             </TimelineEvent>
           )}
 
-          {!loading && <RecordCard call={call} />}
+          {!loading && (
+            <>
+              <RecordCard call={call} />
+              {call.recording.available && (
+                <audio controls preload="none" src={recordingUrl(call.id)} className="h-8 w-full max-w-xs" />
+              )}
+            </>
+          )}
         </div>
       </div>
     </div>
