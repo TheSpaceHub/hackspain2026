@@ -150,6 +150,12 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         phone: z.string().optional().describe('Spanish phone number'),
       }),
       execute: async (args) => {
+        // Alberto's call: identified by phone, slot held, then the model looked him up
+        // again with a garbled query, got "no record" and started registering him.
+        if (state.matched && state.caller_is_patient) {
+          const m = state.matched;
+          return `Already identified: ${[m.given_name, m.first_surname, m.second_surname].filter(Boolean).join(' ')} (${m.patient_id}), from the number they are ringing from. They are not a new patient and there is nothing to register — carry on with what they want.`;
+        }
         const query = {
           name: real(args.name),
           national_id: real(args.national_id) ? state.patient.national_id ?? args.national_id : undefined,

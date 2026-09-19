@@ -455,9 +455,17 @@ export class CallSession {
       if (turn.role !== 'assistant') {
         if (this.#state) this.#state.last_caller_text = turn.text;
         const before = turns[i - 1];
+        // "5 4 8 8 4 9 3 9." then "Q." — one answer, two finals; ground on both.
+        const heard =
+          before && before.role !== 'assistant' ? `${before.text} ${turn.text}` : turn.text;
+        const asked = turns[i - 2];
         this.#extractor?.observe(
-          turn.text,
-          before?.role === 'assistant' ? before.text : undefined,
+          heard,
+          before?.role === 'assistant'
+            ? before.text
+            : asked?.role === 'assistant'
+              ? asked.text
+              : undefined,
         );
       }
       this.#shared.store.write({

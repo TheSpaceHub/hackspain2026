@@ -132,6 +132,16 @@ function harness(
   const released = await numeric.call('release_slot', {});
   check('release_slot lets go of the held slot', /Released/.test(released) && numeric.state.accepted === null, true);
 
+  // Alberto: phone-matched, slot held, then re-looked-up with a garbled name → "new patient".
+  const known = harness({}, undefined);
+  recordMatch(known.state, { patient_id: 'P00389', given_name: 'Alberto', first_surname: 'Rubio', second_surname: 'Sanz' });
+  const relookup = await known.call('identify_patient', { name: 'Alberto Rubio Sands' });
+  check(
+    'identify_patient never turns a phone-matched patient into a new one',
+    /Already identified: Alberto Rubio Sanz \(P00389\)/.test(relookup) && known.state.matched?.patient_id === 'P00389',
+    true,
+  );
+
   // Ten silent callers were booked because the model "accepted" for them after a nudge.
   const silent = harness({}, undefined);
   silent.state.caller_turns = 2;
@@ -154,11 +164,12 @@ function harness(
   check('a directory hit is recorded, not read back', h.state.matched?.patient_id, 'pat_001');
   check('and the agent is told not to repeat it', /Do not read this back/.test(found), true);
 
-  const two = await h.call('identify_patient', { phone: '600333444' });
+  const kin = harness();
+  const two = await kin.call('identify_patient', { phone: '600333444' });
   check('a shared household line identifies nobody', /date of birth/.test(two), true);
-  check('and leaves the earlier match alone', h.state.matched?.patient_id, 'pat_001');
+  check('and leaves the earlier match alone', kin.state.matched, null);
 
-  const none = await h.call('identify_patient', { national_id: '00000000T' });
+  const none = await kin.call('identify_patient', { national_id: '00000000T' });
   check('an unknown id is a new patient, not an error', /new patient/.test(none), true);
 }
 

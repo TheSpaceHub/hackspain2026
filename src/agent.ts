@@ -207,7 +207,7 @@ export function fileOnCaller(state: CallState): string | undefined {
     return `The ${label} they gave ("${value.spoken}") does not check out: ${value.problem}. ${how} before moving on.`;
   });
   const missing =
-    state.request.intent === 'register'
+    state.request.intent === 'register' && !state.matched
       ? missingForRegistration(state).map((field) => fieldLabels[field])
       : [];
   if (missing.length > 0) rejected.push(`Still missing for the file: ${missing.join(', ')}`);
