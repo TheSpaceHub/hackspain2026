@@ -24,11 +24,3 @@ export function agentOrigin(mode: AgentMode): string {
   const origin = mode === 'live' ? import.meta.env.VITE_AGENT_ORIGIN : import.meta.env.VITE_SIM_AGENT_ORIGIN;
   return origin ?? '';
 }
-
-export function agentWsUrl(mode: AgentMode): string {
-  if (!import.meta.env.PROD) {
-    const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-    return `${protocol}://${location.host}/agents/${mode}/ws`;
-  }
-  return `${agentOrigin(mode).replace(/^http/, 'ws').replace(/\/+$/, '')}/ws`;
-}

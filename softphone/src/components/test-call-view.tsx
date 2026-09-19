@@ -1,18 +1,20 @@
-import { ArrowRight, Loader2, Phone, PhoneOff } from 'lucide-react';
+import { ExternalLink, Loader2, Phone, PhoneOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { CallFeed } from '@/hooks/use-call-feed';
 import { useNow } from '@/hooks/use-now';
-import { callStatus } from '@/lib/agent/model';
-import { agentWsUrl, type AgentMode } from '@/lib/agent/origin';
 import { formatDuration } from '@/lib/format';
 import type { TestCall } from '@/lib/phone/test-call';
 import { cn } from '@/lib/utils';
 
-/** The URL Prosper dials, and the agent behind this console (through Vite's proxy). */
+const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL ?? 'http://localhost:5173';
+
+/** Direct WebSocket endpoints for the two public and two local agents. */
 const PRESETS = [
-  { label: 'Prosper endpoint', url: 'wss://pmc-blowing-rap-detroit.trycloudflare.com/ws' },
+  { label: 'Live', url: 'wss://pmc-blowing-rap-detroit.trycloudflare.com/ws' },
+  { label: 'Simulation', url: 'wss://term-hub-exchange-desirable.trycloudflare.com/ws' },
+  { label: 'Local live', url: 'ws://localhost:7860/ws' },
+  { label: 'Local sim', url: 'ws://localhost:7861/ws' },
 ];
 
 /** Per-browser settings: which agent to ring, and as whom. */
@@ -35,27 +37,17 @@ function useStored(key: string, fallback: string): [string, (v: string) => void]
 }
 
 interface TestCallViewProps {
-  mode: AgentMode;
   call: TestCall;
-  feed: CallFeed;
-  onOpenCall: (view: 'live' | 'finished', callId: string) => void;
 }
 
 /** Ring the agent from the browser and talk to it, like a caller would. */
-export function TestCallView({ mode, call, feed, onOpenCall }: TestCallViewProps) {
+export function TestCallView({ call }: TestCallViewProps) {
   const s = call.snapshot;
   const now = useNow(1_000);
   const [endpoint, setEndpoint] = useStored('test-call.endpoint', PRESETS[0]!.url);
   const [fromNumber, setFromNumber] = useStored('test-call.from', '');
 
   const busy = s.phase === 'connecting' || s.phase === 'live';
-  const presets = [
-    ...PRESETS,
-    { label: 'Local agent', url: agentWsUrl(mode) },
-    { label: 'Simulation endpoint', url: 'wss://term-hub-exchange-desirable.trycloudflare.com/ws' },
-  ];
-  // The call shows up in this console only when it went to the agent this console reads.
-  const tracked = s.callId ? feed.calls.find((c) => c.id === s.callId) : undefined;
 
   const onPress = (): void => {
     if (busy) call.hangUp();
@@ -116,15 +108,16 @@ export function TestCallView({ mode, call, feed, onOpenCall }: TestCallViewProps
           <p className={cn('tabular text-sm', s.error ? 'text-red-700' : 'text-muted-foreground')}>
             {status}
           </p>
-          {tracked && s.callId && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onOpenCall(callStatus(tracked, now) === 'live' ? 'live' : 'finished', s.callId!)}
+          {s.phase === 'live' && (
+            <a
+              href={DASHBOARD_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
-              {callStatus(tracked, now) === 'live' ? 'Follow it in Live' : 'Open in Finished'}
-              <ArrowRight data-icon="inline-end" />
-            </Button>
+              Open the dashboard
+              <ExternalLink className="size-3.5" />
+            </a>
           )}
         </div>
       </div>
@@ -134,7 +127,7 @@ export function TestCallView({ mode, call, feed, onOpenCall }: TestCallViewProps
           <span className="flex items-center justify-between text-xs text-muted-foreground">
             Endpoint
             <span className="flex gap-1">
-              {presets.map((p) => (
+              {PRESETS.map((p) => (
                 <Button
                   key={p.url}
                   variant={endpoint === p.url ? 'secondary' : 'ghost'}

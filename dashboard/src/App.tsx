@@ -4,14 +4,12 @@ import { ClinicView } from '@/components/clinic/clinic-view';
 import { AppShell, type NavItem } from '@/components/layout/app-shell';
 import { LiveView } from '@/components/live/live-view';
 import { OverviewView } from '@/components/overview/overview-view';
-import { TestCallView } from '@/components/test/test-call-view';
 import { useAgentHealth } from '@/hooks/use-agent-health';
 import { useCallFeed } from '@/hooks/use-call-feed';
 import { useNow } from '@/hooks/use-now';
 import { useRoute, type View } from '@/hooks/use-route';
 import { SimContext, type SimContextValue } from '@/hooks/sim-context';
 import { useSimFeed } from '@/hooks/use-sim-feed';
-import { useTestCall } from '@/hooks/use-test-call';
 import { storedMode, storeMode, type AgentMode } from '@/lib/agent/origin';
 import { callStatus } from '@/lib/agent/model';
 import { consoleMode } from '@/lib/mode';
@@ -30,10 +28,6 @@ export function App() {
   const now = useNow(5_000);
   const clinicApi = health?.clinic_api ?? null;
   const actualMode = consoleMode(clinicApi);
-  // Held above the tabs, so following a test call in Live does not hang it up.
-  const testCall = useTestCall();
-  const onTestCall = testCall.snapshot.phase === 'live';
-
   const nav: NavItem[] = useMemo(() => {
     const live = feed.calls.filter((c) => callStatus(c, now) === 'live').length;
     const items: NavItem[] = [
@@ -46,9 +40,8 @@ export function App() {
       const holds = liveHolds(sim.holds, now).length;
       items.push({ id: 'clinic', label: 'Clinic', count: holds, pulse: holds > 0 });
     }
-    items.push({ id: 'test', label: 'Test call', count: onTestCall ? 1 : undefined, pulse: onTestCall });
     return items;
-  }, [feed.calls, now, actualMode, sim.holds, route.view, onTestCall]);
+  }, [feed.calls, now, actualMode, sim.holds, route.view]);
 
   const openFinished = (callId: string | null): void => navigate({ view: 'finished', callId });
   /** From the clinic to the call that did it: live if it still is, finished otherwise. */
@@ -98,8 +91,6 @@ export function App() {
             onSelect={(callId) => navigate({ view: 'live', callId })}
             onOpenFinished={openFinished}
           />
-        ) : route.view === 'test' ? (
-          <TestCallView mode={agentMode} call={testCall} feed={feed} onOpenCall={(view, callId) => navigate({ view, callId })} />
         ) : (
           <FinishedCallsView mode={agentMode} feed={feed} selectedId={route.callId} onSelect={openFinished} />
         )}
