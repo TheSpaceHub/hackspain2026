@@ -383,11 +383,14 @@ export function setPlanVocabulary(plans: { id: string; name: string }[]): void {
 const fold = (text: string): string =>
   text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[_\s]+/g, ' ').trim();
 
+const planTolerance = (needle: string): number => Math.max(2, Math.floor(needle.length / 4));
+
 /** The clinic's id for a spoken plan, or the spoken plan tidied up when it knows none. */
 export function planId(spoken: string): string {
   const match = only(
     PLANS.map((plan) => ({ item: plan, aliases: [plan.id, plan.name] })),
     spoken,
+    planTolerance,
   );
   return match?.id ?? '';
 }

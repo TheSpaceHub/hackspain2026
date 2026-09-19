@@ -318,9 +318,11 @@ export function specialtyByName(catalogue: Catalogue, spoken: string): { id: str
 
 /** The plan the caller named, or nothing: "sonita" for sanitas is a 422 on availability. */
 export function planByName(catalogue: Catalogue, spoken: string): { id: string; name: string } | undefined {
+  const planTolerance = (needle: string): number => Math.max(2, Math.floor(needle.length / 4));
   return only(
     catalogue.plans.map((p) => ({ item: p, aliases: [p.id, p.name] })),
     spoken,
+    planTolerance,
   );
 }
 
@@ -375,4 +377,3 @@ export function siteHours(catalogue: Catalogue, locationId: string, isoDate: str
 export function isClosureDay(catalogue: Catalogue, isoDate: string): boolean {
   return (catalogue.calendar?.closure_days ?? []).includes(isoDate);
 }
-

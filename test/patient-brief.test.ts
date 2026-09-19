@@ -70,4 +70,12 @@ const now = new Date('2026-10-07T10:00:00Z');
   check('no DOB and no plan produces no brief text', describeBrief(brief), '');
 }
 
+{
+  const brief = buildPatientBrief({
+    patient_id: 'P5',
+    referrals: ['dermatology'],
+  }, catalogue, now);
+  check('referral facts are independent of plan facts', describeBrief(brief), 'Referral held for dermatology. Referral needed for Physiotherapy.');
+}
+
 if (failed) throw new Error(`${failed} patient brief checks failed`);
