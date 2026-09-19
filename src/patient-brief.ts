@@ -111,7 +111,10 @@ export function describeBrief(brief: PatientBrief): string {
   if (brief.referrals_held.length > 0) {
     lines.push(`Referral held for ${brief.referrals_held.join(', ')}.`);
   }
-  if (brief.referral_missing.length > 0) {
+  if (
+    brief.referral_missing.length > 0 &&
+    (brief.plan !== undefined || brief.age_years !== undefined || brief.referrals_held.length > 0)
+  ) {
     lines.push(`Referral needed for ${names(brief.referral_missing)}.`);
   }
   if (brief.visit_kind !== 'unknown') {
