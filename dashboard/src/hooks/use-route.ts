@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 
-export type View = 'overview' | 'live' | 'finished' | 'testing';
+export type View = 'overview' | 'live' | 'finished' | 'clinic' | 'test' | 'testing';
 
 export interface Route {
   view: View;
-  /** The call open in that view, if any. */
+  /** The call open in that view, if any; on the clinic, the day open (YYYY-MM-DD). */
   callId: string | null;
 }
 
 const DEFAULT: Route = { view: 'overview', callId: null };
 
-/** `#/overview`, `#/live/<id>`, `#/finished/<id>`, `#/testing`. The older `#/calls/<id>` still opens a finished call. */
+/**
+ * `#/overview`, `#/live/<id>`, `#/finished/<id>`, `#/clinic/<date>`, `#/test`, `#/testing`.
+ * The older `#/calls/<id>` still opens a finished call.
+ */
 function parse(hash: string): Route {
-  const m = /^#\/(overview|live|finished|testing|calls)(?:\/(.+))?$/.exec(hash);
+  const m = /^#\/(overview|live|finished|calls|clinic|test|testing)(?:\/(.+))?$/.exec(hash);
   if (!m) return DEFAULT;
   const view: View = m[1] === 'calls' ? 'finished' : (m[1] as View);
   return { view, callId: m[2] ? decodeURIComponent(m[2]) : null };

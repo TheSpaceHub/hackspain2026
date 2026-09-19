@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { parentPort, workerData } from 'node:worker_threads';
-import type { CallEnded, CallStarted, Query, StoreMessage, SubmissionRow, TurnRow } from './protocol.js';
+import { type AlertInput, detectAlerts } from './alerts.js';
+import type { CallAlerts, CallEnded, CallStarted, Query, StoreMessage, SubmissionRow, TurnRow } from './protocol.js';
 import { computeStats, type StatsRow } from './stats.js';
 
 /**
@@ -33,6 +34,8 @@ db.exec(`
     decider_raw   TEXT,
     decider_notes TEXT,
     decider_conf  REAL,
+    recording_path TEXT,
+    recording_ms   INTEGER,
     used_floor    INTEGER NOT NULL DEFAULT 0,
     errors        TEXT
   );
@@ -64,6 +67,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS submissions_by_call ON submissions(call_id, seq);
 `);
 
+// Added after the first calls were stored; an older database gains the column in place.
+const hasAlerts = (db.prepare(`PRAGMA table_info(calls)`).all() as { name: string }[]).some((c) => c.name === 'alerts');
+if (!hasAlerts) db.exec(`ALTER TABLE calls ADD COLUMN alerts TEXT`);
+const callColumns = db.prepare(`PRAGMA table_info(calls)`).all() as { name: string }[];
+if (!callColumns.some((c) => c.name === 'recording_path')) db.exec(`ALTER TABLE calls ADD COLUMN recording_path TEXT`);
+if (!callColumns.some((c) => c.name === 'recording_ms')) db.exec(`ALTER TABLE calls ADD COLUMN recording_ms INTEGER`);
+
 const insertCall = db.prepare(
   `INSERT INTO calls (call_id, stream_sid, from_number, started_at) VALUES (?, ?, ?, ?)
    ON CONFLICT(call_id) DO NOTHING`,
@@ -75,7 +85,7 @@ const insertTurn = db.prepare(
 const endCall = db.prepare(
   `UPDATE calls SET ended_at=?, ended_by=?, call_ms=?, frames_in=?, frames_out=?,
      session_start_ms=?, decider_ms=?, close_to_submitted_ms=?, decider_model=?,
-     decider_raw=?, decider_notes=?, decider_conf=?, used_floor=?, errors=?
+     decider_raw=?, decider_notes=?, decider_conf=?, recording_path=?, recording_ms=?, used_floor=?, errors=?
    WHERE call_id=?`,
 );
 const insertSubmission = db.prepare(
@@ -84,7 +94,8 @@ const insertSubmission = db.prepare(
 );
 const recentCalls = db.prepare(
   `SELECT c.*, (SELECT COUNT(*) FROM turns t WHERE t.call_id = c.call_id) AS turn_count,
-          (SELECT group_concat(s.action || '=' || s.status) FROM submissions s WHERE s.call_id = c.call_id) AS outcome
+          (SELECT group_concat(s.action || '=' || s.status || COALESCE(':' || CASE WHEN json_valid(s.body) THEN json_extract(s.body, '$.reason') END, ''))
+            FROM submissions s WHERE s.call_id = c.call_id) AS outcome
    FROM calls c ORDER BY c.started_at DESC LIMIT ?`,
 );
 const oneCall = db.prepare(`SELECT * FROM calls WHERE call_id = ?`);
@@ -95,9 +106,58 @@ const statsRows = db.prepare(
   `SELECT c.started_at, c.ended_at, c.call_ms, c.session_start_ms, c.decider_ms, c.close_to_submitted_ms, c.used_floor,
           (SELECT s.action FROM submissions s WHERE s.call_id = c.call_id AND s.status IN (200, 409)
             ORDER BY s.seq LIMIT 1) AS outcome,
-          (SELECT COUNT(*) FROM submissions s WHERE s.call_id = c.call_id) AS submissions
+          (SELECT CASE WHEN json_valid(s.body) THEN json_extract(s.body, '$.reason') END FROM submissions s WHERE s.call_id = c.call_id AND s.status IN (200, 409)
+            ORDER BY s.seq LIMIT 1) AS outcome_reason,
+          (SELECT COUNT(*) FROM submissions s WHERE s.call_id = c.call_id) AS submissions,
+          c.alerts
    FROM calls c WHERE c.started_at >= ? ORDER BY c.started_at`,
 );
+
+const alertCall = db.prepare(
+  `SELECT from_number, ended_at, ended_by, call_ms, close_to_submitted_ms, used_floor, alerts FROM calls WHERE call_id = ?`,
+);
+const alertSubs = db.prepare(`SELECT action, status FROM submissions WHERE call_id = ? ORDER BY seq`);
+const saveAlerts = db.prepare(`UPDATE calls SET alerts = ? WHERE call_id = ?`);
+const unalerted = db.prepare(`SELECT call_id FROM calls WHERE ended_at IS NOT NULL AND alerts IS NULL`);
+
+/** How long after a call's end its alerts wait for the submissions still in flight. */
+const END_SETTLE_MS = 2_000;
+
+interface AlertCallRow {
+  from_number: string | null;
+  ended_at: string | null;
+  ended_by: string | null;
+  call_ms: number | null;
+  close_to_submitted_ms: number | null;
+  used_floor: number;
+  alerts: string | null;
+}
+
+/** Re-derive a call's alerts from what is stored; store and announce them when they changed. */
+function refreshAlerts(callId: string, announce = true): void {
+  const c = alertCall.get(callId) as AlertCallRow | undefined;
+  if (!c) return;
+  const input: AlertInput = {
+    fromNumber: c.from_number,
+    ended: c.ended_at !== null,
+    endedBy: c.ended_by,
+    callMs: c.call_ms,
+    closeToSubmittedMs: c.close_to_submitted_ms,
+    usedFloor: c.used_floor === 1,
+    submissions: alertSubs.all(callId) as unknown as AlertInput['submissions'],
+    turns: callTurns.all(callId) as unknown as AlertInput['turns'],
+  };
+  const next = JSON.stringify(detectAlerts(input));
+  if (next === c.alerts) return;
+  saveAlerts.run(next, callId);
+  if (announce) {
+    const msg: CallAlerts = { type: 'call_alerts', call_id: callId, alerts: JSON.parse(next) };
+    parentPort?.postMessage(msg);
+  }
+}
+
+// Calls stored before alerts existed get theirs once, quietly, at startup.
+for (const { call_id } of unalerted.all() as { call_id: string }[]) guard(() => refreshAlerts(call_id, false));
 
 /** A row the store cannot write must never take a call down with it. */
 function guard(run: () => void): void {
@@ -118,6 +178,7 @@ parentPort?.on('message', (msg: StoreMessage) => {
     case 'turn': {
       const m = msg as TurnRow;
       guard(() => insertTurn.run(m.call_id, m.seq, m.role, m.text, m.at));
+      if (m.role === 'assistant') guard(() => refreshAlerts(m.call_id));
       break;
     }
     case 'call_ended': {
@@ -127,9 +188,13 @@ parentPort?.on('message', (msg: StoreMessage) => {
           m.ended_at, m.ended_by, m.call_ms, m.frames_in, m.frames_out,
           m.session_start_ms ?? null, m.decider_ms ?? null, m.close_to_submitted_ms ?? null,
           m.decider_model ?? null, m.decider_raw ?? null, m.decider_notes ?? null,
-          m.decider_conf ?? null, m.used_floor ? 1 : 0, JSON.stringify(m.errors), m.call_id,
+          m.decider_conf ?? null, m.recording_path ?? null, m.recording_ms ?? null,
+          m.used_floor ? 1 : 0, JSON.stringify(m.errors), m.call_id,
         ),
       );
+      // The end is written a beat before the call's submission rows land; judging "no
+      // record" now would flash it on every call. Let them arrive first.
+      setTimeout(() => guard(() => refreshAlerts(m.call_id)), END_SETTLE_MS);
       break;
     }
     case 'submission': {
@@ -138,6 +203,7 @@ parentPort?.on('message', (msg: StoreMessage) => {
         insertSubmission.run(m.call_id, m.seq, m.action, m.route, m.body, m.status,
           m.response ?? null, m.attempts, m.duration_ms, m.error ?? null),
       );
+      guard(() => refreshAlerts(m.call_id));
       break;
     }
     case 'query': {

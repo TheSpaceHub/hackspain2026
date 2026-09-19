@@ -1,12 +1,21 @@
 /**
  * Talking to the agent's console API. In dev every path is same-origin and Vite
- * proxies it to the agent (vite.config.ts); set VITE_AGENT_ORIGIN to point a built
- * dashboard straight at one — the agent sends `Access-Control-Allow-Origin: *`.
+ * proxies it to the agent (vite.config.ts); a deployed console talks to the agent's
+ * public URL (origin.ts) — the agent sends `Access-Control-Allow-Origin: *`.
  */
 import { type Call, fromDetail, fromRecentRecord } from './model';
 import type { CallDetailResponse, FeedEvent, RecentCallsResponse } from './wire';
+import { AGENT_ORIGIN } from './origin';
 
-const ORIGIN = import.meta.env.PROD ? (import.meta.env.VITE_AGENT_ORIGIN ?? '') : '';
+const ORIGIN = AGENT_ORIGIN;
+
+export function listenUrl(id: string): string {
+  return `${ORIGIN}/calls/${encodeURIComponent(id)}/listen`;
+}
+
+export function recordingUrl(id: string): string {
+  return `${ORIGIN}/calls/${encodeURIComponent(id)}/recording.wav`;
+}
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${ORIGIN}${path}`, { signal });
@@ -29,7 +38,7 @@ export async function fetchCall(id: string, signal?: AbortSignal): Promise<Call 
 
 // --- the live stream --------------------------------------------------------
 
-const ROW_EVENTS = ['call_started', 'turn', 'call_ended', 'submission'] as const;
+const ROW_EVENTS = ['call_started', 'turn', 'call_ended', 'submission', 'call_alerts'] as const;
 
 export interface FeedHandlers {
   onEvent: (event: FeedEvent) => void;

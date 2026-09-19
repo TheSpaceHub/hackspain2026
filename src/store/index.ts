@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { config } from '../config.js';
-import type { QueryResult, StoreMessage } from './protocol.js';
+import type { CallAlerts, QueryResult, StoreMessage } from './protocol.js';
 
 /**
  * Handle to the central store. Writes are fire-and-forget postMessage: they cross to the
@@ -22,8 +22,12 @@ export class Store extends EventEmitter {
     // tsx registers its loader for workers too, so the .ts entry resolves as-is.
     const here = dirname(fileURLToPath(import.meta.url));
     this.#worker = new Worker(join(here, 'worker.ts'), { workerData: { path } });
-    this.#worker.on('message', (msg: QueryResult) => {
-      if (msg.type !== 'query_result') return;
+    this.#worker.on('message', (msg: QueryResult | CallAlerts) => {
+      // Alerts are derived in the worker; they reach the console like any other row.
+      if (msg.type === 'call_alerts') {
+        this.emit('row', msg);
+        return;
+      }
       this.#pending.get(msg.id)?.(msg);
       this.#pending.delete(msg.id);
     });

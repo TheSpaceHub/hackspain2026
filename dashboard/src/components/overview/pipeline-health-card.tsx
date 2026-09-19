@@ -81,19 +81,19 @@ function checks(s: Stats): Check[] {
   ];
 }
 
-export function PipelineHealthCard({ stats }: { stats: Stats }) {
+export function PipelineHealthCard({ stats, className }: { stats: Stats; className?: string }) {
   return (
-    <Card size="sm">
+    <Card size="sm" className={className}>
       <CardHeader>
         <CardTitle>Pipeline health</CardTitle>
         <CardDescription>How close the agent runs to the platform’s limits</CardDescription>
       </CardHeader>
       <CardContent>
-      <ul className="-my-3 divide-y">
+      <ul className="grid gap-x-8 lg:grid-cols-2">
         {checks(stats).map((c) => {
           const st = STATUS[c.health];
           return (
-            <li key={c.name} className="space-y-2 py-3">
+            <li key={c.name} className="space-y-2 border-t py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium">{c.name}</p>

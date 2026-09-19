@@ -89,8 +89,8 @@ export class Router {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key, X-Sim-Call-Id',
+        'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
       });
       res.end();
       return;

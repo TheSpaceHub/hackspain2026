@@ -10,7 +10,7 @@
  *
  * Nothing outside src/lib/agent should touch either; model.ts turns both into one.
  */
-import type { CallEnded, CallStarted, SubmissionRow, TurnRow } from '@agent/store/protocol';
+import type { CallAlerts, CallEnded, CallStarted, SubmissionRow, TurnRow } from '@agent/store/protocol';
 
 export type { CallEnded, CallStarted, SubmissionRow, TurnRow };
 
@@ -36,6 +36,10 @@ export interface CallRecord {
   used_floor: 0 | 1;
   /** A string[] on the wire, JSON text in the table. */
   errors: string | null;
+  /** JSON Alert[], derived by the store worker; null until it has run. */
+  alerts: string | null;
+  recording_path: string | null;
+  recording_ms: number | null;
 }
 
 /** A row of `GET /calls`: the call plus two columns the query derives. */
@@ -94,4 +98,5 @@ export type FeedEvent =
   | CallStarted
   | TurnRow
   | CallEnded
-  | SubmissionRow;
+  | SubmissionRow
+  | CallAlerts;

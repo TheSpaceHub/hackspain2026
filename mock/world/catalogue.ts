@@ -123,20 +123,31 @@ const snapshot = JSON.parse(
 ) as CatalogueSnapshot;
 
 export class Catalogue {
-  readonly raw = snapshot;
-  readonly providers = new Map(snapshot.providers.map((p) => [p.id, p]));
-  readonly specialties = new Map(snapshot.specialties.map((s) => [s.id, s]));
-  readonly types = new Map(snapshot.appointment_types.map((t) => [t.id, t]));
-  readonly locations = new Map(snapshot.locations.map((l) => [l.id, l]));
-  readonly plans = new Map(snapshot.plans.map((p) => [p.id, p]));
-  readonly #typeByName = new Map(snapshot.appointment_types.map((t) => [t.name, t]));
+  readonly raw: CatalogueSnapshot;
+  readonly providers: Map<string, Provider>;
+  readonly specialties: Map<string, Specialty>;
+  readonly types: Map<string, AppointmentType>;
+  readonly locations: Map<string, Location>;
+  readonly plans: Map<string, Plan>;
+  readonly #typeByName: Map<string, AppointmentType>;
+
+  /** The bundled snapshot by default; the sim passes one fetched from the live API. */
+  constructor(raw: CatalogueSnapshot = snapshot) {
+    this.raw = raw;
+    this.providers = new Map(raw.providers.map((p) => [p.id, p]));
+    this.specialties = new Map(raw.specialties.map((s) => [s.id, s]));
+    this.types = new Map(raw.appointment_types.map((t) => [t.id, t]));
+    this.locations = new Map(raw.locations.map((l) => [l.id, l]));
+    this.plans = new Map(raw.plans.map((p) => [p.id, p]));
+    this.#typeByName = new Map(raw.appointment_types.map((t) => [t.name, t]));
+  }
 
   get calendar(): CatalogueSnapshot['calendar'] {
-    return snapshot.calendar;
+    return this.raw.calendar;
   }
 
   providersOf(specialtyId: string): Provider[] {
-    return snapshot.providers.filter((p) => p.specialty_id === specialtyId);
+    return this.raw.providers.filter((p) => p.specialty_id === specialtyId);
   }
 
   /** The ids of the types a provider performs; the catalogue lists them by name. */
@@ -150,7 +161,7 @@ export class Catalogue {
    */
   typeFor(specialtyId: string, hasVisitedBefore: boolean): AppointmentType {
     const want = hasVisitedBefore ? 'existing_only' : 'new_only';
-    const own = snapshot.appointment_types.find(
+    const own = this.raw.appointment_types.find(
       (t) => t.specialty_id === specialtyId && t.new_patient_requirement === want,
     );
     return own ?? this.types.get(hasVisitedBefore ? 'review' : 'first_visit')!;

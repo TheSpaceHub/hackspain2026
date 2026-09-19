@@ -1,10 +1,12 @@
-import { Inbox, PhoneOff, Search } from 'lucide-react';
+import { Inbox, PhoneOff, Search, TriangleAlert } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { type Call, callStatus } from '@/lib/agent/model';
 import { dayKey, formatClock, formatDay, formatDuration, formatPhone } from '@/lib/format';
 import { summariseOutcome } from '@/lib/outcome';
 import { cn } from '@/lib/utils';
+import { AlertIndicator } from './alerts';
 import { EmptyState } from './empty-state';
 import { OutcomeBadge } from './outcome-badge';
 
@@ -23,7 +25,8 @@ function matches(call: Call, query: string, now: number): boolean {
   if (digits.length >= 3 && call.fromNumber?.replace(/\D/g, '').includes(digits)) return true;
   if (call.id.toLowerCase().includes(q)) return true;
   const outcome = summariseOutcome(call, callStatus(call, now)).label.toLowerCase();
-  return outcome.includes(q) || call.outcomes.some((o) => o.action.includes(q.replace(/\s+/g, '_')));
+  const snake = q.replace(/\s+/g, '_');
+  return outcome.includes(q) || call.outcomes.some((o) => o.action.includes(snake) || !!o.reason?.includes(snake));
 }
 
 function CallRow({ call, selected, onSelect, now }: { call: Call; selected: boolean; onSelect: () => void; now: number }) {
@@ -43,7 +46,10 @@ function CallRow({ call, selected, onSelect, now }: { call: Call; selected: bool
         <span className={cn('truncate text-sm', phone ? 'font-medium' : 'text-muted-foreground italic')}>
           {phone ?? 'Withheld number'}
         </span>
-        <span className="tabular shrink-0 text-xs text-muted-foreground">{formatClock(call.startedAt)}</span>
+        <span className="flex shrink-0 items-center gap-2.5">
+          <AlertIndicator alerts={call.alerts} />
+          <span className="tabular text-xs text-muted-foreground">{formatClock(call.startedAt)}</span>
+        </span>
       </div>
       <div className="flex items-center justify-between gap-3">
         <OutcomeBadge call={call} status={callStatus(call, now)} />
@@ -57,29 +63,42 @@ function CallRow({ call, selected, onSelect, now }: { call: Call; selected: bool
 
 export function CallList({ calls, selectedId, onSelect, now }: CallListProps) {
   const [query, setQuery] = useState('');
+  const [onlyAlerts, setOnlyAlerts] = useState(false);
+  const flagged = useMemo(() => calls.filter((c) => (c.alerts?.length ?? 0) > 0).length, [calls]);
 
   const groups = useMemo(() => {
     const byDay = new Map<string, Call[]>();
-    for (const call of calls.filter((c) => matches(c, query, now))) {
+    for (const call of calls.filter((c) => matches(c, query, now) && (!onlyAlerts || (c.alerts?.length ?? 0) > 0))) {
       const key = dayKey(call.startedAt);
       byDay.set(key, [...(byDay.get(key) ?? []), call]);
     }
     return [...byDay.values()];
-  }, [calls, query, now]);
+  }, [calls, query, now, onlyAlerts]);
 
   return (
     <div className="flex h-full flex-col">
       <div className="space-y-3 border-b p-3">
-        <div className="flex items-baseline justify-between px-1">
-          <h2 className="font-heading text-base font-medium">Calls</h2>
-          <span className="tabular text-xs text-muted-foreground">{calls.length} total</span>
+        <div className="flex items-center justify-between gap-2 pl-1">
+          <h2 className="font-heading text-base font-medium">
+            Calls <span className="tabular text-xs font-normal text-muted-foreground">{calls.length}</span>
+          </h2>
+          <Button
+            variant={onlyAlerts ? 'secondary' : 'ghost'}
+            size="xs"
+            aria-pressed={onlyAlerts}
+            onClick={() => setOnlyAlerts((on) => !on)}
+            disabled={flagged === 0 && !onlyAlerts}
+          >
+            <TriangleAlert data-icon="inline-start" />
+            With alerts <span className="tabular text-muted-foreground">{flagged}</span>
+          </Button>
         </div>
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Number, call id or outcome"
+            placeholder="Number, call id, outcome or reason"
             className="pl-9"
             aria-label="Filter calls"
           />
@@ -93,7 +112,7 @@ export function CallList({ calls, selectedId, onSelect, now }: CallListProps) {
           </EmptyState>
         ) : groups.length === 0 ? (
           <EmptyState icon={PhoneOff} title="Nothing matches">
-            No call matches “{query}”.
+            {query ? `No call matches “${query}”${onlyAlerts ? ' with alerts' : ''}.` : 'No call has alerts.'}
           </EmptyState>
         ) : (
           groups.map((group) => (

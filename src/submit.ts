@@ -21,22 +21,26 @@ export interface SubmitResult {
  * repeat themselves when they are unsure, and the second POST comes back 409 "already
  * has that action" — a wasted round trip inside the 30 s close window.
  */
-export async function submitActions(callId: string, actions: Action[]): Promise<SubmitResult[]> {
+export async function submitActions(
+  callId: string,
+  actions: Action[],
+  baseUrl: string = config.prosper.baseUrl,
+): Promise<SubmitResult[]> {
   const results: SubmitResult[] = [];
   const seen = new Set<string>();
   for (const action of actions) {
     const key = JSON.stringify(action);
     if (seen.has(key)) continue;
     seen.add(key);
-    results.push(await submitOne(callId, action));
+    results.push(await submitOne(callId, action, baseUrl));
   }
   return results;
 }
 
-async function submitOne(callId: string, action: Action): Promise<SubmitResult> {
+async function submitOne(callId: string, action: Action, baseUrl: string): Promise<SubmitResult> {
   const { action: verb, ...fields } = action;
   const route = ROUTES[verb];
-  const url = `${config.prosper.baseUrl}/api/v1/submit/${route}`;
+  const url = `${baseUrl}/api/v1/submit/${route}`;
   const body: Record<string, unknown> = { call_id: callId, ...fields };
   const startedAt = Date.now();
 

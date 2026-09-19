@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "npx pnpm@10.15.0 install --ignore-workspace",
+  "buildCommand": "npx pnpm@10.15.0 run build",
+  "outputDirectory": "dist"
+}

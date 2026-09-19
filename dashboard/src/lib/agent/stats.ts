@@ -3,6 +3,8 @@
  * counted from the feed, which only holds the most recent calls.
  */
 
+import { AGENT_ORIGIN } from './origin';
+
 export interface Distribution {
   p50: number | null;
   p95: number | null;
@@ -20,9 +22,17 @@ export interface Stats {
     without_record: number;
     rejected: number;
     floor_used: number;
+    /** Ended with at least one alert. */
+    flagged: number;
+    /** Ended with a critical alert. */
+    critical: number;
   };
   /** Ended calls by first accepted action; `none` for no record. */
+  /** Ended calls carrying each alert. */
+  alerts: Record<string, number>;
   outcomes: Record<string, number>;
+  /** The same calls by reason, per action that carries one: `{ no_action: { out_of_scope: 3 } }`. */
+  reasons: Record<string, Record<string, number>>;
   latency: {
     call_ms: Distribution;
     session_start_ms: Distribution;
@@ -61,7 +71,7 @@ export const RANGES: Range[] = [
   { id: 'all', label: 'All time', phrase: 'all time', bucketMs: 60 * 60_000, since: () => null },
 ];
 
-const ORIGIN = import.meta.env.PROD ? (import.meta.env.VITE_AGENT_ORIGIN ?? '') : '';
+const ORIGIN = AGENT_ORIGIN;
 
 export async function fetchStats(range: Range, now: number, signal?: AbortSignal): Promise<Stats> {
   const q = new URLSearchParams({ bucket_ms: String(range.bucketMs) });
@@ -72,15 +82,31 @@ export async function fetchStats(range: Range, now: number, signal?: AbortSignal
   return (await res.json()) as Stats;
 }
 
+export type AgentMode = 'live' | 'simulation';
+
 export interface AgentHealth {
   ok: boolean;
   live: number;
-  /** The clinic API the agent reads from and submits to. */
+  /** The clinic API new calls read from and submit to. */
   clinic_api?: string;
+  mode?: AgentMode;
+  /** Both clinics the agent knows, whichever it is on. */
+  clinics?: Record<AgentMode, string>;
 }
 
 export async function fetchHealth(signal?: AbortSignal): Promise<AgentHealth> {
-  const res = await fetch(`${ORIGIN}/health`, { signal });
+  const res = await fetch(`${ORIGIN}/health`, { signal, cache: 'no-store' });
   if (!res.ok) throw new Error(`GET /health → ${res.status}`);
+  return (await res.json()) as AgentHealth;
+}
+
+/** Switch the agent's clinic for new calls; the ones open keep theirs. */
+export async function setAgentMode(mode: AgentMode): Promise<AgentHealth> {
+  const res = await fetch(`${ORIGIN}/mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
+  if (!res.ok) throw new Error(`POST /mode → ${res.status}`);
   return (await res.json()) as AgentHealth;
 }
