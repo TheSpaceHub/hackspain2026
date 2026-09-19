@@ -1,12 +1,13 @@
 /**
  * Talking to the agent's console API. In dev every path is same-origin and Vite
- * proxies it to the agent (vite.config.ts); set VITE_AGENT_ORIGIN to point a built
- * dashboard straight at one — the agent sends `Access-Control-Allow-Origin: *`.
+ * proxies it to the agent (vite.config.ts); a deployed console talks to the agent's
+ * public URL (origin.ts) — the agent sends `Access-Control-Allow-Origin: *`.
  */
 import { type Call, fromDetail, fromRecentRecord } from './model';
 import type { CallDetailResponse, FeedEvent, RecentCallsResponse } from './wire';
+import { AGENT_ORIGIN } from './origin';
 
-const ORIGIN = import.meta.env.PROD ? (import.meta.env.VITE_AGENT_ORIGIN ?? '') : '';
+const ORIGIN = AGENT_ORIGIN;
 
 export function listenUrl(id: string): string {
   return `${ORIGIN}/calls/${encodeURIComponent(id)}/listen`;

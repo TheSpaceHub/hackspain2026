@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { FinishedCallsView } from '@/components/calls/finished-calls-view';
 import { ClinicView } from '@/components/clinic/clinic-view';
+import { ConnectAgent } from '@/components/layout/agent-origin';
 import { AppShell, type NavItem } from '@/components/layout/app-shell';
 import { LiveView } from '@/components/live/live-view';
 import { OverviewView } from '@/components/overview/overview-view';
@@ -13,6 +14,7 @@ import { SimContext, type SimContextValue } from '@/hooks/sim-context';
 import { useSimFeed } from '@/hooks/use-sim-feed';
 import { useTestCall } from '@/hooks/use-test-call';
 import { callStatus } from '@/lib/agent/model';
+import { NEEDS_AGENT_ORIGIN } from '@/lib/agent/origin';
 import { consoleMode } from '@/lib/mode';
 import { liveHolds } from '@/lib/sim/model';
 
@@ -80,7 +82,9 @@ export function App() {
         switching={switching}
         switchError={switchError}
       >
-        {route.view === 'overview' ? (
+        {NEEDS_AGENT_ORIGIN ? (
+          <ConnectAgent />
+        ) : route.view === 'overview' ? (
           <OverviewView feed={feed} />
         ) : route.view === 'clinic' ? (
           <ClinicView
