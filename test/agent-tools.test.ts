@@ -242,6 +242,22 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   check('and a placeholder name is never looked up', /Nothing to search on/.test(identified), true);
 }
 
+// --- words the model says, ids the diary takes -------------------------------
+
+{
+  const h = harness();
+  const said = await h.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'general practice', location_id: 'Centro' });
+  const asked = h.clinic.requests.find((r) => r.path === '/api/v1/availability');
+  check('a spoken specialty is sent as its id', asked?.query.specialty_id?.[0], 'spec_gp');
+  check('and a site by the name the caller uses', asked?.query.location_id?.[0], 'loc_centro');
+  check('so the caller gets times, not an apology', /Offer these/.test(said), true);
+
+  const loose = harness();
+  await loose.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'wizardry' });
+  const wide = loose.clinic.requests.find((r) => r.path === '/api/v1/availability');
+  check('a specialty nobody has is dropped, not sent', wide?.query.specialty_id, undefined);
+}
+
 // --- a tool call it printed instead of making --------------------------------
 
 {

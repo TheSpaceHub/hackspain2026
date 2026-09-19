@@ -227,6 +227,17 @@ export function providerOnLeave(provider: Provider, isoDate: string): boolean {
   return isoDate >= start && isoDate <= end;
 }
 
+/**
+ * The API takes ids, the model says words: "general practice" is a 422, `general_practice`
+ * is a diary. Match on the id, the name, or the id with its underscores said as spaces.
+ */
+export function specialtyByName(catalogue: Catalogue, spoken: string): { id: string; name: string } | undefined {
+  const needle = fold(spoken).replace(/[_\s]+/g, ' ');
+  if (!needle) return undefined;
+  const same = (value: string): boolean => fold(value).replace(/[_\s]+/g, ' ') === needle;
+  return catalogue.specialties.find((s) => same(s.id) || same(s.name));
+}
+
 export function locationById(catalogue: Catalogue, id: string): Location | undefined {
   const needle = fold(id);
   return catalogue.locations.find((l) => fold(l.id) === needle || fold(l.name).includes(needle));

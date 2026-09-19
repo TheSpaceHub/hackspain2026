@@ -86,6 +86,14 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
   check('what was said is written down', state.patient.first_surname, 'Domínguez');
   check('a second surname nobody gave is not', state.patient.second_surname, undefined);
 
+  const copied = createCallState('call-copied');
+  applyPatch(copied, { patient: { national_id: 'P00001' } }, "Yes. That's right.");
+  check('an id lifted off the notes on a turn with no number in it is dropped', copied.patient.national_id, undefined);
+
+  const words = createCallState('call-words');
+  applyPatch(words, { patient: { phone: '600999888' } }, 'six hundred, nine nine nine, eight eight eight');
+  check('a number said in words is still taken', words.patient.phone, '600999888');
+
   const spelled = createCallState('call-spelled');
   applyPatch(spelled, { patient: { national_id: '48064716Y' } }, 'It is 4 8 0 6 4 7 1 6 Y.');
   check('an id spelled out still counts as said', spelled.patient.national_id, '48064716Y');

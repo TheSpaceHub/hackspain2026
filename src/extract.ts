@@ -63,6 +63,8 @@ const SYSTEM_PROMPT = `You transcribe facts, you do not converse. A receptionist
 
 Read the exchange and return JSON holding ONLY facts the caller stated in it. Say nothing else — no prose, no explanation, no code fence.
 
+The notes you are shown are context, so you can tell new from old. Never copy a value out of them into your answer, and never answer with anything the receptionist said — only the caller's own words count.
+
 Rules:
 - Omit any key you did not hear. An empty object is the right answer for small talk.
 - Never guess, never infer, never fill a gap with "unknown" or a placeholder. If it was not said, it is not there.
@@ -193,6 +195,9 @@ function tight(text: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+const NUMBER_WORDS =
+  /\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|cero|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|cien|ciento|mil)\b/i;
+
 const MONTH_NAMES =
   /january|february|march|april|may|june|july|august|september|october|november|december|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre/i;
 
@@ -216,9 +221,9 @@ export function heardIt(field: PatientField, value: string, heard: string): bool
   const hay = tight(heard);
   const saidDigits = heard.replace(/\D/g, '');
 
-  // A number said in words ("six hundred, nine nine nine") has no digits to check
-  // against, and a wrong drop costs more than a wrong keep.
-  if (/\d/.test(value) && saidDigits === '') return true;
+  // A number can be said in words ("six hundred, nine nine nine"), which leaves no
+  // digits to check against — but a turn with no number in it at all did not carry one.
+  if (/\d/.test(value) && saidDigits === '') return NUMBER_WORDS.test(heard);
 
   if (field === 'date_of_birth') {
     const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);

@@ -118,9 +118,9 @@ export class ReceptionistAgent extends voice.Agent {
   }
 
   /**
-   * Hold a turn that opens with `{` until it is whole: it is either a tool call the
-   * model forgot to make, or a blob nobody should hear. Anything else streams straight
-   * through, so a turn that speaks is not delayed at all.
+   * Hold everything from the first `{` of a turn until the turn ends: it is either a
+   * tool call the model printed instead of making, or a blob nobody should hear. The
+   * words before it stream out untouched, so a turn that only speaks is never delayed.
    */
   override async llmNode(
     chatCtx: llm.ChatContext,
@@ -132,29 +132,36 @@ export class ReceptionistAgent extends voice.Agent {
 
     const known = new Set(Object.keys(toolCtx));
     let held = '';
-    let holding = true;
+    let holding = false;
 
     return stream.pipeThrough(
       new TransformStream<llm.ChatChunk | string, llm.ChatChunk | string>({
         transform(chunk, controller) {
           const text = typeof chunk === 'string' ? chunk : (chunk.delta?.content ?? '');
           const isCall = typeof chunk !== 'string' && chunk.delta?.toolCalls !== undefined;
-          if (!holding || text === '' || isCall) {
+          if (text === '' || isCall) {
             controller.enqueue(chunk);
             return;
           }
-          held += text;
-          const seen = held.trimStart();
-          if (seen === '' || seen.startsWith('{')) return;
-          holding = false;
-          controller.enqueue(held);
-          held = '';
+          if (holding) {
+            held += text;
+            return;
+          }
+          const brace = text.indexOf('{');
+          if (brace === -1) {
+            controller.enqueue(chunk);
+            return;
+          }
+          if (brace > 0) controller.enqueue(text.slice(0, brace));
+          holding = true;
+          held = text.slice(brace);
         },
         flush(controller) {
           if (held === '') return;
           const call = printedToolCall(held.trim(), known);
           if (!call) {
-            controller.enqueue(RECOVER);
+            // A brace in ordinary speech is harmless; a JSON object is not.
+            controller.enqueue(/"\s*name\s*"\s*:/.test(held) ? RECOVER : held);
             return;
           }
           console.warn(`[agent] printed a ${call.name} tool call instead of making it`);

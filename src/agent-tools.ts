@@ -17,6 +17,7 @@ import {
   locationById,
   providersByName,
   siteHours,
+  specialtyByName,
   type Availability,
   type Catalogue,
   type ClinicApi,
@@ -130,11 +131,22 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         location_id: z.string().optional(),
       }),
       execute: async (args) => {
+        // The model says "general practice" and "Centro"; the diary takes
+        // `general_practice` and `loc_centro`, and rejects the whole query otherwise. A
+        // filter we cannot resolve is dropped rather than sent: a wider search still
+        // answers the caller, a 422 does not.
+        const saidSpecialty = real(args.specialty_id);
+        const saidLocation = real(args.location_id);
+        const specialty =
+          saidSpecialty && catalogue ? specialtyByName(catalogue, saidSpecialty)?.id : saidSpecialty;
+        const location =
+          saidLocation && catalogue ? locationById(catalogue, saidLocation)?.id : saidLocation;
+
         const request = recordRequest(state, {
           when_phrase: args.when_phrase,
-          specialty_id: args.specialty_id,
+          specialty_id: specialty,
           provider_name: args.provider_name,
-          location_id: args.location_id,
+          location_id: location,
         });
 
         let providerId = request.provider_id;
@@ -150,7 +162,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         }
 
         const window = resolveWhen(args.when_phrase, now(), {
-          locationId: args.location_id ?? request.location_id,
+          locationId: location ?? request.location_id,
           closureDays: catalogue?.calendar?.closure_days,
           maxSpanDays: catalogue?.calendar?.max_span_days ?? undefined,
         });
@@ -160,8 +172,8 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           date_from: window.date_from,
           date_to: window.date_to,
           provider_id: providerId,
-          specialty_id: args.specialty_id ?? request.specialty_id,
-          location_id: args.location_id ?? request.location_id,
+          specialty_id: specialty ?? request.specialty_id,
+          location_id: location ?? request.location_id,
           patient_id: state.matched?.patient_id,
           insurer: request.insurers.length > 0 ? request.insurers : undefined,
         });
