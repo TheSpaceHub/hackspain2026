@@ -277,11 +277,11 @@ function harness(
 {
   const h = harness({ fullDays: ['2026-10-08'] });
   const full = await h.call('find_slots', { when_phrase: 'Thursday', specialty_id: 'spec_gp' });
-  check('a full day is a full day, not an invented time', /Nothing free/.test(full), true);
-  check('and nothing is quoted off it', h.state.quoted.length, 0);
+  check('a full day says nothing before the later real offer', /Nothing on Thursday 8 October/.test(full), true);
+  check('and the later offer is quoted', h.state.quoted[0]?.start_time.slice(0, 10), '2026-10-09');
 
   const open = await h.call('find_slots', { when_phrase: 'as soon as possible', specialty_id: 'spec_gp' });
-  check('the soonest search skips the full day', h.state.quoted[0]!.start_time.slice(0, 10), '2026-10-09');
+  check('the soonest search still finds an open slot', h.state.quoted[0]!.start_time.slice(0, 10), '2026-10-09');
   check('and offers that one alone, not a menu they can pick a later time off', h.state.quoted.length, 1);
   check('which is the one it read out', /Offer that one and no other/.test(open), true);
   check('an ordinary earliest search keeps its original wording', /The soonest there is:/.test(open), true);
@@ -291,7 +291,7 @@ function harness(
 {
   const h = harness({ fullDays: ['2026-10-08'] });
   await h.call('find_slots', { when_phrase: 'Friday', specialty_id: 'spec_gp' });
-  const empty = await h.call('find_slots', { when_phrase: 'Thursday', specialty_id: 'spec_gp' });
+  const empty = await h.call('find_slots', { when_phrase: 'Thursday after 5 pm', specialty_id: 'spec_gp' });
   check('an empty re-search withdraws the earlier offer', /withdrawn/.test(empty) && h.state.quoted.length, 0);
   h.state.caller_turns++;
   h.state.last_caller_text = 'Yes, that one';
@@ -406,6 +406,29 @@ function harness(
   });
   await exact.call('find_slots', { when_phrase: 'at 9', specialty_id: 'spec_gp' });
   check('bare at clock remains exact', exact.state.quoted.length === 1 && exact.state.quoted[0]?.start_time.includes('09:00'), true);
+}
+
+{
+  const h = harness({ slotTimes: [{ hour: 9 }, { hour: 11 }] });
+  const nothing = await h.call('find_slots', {
+    when_phrase: 'from two o’clock in the afternoon onwards',
+    specialty_id: 'spec_gp',
+  });
+  check('hard clock without a date searches the whole horizon', h.clinic.requests[0]?.query.date_from, ['2026-10-07']);
+  check('hard clock without a date uses the catalogue horizon', h.clinic.requests[0]?.query.date_to, ['2026-10-21']);
+  check('hard clock without a date reports no availability', /on any day the diary covers/.test(nothing), true);
+  check('hard clock without a date sets no availability state', h.state.no_availability?.constraint, 'from 14:00');
+}
+
+{
+  const h = harness({ fullDays: ['2026-10-08'] });
+  const fallback = await h.call('find_slots', {
+    when_phrase: 'Thursday',
+    specialty_id: 'spec_gp',
+  });
+  check('a full named day searches after it', h.state.quoted[0]?.start_time.slice(0, 10), '2026-10-09');
+  check('a full named day says nothing before the later offer', /Nothing on Thursday 8 October/.test(fallback), true);
+  check('the later full-day fallback is quoted', /The soonest after that/.test(fallback), true);
 }
 
 {

@@ -178,7 +178,7 @@ function clocksIn(text: string): { hour: number; minute: number; ambiguous: bool
   const wordClock = new RegExp(`\\b(?:half past\\s+|a las\\s+|a la\\s+)?(${words})(?:\\s+(?:in the|de la)\\s+(?:afternoon|evening|tarde|noche))?\\b`, 'gi');
   for (const match of text.matchAll(wordClock)) {
     const before = text.slice(Math.max(0, match.index ?? 0) - 12, match.index ?? 0);
-    const after = text.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 20);
+    const after = text.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 50);
     const halfPast = /\bhalf past\b/i.test(before) || /^half past\b/i.test(match[0]!);
     add(CLOCK_WORDS[match[1]!.toLowerCase()]!, halfPast ? 30 : 0, undefined, `${before} ${match[0]} ${after}`);
   }

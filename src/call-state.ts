@@ -104,6 +104,12 @@ export interface CallState {
   quoted_after_caller_turns?: number;
   last_caller_text?: string;
   accepted: QuotedSlot | null;
+  no_availability?: {
+    constraint: string;
+    specialty?: string;
+    location?: string;
+    through: string;
+  };
   phone_match_rejected?: string;
   invented_offer?: string;
   invented_provider?: string;
@@ -257,6 +263,7 @@ function namePartMatches(spoken: string, record: string | null | undefined, pref
 /** Slots we actually said out loud, so the submitted `slot` is the quoted string exactly. */
 export function recordQuote(state: CallState, slots: QuotedSlot[]): void {
   state.quoted = slots;
+  if (slots.length > 0) state.no_availability = undefined;
   state.quoted_spoken = false;
   state.quoted_at = state.turns_seen;
   state.quoted_after_caller_turns = state.caller_turns;
@@ -474,6 +481,7 @@ export function acceptFromTranscript(
 
 export function recordAccepted(state: CallState, slot: QuotedSlot, note?: string): void {
   state.accepted = slot;
+  state.no_availability = undefined;
   record(state, 'accepted', `${slot.start_time} ${slot.provider_id}`, note);
 }
 

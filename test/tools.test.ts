@@ -108,6 +108,11 @@ const constraintNow = new Date('2026-09-19T12:20:00Z');
 const fromClock = resolveWhen('Wednesday from 2 pm onwards', constraintNow);
 check('from clock sets a hard afternoon bound', fromClock.after_clock, { hour: 14, minute: 0, ambiguous: false });
 check('from clock keeps the named Wednesday', fromClock.date_from, '2026-09-23');
+check(
+  'worded from-clock parses as an afternoon bound',
+  resolveWhen('from two o’clock in the afternoon onwards', constraintNow).after_clock,
+  { hour: 14, minute: 0, ambiguous: false },
+);
 const afterDate = resolveWhen('the soonest after Wednesday the 30th of September', constraintNow);
 check('after named date starts the next day', afterDate.date_from, '2026-10-01');
 check('after named date is an earliest window', afterDate.earliest, true);

@@ -701,6 +701,19 @@ export class CallSession {
       actions = [FLOOR_ACTION];
     }
     if (this.#state) {
+      if (
+        this.#state.no_availability &&
+        !this.#state.accepted &&
+        this.#state.request.intent !== 'register' &&
+        this.#state.request.intent !== 'cancel' &&
+        this.#state.request.intent !== 'reschedule'
+      ) {
+        this.#errors.push(
+          `no_availability override: nothing matched ${this.#state.no_availability.constraint} through ${this.#state.no_availability.through}`,
+        );
+        clog.warn('[decider] forced no_action/no_availability from diary state');
+        return [{ action: 'no_action', reason: 'no_availability' }];
+      }
       if (this.#state.request.intent === 'cancel') {
         const ids = this.#state.appointment_ids.length > 0
           ? this.#state.appointment_ids

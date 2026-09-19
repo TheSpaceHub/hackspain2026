@@ -118,6 +118,29 @@ function hardWindowPhrase(window: { after_clock?: { hour: number; minute: number
   return undefined;
 }
 
+function hasDateReference(text: string): boolean {
+  return /\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo|january|february|march|april|may|june|july|august|september|october|november|december|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre|next|this|coming|mañana|pasado)\b/i.test(text);
+}
+
+function setNoAvailability(
+  state: CallState,
+  constraint: string,
+  specialty: string | undefined,
+  location: string | undefined,
+  through: string,
+): void {
+  state.no_availability = { constraint, specialty, location, through };
+}
+
+function spokenDate(iso: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Madrid',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(new Date(`${iso}T12:00:00+00:00`));
+}
+
 async function capped<T>(name: string, ms: number, work: Promise<T> | T): Promise<T | string> {
   let timer: NodeJS.Timeout | undefined;
   try {
@@ -346,6 +369,18 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           closureDays: catalogue?.calendar?.closure_days,
           maxSpanDays: catalogue?.calendar?.max_span_days ?? undefined,
         });
+        const hardClock = hardWindowPhrase(window);
+        const maxSpanDays = catalogue?.calendar?.max_span_days ?? 30;
+        const hardClockNoDate = Boolean(hardClock && window.earliest && !hasDateReference(args.when_phrase));
+        if (hardClockNoDate) {
+          const today = madridDate(now());
+          window = {
+            ...window,
+            date_from: today,
+            date_to: addDays(today, maxSpanDays),
+            earliest: true,
+          };
+        }
         if (laterThanAppointment) {
           const selected = state.upcoming.find((appointment) =>
             appointment.appointment_id === state.request.appointment_id,
@@ -380,6 +415,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         deps.onAvailability?.(availability);
 
         let restrictionNote = '';
+        let afterSpecificDateNote = '';
         const providerRestriction = namedProvider && providerId && availability.slots.length === 0
           ? availability.blocked.find((entry) =>
             (entry.provider_id === providerId || /provider_not_(?:in_network|found)/i.test(entry.restriction)) &&
@@ -418,13 +454,54 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
             recordRequest(state, { blocked_by: blocked });
             clog.warn(`[find_slots] blocked: ${blocked}`);
           }
+          const specificDate = !window.earliest && window.date_from === window.date_to && !hardClock;
+          if (specificDate && !blocked) {
+            const requestedDate = window.date_from;
+            const fallbackTo = addDays(requestedDate, maxSpanDays);
+            const fallback = await api.findAvailability({
+              date_from: addDays(requestedDate, 1),
+              date_to: fallbackTo,
+              provider_id: providerId,
+              specialty_id: specialty,
+              location_id: location,
+              patient_id: state.matched?.patient_id,
+              insurer: plans.length > 0 ? plans : undefined,
+            });
+            deps.onAvailability?.(fallback);
+            if (fallback.slots.length > 0) {
+              availability = fallback;
+              window = {
+                ...window,
+                date_from: addDays(requestedDate, 1),
+                date_to: fallbackTo,
+                earliest: true,
+              };
+              afterSpecificDateNote = `Nothing on ${spokenDate(requestedDate)}. The soonest after that with the same doctor/department is: `;
+            } else {
+              const withdrew = withdrawOpenQuote(state);
+              setNoAvailability(state, `on ${spokenDate(requestedDate)}`, specialty, location, fallbackTo);
+              return `Nothing on ${spokenDate(requestedDate)} or after, through ${spokenDate(fallbackTo)}. Tell the caller plainly that there is nothing available and do not offer another time.${withdrew ? ' The earlier offer is withdrawn — if they want it after all, call find_slots again.' : ''}`;
+            }
+          }
+          if (availability.slots.length > 0) {
+            // The full named day was replaced with the earliest later slot.
+          } else {
           const withdrew = withdrawOpenQuote(state);
-          const hardPhrase = hardWindowPhrase(window);
-          const hardDate = !hardPhrase && /\b(?:after|from|a partir del|a partir de)\b/i.test(args.when_phrase);
-          if (hardPhrase || hardDate) {
+          const hardDate = !hardClock && /\b(?:after|from|a partir del|a partir de)\b/i.test(args.when_phrase);
+          if (hardClockNoDate) {
             const specialtyLabel = specialty ?? 'that specialty';
             const locationLabel = location ? ` at ${siteName(catalogue, location)}` : '';
-            const constraint = hardPhrase ?? `after ${args.when_phrase.replace(/^.*?\b(?:after|from|a partir del|a partir de)\b\s*/i, '')}`;
+            const constraint = window.after_clock
+              ? `from ${formatClock(window.after_clock)}`
+              : hardClock ?? 'in that window';
+            setNoAvailability(state, constraint, specialty, location, window.date_to);
+            return `Nothing ${constraint} for ${specialtyLabel}${locationLabel} on any day the diary covers (through ${spokenDate(window.date_to)}). Tell the caller plainly that there is nothing in that window at all. Do not offer any other time or site unless they ask. If they say nothing else will do, apologise and close the call.${withdrew ? ' The earlier offer is withdrawn — if they want it after all, call find_slots again.' : ''}`;
+          }
+          if (hardClock || hardDate) {
+            const specialtyLabel = specialty ?? 'that specialty';
+            const locationLabel = location ? ` at ${siteName(catalogue, location)}` : '';
+            const constraint = hardClock ?? `after ${args.when_phrase.replace(/^.*?\b(?:after|from|a partir del|a partir de)\b\s*/i, '')}`;
+            setNoAvailability(state, constraint, specialty, location, window.date_to);
             return `Nothing ${constraint} for ${specialtyLabel}${locationLabel} in that window. Tell the caller plainly and ask whether another day, another site, or a different time would do. Do not offer any other time.${withdrew ? ' The earlier offer is withdrawn — if they want it after all, call find_slots for that day again.' : ''}`;
           }
           return (blocked
@@ -432,6 +509,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
             : 'Nothing free in that window. Offer to look at a different day.') +
             (withdrew ? ' The earlier offer is withdrawn — if they want it after all, call find_slots for that day again.' : '') +
             specialtyNote;
+          }
         }
 
         if (state.request.blocked_by) retract(state, 'blocked_by');
@@ -451,7 +529,6 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           return `Nothing free in that window. Offer to look at a different day.${withdrew ? ' The earlier offer is withdrawn — if they want it after all, call find_slots for that day again.' : ''}${specialtyNote}`;
         }
         const wanted = window.part_of_day;
-        const hardClock = hardWindowPhrase(window);
         const hardDate = !hardClock && /\b(?:after|from|a partir del|a partir de)\b/i.test(args.when_phrase);
         const matching = availability.slots.filter((slot) => {
           const inRequestedPart = wanted ? inPart(slot.start_time, wanted) : true;
@@ -468,6 +545,14 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           const specialtyLabel = specialty ?? 'that specialty';
           const locationLabel = location ? ` at ${siteName(catalogue, location)}` : '';
           const withdrew = withdrawOpenQuote(state);
+          if (hardClockNoDate) {
+            const constraint = window.after_clock
+              ? `from ${formatClock(window.after_clock)}`
+              : hardClock ?? 'in that window';
+            setNoAvailability(state, constraint, specialty, location, window.date_to);
+            return `Nothing ${constraint} for ${specialtyLabel}${locationLabel} on any day the diary covers (through ${spokenDate(window.date_to)}). Tell the caller plainly that there is nothing in that window at all. Do not offer any other time or site unless they ask. If they say nothing else will do, apologise and close the call.${withdrew ? ' The earlier offer is withdrawn — if they want it after all, call find_slots again.' : ''}`;
+          }
+          setNoAvailability(state, hardClock ?? `after ${args.when_phrase}`, specialty, location, window.date_to);
           return `Nothing ${constraint} for ${specialtyLabel}${locationLabel} in that window. Tell the caller plainly and ask whether another day, another site, or a different time would do. Do not offer any other time.${withdrew ? ' The earlier offer is withdrawn — if they want it after all, call find_slots for that day again.' : ''}`;
         }
         // Nothing in the half of the day they asked for is worth saying out loud: a
@@ -506,8 +591,9 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         const soonestIntro = restrictionNote
           ? `The soonest with another ${alternateSpecialtyLabel(namedProvider?.specialty_name ?? specialty ?? 'doctor')} is:`
           : 'The soonest there is:';
+        const offerIntro = afterSpecificDateNote || soonestIntro;
         return restrictionNote + (window.earliest
-          ? `${moved}${partNote}${soonestIntro} ${lines[0]}. Offer that one and no other. When they say yes, call accept_slot. Only if they turn it down, ask which day would suit and look again.`
+          ? `${afterSpecificDateNote ? '' : `${moved}${partNote}`}${offerIntro} ${lines[0]}. Offer that one and no other. When they say yes, call accept_slot. Only if they turn it down, ask which day would suit and look again.`
           : `${moved}${partNote}Offer these, and nothing else: ${lines.join('; ')}. When they pick one, call accept_slot.`) + specialtyNote;
       },
     }),
