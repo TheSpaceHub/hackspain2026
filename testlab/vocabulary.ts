@@ -25,14 +25,14 @@ export const VOCABULARIES: Vocabulary[] = [
   {
     id: 'vague',
     label: 'Vague',
-    description: 'Times and places as a person says them: "first thing", "after lunch", "the usual one".',
+    description: 'Says it sideways: "I have been feeling rough", "after work" — plain enough once asked.',
     instructions: [
-      'You say things the way people say them to each other, not the way a diary writes them down. Times are',
-      '"first thing in the morning", "right after lunch", "sometime before I pick the kids up", "end of next',
-      'week"; days are "Tuesday-ish" or "the day after tomorrow"; places are "the usual one", "the one near the',
-      'market"; doctors are "my regular one" and specialties "the bone people". None of it is evasion — it is',
-      'simply how you think about your week. If they offer you an exact time or read a date back, you are happy',
-      'to say yes or no to it; you just would not have come up with it yourself.',
+      'You put things indirectly, the way people do: you say what is going on rather than what you want —',
+      '"I have not been feeling right since the weekend" instead of "I would like to see the doctor" — and you',
+      'give times as parts of the day, "after work", "first thing", "once the kids are at school", rather than',
+      'a clock time. It is not evasion and you are not being difficult: ask you a direct question and you',
+      'answer it plainly, offer you an exact time and you say yes or no to it. You simply would not have put it',
+      'that precisely yourself.',
     ].join(' '),
   },
   {

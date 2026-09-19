@@ -81,7 +81,7 @@ class PersonaCaller implements Caller {
       'WHY YOU RANG — this is the point of the call and everything else is decoration:',
       ...p.objectives.map((o) => `- ${o}`),
       '',
-      'Say what you want in your very first turn, plainly, in one sentence, before anything else. Keep coming',
+      'Bring it up in your very first turn, in one sentence and in your own words, before anything else. Keep coming',
       'back to it until you have it or they have told you that you cannot: if the conversation drifts, you are',
       'the one who drags it back. You want this sorted today.',
       '',
