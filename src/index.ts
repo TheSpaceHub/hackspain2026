@@ -3,6 +3,8 @@ import { initializeLogger } from '@livekit/agents';
 import { WebSocketServer } from 'ws';
 import { CallSession, type Shared } from './call-session.js';
 import { loadClinic } from './clinic.js';
+import { DEFAULT_TOOL_TIMEOUT_MS } from './agent-tools.js';
+import { ClinicApi } from './clinic-api.js';
 import { config } from './config.js';
 import { loadVad } from './models.js';
 import { openStore } from './store/index.js';
@@ -17,14 +19,34 @@ async function main(): Promise<void> {
   // Shared on purpose: one copy of the VAD weights, one catalogue.
   const [vad, clinic] = await Promise.all([loadVad(), loadClinic()]);
   const store = openStore();
+
+  // Abort under the per-tool cap, so a slow API surfaces as a failure the agent can
+  // explain rather than as the tool giving up on a request still in flight.
+  const api = new ClinicApi({
+    baseUrl: config.prosper.baseUrl,
+    apiKey: config.prosper.apiKey,
+    timeoutMs: DEFAULT_TOOL_TIMEOUT_MS - 500,
+  });
+
+  // Doctors, sites, plans and closures are identical all event: parsed once here off the
+  // document `loadClinic` already fetched, so no call ever pays for them.
+  const catalogue = clinic.raw === null ? null : api.primeCatalogue(clinic.raw);
+
   const shared: Shared = {
     vad,
     keyterms: clinic.keyterms,
     clinicBriefing: clinic.briefing,
     store,
+    api,
+    catalogue,
   };
 
   console.log(`[boot] clinic catalogue from ${clinic.source}, ${clinic.keyterms.length} keyterms`);
+  console.log(
+    catalogue
+      ? `[boot] cached ${catalogue.providers.length} providers, ${catalogue.locations.length} sites, ${catalogue.plans.length} plans`
+      : '[boot] no catalogue: lookups still work, catalogue answers do not',
+  );
   console.log(
     config.provider === 'anthropic'
       ? `[boot] llm ${config.anthropic.model} (call effort ${config.anthropic.callEffort}) · decider ${config.anthropic.deciderModel} (effort ${config.anthropic.deciderEffort})`

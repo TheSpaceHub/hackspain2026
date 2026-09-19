@@ -162,6 +162,17 @@ export class ClinicApi {
     return parsed.success ? parsed.data : { providers: [], slots: [], blocked: [] };
   }
 
+  /**
+   * The catalogue as already fetched elsewhere. `loadClinic` pulls the same document at
+   * boot for STT keyterms; priming with its `raw` spends no second request.
+   */
+  primeCatalogue(raw: unknown): Catalogue | null {
+    const parsed = catalogueSchema.safeParse(raw);
+    if (!parsed.success) return null;
+    this.#catalogue = Promise.resolve(parsed.data);
+    return parsed.data;
+  }
+
   /** Generated once and identical all event, so fetched once per process. */
   getCatalogue(): Promise<Catalogue> {
     this.#catalogue ??= this.#get('/api/v1/clinic', {}).then((json) => {
@@ -214,6 +225,17 @@ export function providerOnLeave(provider: Provider, isoDate: string): boolean {
   const end = provider.leave?.end;
   if (!start || !end) return false;
   return isoDate >= start && isoDate <= end;
+}
+
+/**
+ * The API takes ids, the model says words: "general practice" is a 422, `general_practice`
+ * is a diary. Match on the id, the name, or the id with its underscores said as spaces.
+ */
+export function specialtyByName(catalogue: Catalogue, spoken: string): { id: string; name: string } | undefined {
+  const needle = fold(spoken).replace(/[_\s]+/g, ' ');
+  if (!needle) return undefined;
+  const same = (value: string): boolean => fold(value).replace(/[_\s]+/g, ' ') === needle;
+  return catalogue.specialties.find((s) => same(s.id) || same(s.name));
 }
 
 export function locationById(catalogue: Catalogue, id: string): Location | undefined {

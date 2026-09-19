@@ -29,6 +29,8 @@ export interface CallLog {
     frames_out: number;
   };
   transcript: TranscriptTurn[];
+  /** The scratchpad as the decider saw it — the only view of what was written down. */
+  notes?: string;
   decider?: {
     input: { from_number?: string; now: string; turns: number };
     output: DeciderResult['output'];

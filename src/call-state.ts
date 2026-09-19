@@ -213,8 +213,14 @@ export function readCallState(state: CallState): string {
     .join(' ');
   lines.push(`Request: ${request || '(nothing yet)'}`);
 
-  if (state.accepted) lines.push(`Accepted slot: ${state.accepted.start_time} with ${state.accepted.provider_name ?? state.accepted.provider_id} at ${state.accepted.location_id}`);
-  else if (state.quoted.length > 0) lines.push(`Quoted, none accepted: ${state.quoted.map((s) => s.start_time).join(', ')}`);
+  if (state.accepted) {
+    const a = state.accepted;
+    lines.push(
+      `Accepted slot: slot=${a.start_time} provider_id=${a.provider_id} location_id=${a.location_id}` +
+        ` appointment_type_id=${a.appointment_type_id}` +
+        (a.payable_with?.length ? ` payable_with=${a.payable_with.join(',')}` : ''),
+    );
+  } else if (state.quoted.length > 0) lines.push(`Quoted, none accepted: ${state.quoted.map((s) => s.start_time).join(', ')}`);
 
   return lines.join('\n');
 }

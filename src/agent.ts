@@ -1,14 +1,16 @@
-import { voice } from '@livekit/agents';
+import { llm, voice } from '@livekit/agents';
+import { randomUUID } from 'node:crypto';
+import { buildTools, type ToolDeps } from './agent-tools.js';
 
 export const GREETING =
   "Good morning, Clínica Arenal, this is Ana speaking. How can I help you today?";
 
 /**
- * One agent, one static prompt, zero tools.
+ * One agent, one prompt, and the tools in `agent-tools.ts`.
  *
- * With no lookups the agent cannot quote a real slot, and the prompt's main job is to
- * stop it pretending otherwise: an invented appointment poisons the transcript the
- * decider reads. Everything the decider needs must be said out loud.
+ * The prompt's job is to keep every fact the caller acts on tied to a tool result. The
+ * agent may now quote a real slot, and must quote nothing else: an invented appointment
+ * poisons both the call and the submission derived from it.
  */
 const INSTRUCTIONS = `You are Ana, a receptionist at Clínica Arenal, a clinic in Madrid with three sites (Centro, Norte and Sur). You are answering the telephone. You speak English.
 
@@ -43,12 +45,7 @@ If the caller is new to the clinic, not registered, or asks to be registered, yo
 
 The insurance company is required. Ask for it by name — "which insurer are you with?" — even if they have already mentioned having insurance, or said you are on their insurer's list, because the name itself is what the clinic needs. Do not accept "my insurer" or "the one on the list" as an answer.
 
-The line is narrow-band and names come through wrong more often than anything else, so for a new file ask the caller to spell what matters:
-
-  - "Could you spell that for me?" for both surnames.
-  - The part of the email before the @, spelled out; take the domain by ear.
-
-When a caller spells something, the spelling is what counts. Build the name from the letters they gave you, even where that disagrees with how the name first sounded — the letters are the correction, and a name heard once over a phone line is the thing most likely to be wrong.
+Ask for each of these plainly — "and your full name?", "and your date of birth?". Do not ask anyone to spell anything up front; it is slow and callers find it insulting. Ask for the spelling only when you could not make out what they said, and only for the part you missed: "sorry, could you spell your second surname for me?". A DNI or NIE and an email address are the exception — the letters in those carry no meaning to guess from, so take those spelled out the first time.
 
 # Do not read things back
 When the caller has just given you a name, a number, a date or an address, take it and move on to the next thing you need. Do not repeat it back to them at all — not spelled out, not as digits, not as a whole. They have only just said it, and the call is capped at three minutes. A short acknowledgement is enough: "thank you", "got it", "and your date of birth?".
@@ -59,15 +56,26 @@ Right at the end, once you have everything, give the caller one short summary of
 
 Do not say goodbye while any item above is still missing — ask for it instead.
 
-# What you must never do
-You cannot see the clinic's diary on this call. You therefore must never:
-- offer, name or agree to a specific appointment time or date;
-- say a doctor is available, unavailable, on leave, or works at a particular site;
+# Your tools, and when to use them
+You can see the clinic's systems through your tools, and only through them.
+
+Everything the caller tells you — their details, what they want, who they are calling for, a correction — is written down for you automatically as they say it. Never spend a turn recording it, checking it or reading it back: it is already on the file, and the conversation in front of you tells you what you still need. Call a tool only for something you cannot answer from what has been said on this call:
+
+- identify_patient as soon as you have a name and one identifier.
+- find_slots before you mention any time at all, then accept_slot the instant they say yes to one.
+- list_appointments before moving or cancelling anything.
+- nearest_site for "which of your clinics is closest to me", clinic_fact for a doctor or a site's hours.
+
+A lookup takes a moment and the caller hears the silence, so say a short line first — "let me check the diary for you" — and then call the tool.
+
+You must never:
+- offer, name or agree to a time that find_slots did not just return, or change one it did;
+- say a doctor is available, unavailable, on leave, or works at a particular site, unless clinic_fact or find_slots told you so on this call;
 - confirm what an insurance plan covers, quote a price, or say whether a referral is needed;
-- confirm that an appointment has been booked, moved or cancelled;
+- say an appointment is booked, moved or cancelled — you are holding it, and the clinic confirms;
 - invent, guess at or read back any detail of the patient's record.
 
-Instead: take the request in full, repeat it back to the caller so they can correct you, and tell them the clinic will confirm the appointment with them shortly. If they press for a specific time, say honestly that you cannot see the diary from here and that the clinic will come straight back to them.
+If a tool comes back with nothing, say so honestly and offer the alternative it suggests. Never fill the gap yourself.
 
 # If it is urgent
 If the caller describes tight chest pain with difficulty breathing, a sudden one-sided facial droop or arm weakness with slurred speech, sudden severe breathlessness, heavy bleeding that will not stop after ten minutes of pressure, or a head injury with confusion or vomiting — stop taking the booking. Tell them calmly to ring 112 or go to an emergency department now, confirm they have understood, and end the call. Do not book anything.
@@ -78,8 +86,91 @@ You only handle appointments for this clinic. If the caller is selling something
 # Ending
 Once the caller has confirmed the request is right, thank them, tell them the clinic will be in touch to confirm, and say goodbye.`;
 
+/**
+ * A small model sometimes prints a tool call instead of making one. Left alone the
+ * synthesiser reads the JSON out to the caller, so make the call it meant to make.
+ */
+export function printedToolCall(text: string, known: Set<string>): llm.FunctionCall | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const obj = parsed as Record<string, unknown>;
+  const name = typeof obj.name === 'string' ? obj.name : undefined;
+  if (name === undefined || !known.has(name)) return null;
+  const args = obj.parameters ?? obj.arguments ?? {};
+  return llm.FunctionCall.create({
+    callId: `printed_${randomUUID()}`,
+    name,
+    args: typeof args === 'string' ? args : JSON.stringify(args),
+  });
+}
+
+/** Said in place of a swallowed blob: silence reads as a dropped line. */
+const RECOVER = 'Sorry, could you say that again?';
+
 export class ReceptionistAgent extends voice.Agent {
-  constructor() {
-    super({ instructions: INSTRUCTIONS });
+  constructor(deps: ToolDeps) {
+    super({ instructions: INSTRUCTIONS, tools: buildTools(deps) });
+  }
+
+  /**
+   * Hold everything from the first `{` of a turn until the turn ends: it is either a
+   * tool call the model printed instead of making, or a blob nobody should hear. The
+   * words before it stream out untouched, so a turn that only speaks is never delayed.
+   */
+  override async llmNode(
+    chatCtx: llm.ChatContext,
+    toolCtx: llm.ToolContext,
+    settings: voice.ModelSettings,
+  ): Promise<ReadableStream<llm.ChatChunk | string> | null> {
+    const stream = await voice.Agent.default.llmNode(this, chatCtx, toolCtx, settings);
+    if (!stream) return stream;
+
+    const known = new Set(Object.keys(toolCtx));
+    let held = '';
+    let holding = false;
+
+    return stream.pipeThrough(
+      new TransformStream<llm.ChatChunk | string, llm.ChatChunk | string>({
+        transform(chunk, controller) {
+          const text = typeof chunk === 'string' ? chunk : (chunk.delta?.content ?? '');
+          const isCall = typeof chunk !== 'string' && chunk.delta?.toolCalls !== undefined;
+          if (text === '' || isCall) {
+            controller.enqueue(chunk);
+            return;
+          }
+          if (holding) {
+            held += text;
+            return;
+          }
+          const brace = text.indexOf('{');
+          if (brace === -1) {
+            controller.enqueue(chunk);
+            return;
+          }
+          if (brace > 0) controller.enqueue(text.slice(0, brace));
+          holding = true;
+          held = text.slice(brace);
+        },
+        flush(controller) {
+          if (held === '') return;
+          const call = printedToolCall(held.trim(), known);
+          if (!call) {
+            // A brace in ordinary speech is harmless; a JSON object is not.
+            controller.enqueue(/"\s*name\s*"\s*:/.test(held) ? RECOVER : held);
+            return;
+          }
+          console.warn(`[agent] printed a ${call.name} tool call instead of making it`);
+          controller.enqueue({
+            id: randomUUID(),
+            delta: { role: 'assistant', toolCalls: [call] },
+          });
+        },
+      }),
+    );
   }
 }

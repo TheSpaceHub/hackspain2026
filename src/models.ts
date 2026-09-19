@@ -1,4 +1,4 @@
-import type { llm } from '@livekit/agents';
+import type { llm, stt } from '@livekit/agents';
 import * as deepgram from '@livekit/agents-plugin-deepgram';
 import * as openai from '@livekit/agents-plugin-openai';
 import * as silero from '@livekit/agents-plugin-silero';
@@ -16,10 +16,14 @@ export async function loadVad(): Promise<SharedVad> {
 }
 
 /**
- * Workers AI 400s on `tools: []`, which the plugin sends on every turn when the agent has
- * no tools — v0's every turn. No-ops once v1 has real tools.
+ * Two Workers AI departures from the OpenAI shape, both fatal on a call:
+ *
+ * - it 400s on `tools: []`, which the plugin sends on every turn of a toolless agent;
+ * - it 400s (empty body, no message) on an assistant turn whose `content` is `null` —
+ *   which is exactly what it returns for a tool call, so replaying that turn with the
+ *   tool result kills the second pass and the caller hears nothing after the lookup.
  */
-const stripEmptyTools: typeof fetch = async (input, init) => {
+const workersAiQuirks: typeof fetch = async (input, init) => {
   if (init?.method === 'POST' && typeof init.body === 'string') {
     try {
       const body = JSON.parse(init.body) as Record<string, unknown>;
@@ -27,8 +31,13 @@ const stripEmptyTools: typeof fetch = async (input, init) => {
         delete body.tools;
         delete body.tool_choice;
         delete body.parallel_tool_calls;
-        init = { ...init, body: JSON.stringify(body) };
       }
+      if (Array.isArray(body.messages)) {
+        for (const message of body.messages as Record<string, unknown>[]) {
+          if (message.content === null || message.content === undefined) message.content = '';
+        }
+      }
+      init = { ...init, body: JSON.stringify(body) };
     } catch {
       // not ours to touch
     }
@@ -75,23 +84,45 @@ export function createLLM(): llm.LLM {
     client: new OpenAI({
       apiKey: config.cloudflare.apiToken,
       baseURL: config.cloudflare.baseURL,
-      fetch: stripEmptyTools,
+      fetch: workersAiQuirks,
     }),
   });
 }
 
-/** Deepgram takes 8 kHz directly; nothing is upsampled on the way in. */
-export function createSTT(keyterms: string[]): deepgram.STT {
+/**
+ * Deepgram takes 8 kHz directly; nothing is upsampled on the way in.
+ *
+ * Flux ends a turn by deciding the caller has finished rather than by waiting out a
+ * silence timer, and flags it early enough (`eagerEotThreshold`) that the reply is
+ * already being generated while they say their last word. On a nova-3 call that wait
+ * was a second of dead air per turn. Non-Flux models keep the V1 socket.
+ */
+export function createSTT(keyterms: string[]): stt.STT {
+  const model = config.deepgram.sttModel;
+  if (model.startsWith('flux-')) {
+    return new deepgram.STTv2({
+      apiKey: config.deepgram.apiKey,
+      model,
+      // Only the multilingual Flux model takes hints; the English one rejects them.
+      languageHint: model.endsWith('-multi') ? config.deepgram.languageHints : undefined,
+      sampleRate: 8000,
+      keyterms,
+      // Digits as digits, which is what a DNI needs.
+      numerals: true,
+      eotThreshold: config.deepgram.eotThreshold,
+      eagerEotThreshold: config.deepgram.eagerEotThreshold,
+    });
+  }
+
   return new deepgram.STT({
     apiKey: config.deepgram.apiKey,
-    model: config.deepgram.sttModel,
-    language: config.deepgram.language,
+    model,
+    language: config.deepgram.languageHints[0],
     sampleRate: 8000,
     numChannels: 1,
     interimResults: true,
     punctuate: true,
     smartFormat: true,
-    // Digits as digits, which is what a DNI needs.
     numerals: true,
     // Close an utterance on a word gap, not only on silence.
     utteranceEndMs: 1000,

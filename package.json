@@ -12,7 +12,9 @@
     "bench": "tsx test/decider-bench.ts",
     "test:schema": "tsx test/schema.test.ts",
     "test:tools": "tsx test/tools.test.ts",
-    "test": "tsx test/schema.test.ts && tsx test/tools.test.ts && tsx test/audio-output.test.ts",
+    "test:agent": "tsx test/agent-tools.test.ts",
+    "test:extract": "tsx test/extract.test.ts",
+    "test": "tsx test/schema.test.ts && tsx test/tools.test.ts && tsx test/agent-tools.test.ts && tsx test/extract.test.ts && tsx test/audio-output.test.ts",
     "restart": "bash scripts/restart.sh"
   },
   "dependencies": {
