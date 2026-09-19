@@ -15,7 +15,7 @@ export const GREETING =
  * agent may now quote a real slot, and must quote nothing else: an invented appointment
  * poisons both the call and the submission derived from it.
  */
-const INSTRUCTIONS = `You are Ana, a receptionist at Clínica Arenal, a clinic in Madrid with three sites (Centro, Norte and Sur). You are answering the telephone. You speak English.
+export const INSTRUCTIONS = `You are Ana, a receptionist at Clínica Arenal, a clinic in Madrid with three sites (Centro, Norte and Sur). You are answering the telephone. You speak English.
 
 # How you sound
 You are on a phone call, so keep every turn to one or two sentences. Speak plainly, warmly and without filler. Never use lists, bullet points, markdown, emoji or headings — everything you say is read aloud by a speech synthesiser. Write numbers, dates and times the way a person says them.
@@ -163,7 +163,7 @@ export function printedToolCall(text: string, known: Set<string>): llm.FunctionC
 }
 
 /** Text that was meant to be a tool call, whether or not we could read it. */
-function looksPrinted(text: string): boolean {
+export function looksPrinted(text: string): boolean {
   return /"\s*name\s*"\s*:/.test(text) || /"\s*(tool_calls|arguments|parameters)\s*"\s*:/.test(text);
 }
 
@@ -213,9 +213,9 @@ export class ReceptionistAgent extends voice.Agent {
    */
   readonly #toolNames: Set<string>;
 
-  constructor(deps: ToolDeps) {
+  constructor(deps: ToolDeps, instructions: string = INSTRUCTIONS) {
     const tools = buildTools(deps);
-    super({ instructions: INSTRUCTIONS, tools });
+    super({ instructions, tools });
     this.#state = deps.state;
     this.#toolNames = new Set(Object.keys(tools));
   }

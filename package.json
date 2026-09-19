@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "harness": "tsx test/fake-harness.ts",
     "harness:local": "MOCK_PROSPER_URL=http://127.0.0.1:8787 tsx test/fake-harness.ts",
+    "prompt-search": "tsx test/prompt-search/search.ts",
     "test:audio": "tsx test/audio-output.test.ts",
     "test:recorder": "tsx test/recorder.test.ts",
     "bench": "tsx test/decider-bench.ts",
