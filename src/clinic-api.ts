@@ -87,9 +87,27 @@ export const catalogueSchema = z.looseObject({
     .optional(),
   providers: z.array(providerSchema).default([]),
   locations: z.array(locationSchema).default([]),
-  specialties: z.array(z.looseObject({ id: z.string(), name: z.string() })).default([]),
-  appointment_types: z.array(z.looseObject({ id: z.string(), name: z.string() })).default([]),
-  plans: z.array(z.looseObject({ id: z.string(), name: z.string() })).default([]),
+  specialties: z.array(z.looseObject({
+    id: z.string(),
+    name: z.string(),
+    min_age_months: z.number().nullable().default(null),
+    max_age_months: z.number().nullable().default(null),
+    referral_required: z.boolean().default(false),
+    covered_by: z.array(z.looseObject({ id: z.string(), name: z.string() })).default([]),
+  })).default([]),
+  appointment_types: z.array(z.looseObject({
+    id: z.string(),
+    name: z.string(),
+    new_patient_requirement: z.string().nullable().default(null),
+    specialty_id: z.string().nullable().default(null),
+  })).default([]),
+  plans: z.array(z.looseObject({
+    id: z.string(),
+    name: z.string(),
+    uncovered_specialty_names: z.array(z.string()).default([]),
+    uncovered_location_names: z.array(z.string()).default([]),
+    refused_by: z.array(z.string()).default([]),
+  })).default([]),
 });
 export type Catalogue = z.infer<typeof catalogueSchema>;
 
@@ -300,9 +318,11 @@ export function specialtyByName(catalogue: Catalogue, spoken: string): { id: str
 
 /** The plan the caller named, or nothing: "sonita" for sanitas is a 422 on availability. */
 export function planByName(catalogue: Catalogue, spoken: string): { id: string; name: string } | undefined {
+  const planTolerance = (needle: string): number => Math.max(2, Math.floor(needle.length / 4));
   return only(
     catalogue.plans.map((p) => ({ item: p, aliases: [p.id, p.name] })),
     spoken,
+    planTolerance,
   );
 }
 
@@ -357,5 +377,3 @@ export function siteHours(catalogue: Catalogue, locationId: string, isoDate: str
 export function isClosureDay(catalogue: Catalogue, isoDate: string): boolean {
   return (catalogue.calendar?.closure_days ?? []).includes(isoDate);
 }
-
-

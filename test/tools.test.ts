@@ -20,6 +20,7 @@ import {
   recordQuote,
   recordRequest,
   retract,
+  setPlanVocabulary,
   readCallState,
   type QuotedSlot,
 } from '../src/call-state.js';
@@ -179,6 +180,10 @@ check('a type that already agrees is left alone', enforceAppointmentType({ ...bo
 // --- call state ------------------------------------------------------------
 
 const state = createCallState('call-1', '+34612345678');
+setPlanVocabulary([
+  { id: 'cigna', name: 'Cigna' },
+  { id: 'nueva_mutua_sanitaria', name: 'Nueva Mutua Sanitaria' },
+]);
 check('the inbound number is kept, normalized', state.from_number, '612345678');
 check('but it is not assumed to be the patient\'s', state.patient.phone, undefined);
 check('a recorded field reads back normalized', recordPatientField(state, 'national_id', 'X 1 2 3 4 5 6 7 L').value, 'X1234567L');
@@ -217,6 +222,47 @@ check('an ordinal picks off the list we read out', afterQuote(['the first one pl
 check('and so does the last', afterQuote(["I'll take the last one"])?.start_time, tuesday.start_time);
 check('the request phrasing is not a choice', afterQuote(['what is the soonest you have', 'ok', 'thanks', 'bye']), null);
 check('nothing is chosen when nothing was said', afterQuote(["I'll think about it"]), null);
+
+{
+  const nineThirty = quote('2026-09-21T09:30:00+02:00', 'PR3');
+  const noReply = createCallState('call-after-quote');
+  noReply.turns_seen = 2;
+  recordQuote(noReply, [nineThirty]);
+  check(
+    'a request before the quote is not an acceptance',
+    acceptFromTranscript(noReply, [
+      { role: 'user', text: 'Book the soonest appointment with orthopaedics.' },
+      { role: 'assistant', text: 'The soonest is Monday at 9:30 with Dr Peral.' },
+    ]),
+    null,
+  );
+
+  const ordinalReply = createCallState('call-after-ordinal');
+  ordinalReply.turns_seen = 2;
+  recordQuote(ordinalReply, [nineThirty]);
+  check(
+    'an ordinal after the quote is an acceptance',
+    acceptFromTranscript(ordinalReply, [
+      { role: 'user', text: 'Book the soonest appointment with orthopaedics.' },
+      { role: 'assistant', text: 'The soonest is Monday at 9:30 with Dr Peral.' },
+      { role: 'user', text: 'Yes, the first one.' },
+    ])?.start_time,
+    nineThirty.start_time,
+  );
+
+  const clockReply = createCallState('call-after-clock');
+  clockReply.turns_seen = 2;
+  recordQuote(clockReply, [nineThirty]);
+  check(
+    'a clock time after the quote is an acceptance',
+    acceptFromTranscript(clockReply, [
+      { role: 'user', text: 'Book the soonest appointment with orthopaedics.' },
+      { role: 'assistant', text: 'The soonest is Monday at 9:30 with Dr Peral.' },
+      { role: 'user', text: '9 30 please.' },
+    ])?.start_time,
+    nineThirty.start_time,
+  );
+}
 
 const held = createCallState('call-3');
 recordQuote(held, [monday, noon]);

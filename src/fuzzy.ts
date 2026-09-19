@@ -76,7 +76,11 @@ export interface Match<T> {
  * the caller has to be asked rather than guessed at. An empty result means nothing was
  * close enough — and nothing close enough must never be sent to the clinic's API.
  */
-export function closest<T>(candidates: Candidate<T>[], spoken: string): Match<T>[] {
+export function closest<T>(
+  candidates: Candidate<T>[],
+  spoken: string,
+  toleranceFor?: (needle: string) => number,
+): Match<T>[] {
   const needle = fold(spoken);
   if (needle === '') return [];
 
@@ -98,7 +102,7 @@ export function closest<T>(candidates: Candidate<T>[], spoken: string): Match<T>
   const exact = scored.filter((m) => m.distance === 0);
   if (exact.length > 0) return exact;
 
-  const limit = tolerance(needle);
+  const limit = (toleranceFor ?? tolerance)(needle);
   const within = scored.filter((m) => m.distance <= limit).sort((a, b) => a.distance - b.distance);
   if (within.length === 0) return [];
 
@@ -107,7 +111,11 @@ export function closest<T>(candidates: Candidate<T>[], spoken: string): Match<T>
 }
 
 /** The single unambiguous match, or nothing. Use when there is no one to ask. */
-export function only<T>(candidates: Candidate<T>[], spoken: string): T | undefined {
-  const matches = closest(candidates, spoken);
+export function only<T>(
+  candidates: Candidate<T>[],
+  spoken: string,
+  toleranceFor?: (needle: string) => number,
+): T | undefined {
+  const matches = closest(candidates, spoken, toleranceFor);
   return matches.length === 1 ? matches[0]!.item : undefined;
 }

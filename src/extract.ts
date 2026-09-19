@@ -119,6 +119,8 @@ export interface Extractor {
   observe(userText: string, agentText?: string): void;
   /** Everything queued has been applied, or the wait ran out. Called at close. */
   settle(waitMs: number): Promise<void>;
+  /** One final pass over the whole call when registration notes are still incomplete. */
+  finalPass(transcript: { role: 'user' | 'assistant'; text: string }[]): Promise<void>;
 }
 
 export const DEFAULT_EXTRACT_TIMEOUT_MS = 8_000;
@@ -135,7 +137,7 @@ export function createExtractor(deps: ExtractorDeps): Extractor {
   let chain: Promise<void> = Promise.resolve();
   let queued = 0;
 
-  const run = async (userText: string, agentText?: string): Promise<void> => {
+  const run = async (userText: string, agentText?: string, exchangeText?: string): Promise<void> => {
     const startedAt = Date.now();
     try {
       const user = [
@@ -143,16 +145,23 @@ export function createExtractor(deps: ExtractorDeps): Extractor {
         readCallState(state),
         '',
         'The exchange, newest speech last:',
-        agentText ? `Receptionist: ${agentText}` : null,
-        `Caller: ${userText}`,
-      ]
-        .filter((line) => line !== null)
-        .join('\n');
+        exchangeText ?? [
+          agentText ? `Receptionist: ${agentText}` : null,
+          `Caller: ${userText}`,
+        ]
+          .filter((line) => line !== null)
+          .join('\n'),
+      ].join('\n');
 
       const raw = await complete(SYSTEM_PROMPT, user, AbortSignal.timeout(timeoutMs));
       const patch = parsePatch(raw);
-      if (patch) applyPatch(state, patch, userText);
-      else onError(`unparseable patch: ${raw.slice(0, 200)}`);
+      if (patch) {
+        const journalBefore = state.journal.length;
+        applyPatch(state, patch, userText);
+        if (state.journal.length === journalBefore) {
+          clog.warn(`[extract] patch changed nothing: ${raw.replace(/\s+/g, ' ').slice(0, 300)}`);
+        }
+      } else onError(`unparseable patch: ${raw.slice(0, 200)}`);
     } finally {
       const duration = Date.now() - startedAt;
       if (duration > 6_000) clog.warn(`[extract] slow: ${(duration / 1000).toFixed(1)}s`);
@@ -191,6 +200,17 @@ export function createExtractor(deps: ExtractorDeps): Extractor {
         clearTimeout(timer);
       }
     },
+
+    async finalPass(transcript) {
+      const exchange = transcript
+        .map((turn) => `${turn.role === 'assistant' ? 'Receptionist' : 'Caller'}: ${turn.text}`)
+        .join('\n');
+      const heard = transcript
+        .filter((turn) => turn.role === 'user')
+        .map((turn) => turn.text)
+        .join('\n');
+      if (heard) await run(heard, undefined, exchange);
+    },
   };
 }
 
@@ -214,7 +234,9 @@ export function parsePatch(raw: string): ExtractedPatch | null {
     else if (ch === '}' && --depth === 0) {
       try {
         const parsed = patchSchema.safeParse(
-          JSON.parse(raw.slice(start, i + 1), (_key, value) => (value === null ? undefined : value)),
+          liftPatientFields(
+            JSON.parse(raw.slice(start, i + 1), (_key, value) => (value === null ? undefined : value)),
+          ),
         );
         return parsed.success ? parsed.data : null;
       } catch {
@@ -223,6 +245,26 @@ export function parsePatch(raw: string): ExtractedPatch | null {
     }
   }
   return null;
+}
+
+/** The model often writes `{"given_name": …}` flat; the field belongs under `patient`. */
+function liftPatientFields(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  const obj = { ...(value as Record<string, unknown>) };
+  const nested =
+    typeof obj.patient === 'object' && obj.patient !== null && !Array.isArray(obj.patient)
+      ? { ...(obj.patient as Record<string, unknown>) }
+      : {};
+  let lifted = false;
+  for (const field of PATIENT_FIELDS) {
+    if (typeof obj[field] === 'string') {
+      if (nested[field] === undefined) nested[field] = obj[field];
+      delete obj[field];
+      lifted = true;
+    }
+  }
+  if (lifted) obj.patient = nested;
+  return obj;
 }
 
 function tight(text: string): string {

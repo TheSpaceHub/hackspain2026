@@ -8,9 +8,10 @@
  */
 
 import { applyPatch, createExtractor, parsePatch, type Complete } from '../src/extract.js';
-import { createCallState, readCallState, recordMatch } from '../src/call-state.js';
+import { createCallState, readCallState, recordMatch, setPlanVocabulary } from '../src/call-state.js';
 
 let failed = 0;
+setPlanVocabulary([{ id: 'nueva_mutua_sanitaria', name: 'Nueva Mutua Sanitaria' }]);
 function check(name: string, actual: unknown, expected: unknown): void {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
@@ -28,6 +29,16 @@ const replying =
 
 check('a fenced answer is still JSON', parsePatch('```json\n{"intent":"book"}\n```')?.intent, 'book');
 check('prose around it is ignored', parsePatch('Sure! {"intent":"cancel"} hope that helps')?.intent, 'cancel');
+check(
+  'flat patient fields are lifted under patient',
+  parsePatch('{"given_name":"Soledad","first_surname":"Domínguez","insurer":"Sonita"}')?.patient?.first_surname,
+  'Domínguez',
+);
+check(
+  'a flat field does not overwrite a nested one',
+  parsePatch('{"given_name":"X","patient":{"given_name":"Soledad"}}')?.patient?.given_name,
+  'Soledad',
+);
 check('nothing usable is null, never a guess', parsePatch('I could not find anything'), null);
 check('a key outside the schema is dropped, not fatal', parsePatch('{"intent":"book","mood":"cross"}')?.intent, 'book');
 check('an invalid enum voids the patch rather than writing junk', parsePatch('{"intent":"chat"}'), null);
@@ -252,6 +263,26 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
   await extractor.settle(1_000);
   check('a failed extraction is logged, not thrown into the call', errors.length, 1);
   check('and the notes are merely empty', state.request.intent, undefined);
+}
+
+{
+  const state = createCallState('call-final-pass');
+  state.request.intent = 'register';
+  const extractor = createExtractor({
+    state,
+    complete: () => Promise.resolve(
+      '{"patient":{"given_name":"Ana","first_surname":"Ruiz","national_id":"48064716Y","date_of_birth":"1990-03-14","phone":"600999888","email":"ana@example.com"}}',
+    ),
+  });
+  await extractor.finalPass([
+    { role: 'assistant', text: 'What is your full name and date of birth?' },
+    { role: 'user', text: 'Ana Ruiz, 14 March 1990.' },
+    { role: 'assistant', text: 'And your phone and email?' },
+    { role: 'user', text: 'My phone is 600999888 and my email is ana@example.com.' },
+  ]);
+  check('the final transcript pass fills registration notes', state.patient.given_name, 'Ana');
+  check('the final transcript pass fills the date', state.patient.date_of_birth, '1990-03-14');
+  check('the final transcript pass fills contact details', state.patient.phone, '600999888');
 }
 
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);

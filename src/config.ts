@@ -94,4 +94,6 @@ export const config = {
   submitReserveMs: 6_000,
 } as const;
 
+export const SILENCE_NUDGE_MS = 7_000;
+
 export type Config = typeof config;
