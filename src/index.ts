@@ -10,6 +10,7 @@ import { config } from './config.js';
 import { loadVad } from './models.js';
 import { openStore } from './store/index.js';
 import { tagLiveKitLogger } from './log.js';
+import { simFetch, simHoldsEnabled } from './sim-holds.js';
 
 /** One process, one WebSocket server, one headless AgentSession per socket. */
 async function main(): Promise<void> {
@@ -29,7 +30,9 @@ async function main(): Promise<void> {
     baseUrl: config.prosper.baseUrl,
     apiKey: config.prosper.apiKey,
     timeoutMs: DEFAULT_TOOL_TIMEOUT_MS - 500,
+    ...(simHoldsEnabled ? { fetch: simFetch() } : {}),
   });
+  if (simHoldsEnabled) console.log(`[boot] SIM_HOLDS=1: holding slots on the sim at ${config.prosper.baseUrl}`);
 
   // Doctors, sites, plans and closures are identical all event: parsed once here off the
   // document `loadClinic` already fetched, so no call ever pays for them.
