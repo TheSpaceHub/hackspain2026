@@ -45,7 +45,10 @@ export class Store extends EventEmitter {
     }
   }
 
-  query(name: 'recent' | 'call', opts: { call_id?: string; limit?: number } = {}): Promise<unknown> {
+  query(
+    name: 'recent' | 'call' | 'stats',
+    opts: { call_id?: string; limit?: number; since?: string; bucket_ms?: number } = {},
+  ): Promise<unknown> {
     const id = this.#nextId++;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
