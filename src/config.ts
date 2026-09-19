@@ -46,6 +46,14 @@ export const config = {
     get deciderModel() {
       return opt('CLOUDFLARE_DECIDER_MODEL', '@cf/nvidia/nemotron-3-120b-a12b');
     },
+    /**
+     * The scratchpad extractor. It runs beside the call rather than inside a turn, so it
+     * is picked for cost and not for latency; small is enough to copy a spelled-out DNI
+     * out of one line of speech.
+     */
+    get extractorModel() {
+      return opt('CLOUDFLARE_EXTRACTOR_MODEL', '@cf/meta/llama-3.1-8b-instruct-fast');
+    },
   },
   /**
    * Claude when a key is present, Cloudflare otherwise. The decider is one offline
@@ -64,9 +72,16 @@ export const config = {
   },
   deepgram: {
     apiKey: req('DEEPGRAM_API_KEY'),
-    sttModel: opt('DEEPGRAM_STT_MODEL', 'nova-3'),
+    // Flux is turn-based: it decides the caller has finished rather than waiting out a
+    // silence timer, and tells us early enough to start generating before they have.
+    sttModel: opt('DEEPGRAM_STT_MODEL', 'flux-general-multi'),
     ttsModel: opt('DEEPGRAM_TTS_MODEL', 'aura-2-thalia-en'),
-    language: opt('DEEPGRAM_LANGUAGE', 'en'),
+    /** Hints, not a lock: callers switch between the two mid-sentence. */
+    languageHints: opt('DEEPGRAM_LANGUAGE_HINTS', 'es,en').split(','),
+    /** How sure Flux must be that the turn ended. Lower is faster and interrupts more. */
+    eotThreshold: Number(opt('DEEPGRAM_EOT_THRESHOLD', '0.7')),
+    /** Below it, generation starts on a guess and is thrown away if they keep talking. */
+    eagerEotThreshold: Number(opt('DEEPGRAM_EAGER_EOT_THRESHOLD', '0.5')),
   },
   port: Number(opt('PORT', '7860')),
   logDir: opt('LOG_DIR', './calls'),

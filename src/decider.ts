@@ -6,10 +6,11 @@ import { deciderJsonSchema, deciderOutputSchema, type Action, type DeciderOutput
 import { formatTranscript, type TranscriptTurn } from './transcript.js';
 
 /**
- * One LLM call, one action, on the transcript alone.
+ * One LLM call, one action, on the transcript plus what the call established.
  *
- * With no lookups there is no patient_id or slot, so almost every call correctly ends in
- * no_action. Only a red-flag symptom and an out-of-scope caller are decidable here.
+ * The scratchpad is what makes book, reschedule and cancel reachable: the patient_id, the
+ * appointment_id and the accepted slot are the strings the tools returned during the
+ * call, so the decider quotes them rather than re-deriving them from speech.
  */
 
 export interface DeciderInput {
@@ -19,6 +20,8 @@ export interface DeciderInput {
   now: Date;
   /** Standing clinic facts, cached at boot. */
   clinicBriefing?: string;
+  /** `readCallState`: what the lookups established, already normalized. */
+  callState?: string;
 }
 
 export interface DeciderResult {
@@ -36,11 +39,15 @@ const SYSTEM_PROMPT = `You are the post-call decision step for Clínica Arenal's
 
 # What you can and cannot produce
 
-You have no live access to the clinic's records on this call. That rules out exactly three actions, because each needs an identifier only a lookup can give you:
-  - "book" needs a patient_id, provider_id and a real free slot.
-  - "reschedule" needs the appointment_id of an existing booking.
+The agent looked the caller up during the call. What it established is in "What the call established" below, and those strings are authoritative: they came from the clinic's own systems, and the transcript is only speech about them. Where the two disagree, the established value wins.
+
+Three actions need identifiers that only appear there:
+  - "book" needs patient_id, provider_id, location_id, appointment_type_id, slot and policy_id — all six off the accepted slot and the matched patient, copied character for character.
+  - "reschedule" needs the appointment_id of the existing booking, plus the accepted slot and policy_id.
   - "cancel" needs that same appointment_id.
-Never emit one of those three, and never invent an id or a slot to satisfy one.
+Emit one only when every field it needs is present there. If any is missing — no patient identified, no slot accepted, no appointment_id — do not emit it and never invent a value to fill the gap: fall back to no_action and name what was missing in notes.
+The slot is the ISO timestamp exactly as recorded. Never reformat it, round it, or rebuild it from what the caller said.
+policy_id is the plan the appointment is billed to, and it is given to you on the "Billing:" line as policy_id=… — copy that id. It is never a plan's spoken name, never a plan the caller mentioned that the line does not carry, and never guessed from the insurer on the record: that line has already been checked against the plans the accepted slot can be billed against. If it says (none established), do not book — return no_action saying no billable plan was confirmed.
 
 Everything else is reachable from the transcript, and you should use it:
 
@@ -52,6 +59,7 @@ Fields: given_name, first_surname, second_surname, national_id, date_of_birth, p
     The letter is checked against the digits by the clinic, so it must be the one the caller actually said. If the transcript genuinely never contains a letter at all, you cannot register — say so in notes and fall back to no_action.
   - date_of_birth is YYYY-MM-DD; the caller will say it in words ("fourteenth of March 1985" is "1985-03-14").
   - phone is digits only, no spaces: what the caller gave, else the number they are calling from.
+  - email is built only out of what the caller dictated, character for character. "at" is the @ and "dot" is a ".", and there is no full stop anywhere they did not say "dot": "Joaquin Gonzalez 24 at Hotmail dot com" is "joaquingonzalez24@hotmail.com", NOT "joaquin.gonzalez24@hotmail.com". Never insert a separator because addresses usually have one.
   - Normalise every field the same way. The transcript is speech, so spacing, punctuation and spelled-out words are expected — convert them, never reject over them.
   - insurer is the plan's id from the list below, lowercase with underscores — "cigna", not "Cigna"; "nueva_mutua", not "Nueva Mutua Sanitaria". A spoken name is rejected.
   - The clinic rejects the whole submission if date_of_birth is not a real date or email is not a string, and a rejected submission records nothing at all. So: never send null for those two. If the transcript truly lacks a date of birth, do not register — return no_action and say which field was missing in notes. If it lacks only an email, send "" for it.
@@ -114,6 +122,9 @@ export async function decide(input: DeciderInput, budgetMs: number): Promise<Dec
   const userPrompt = [
     `Current time in Europe/Madrid: ${madridNow}`,
     `Caller's number: ${input.fromNumber ?? '(withheld)'}`,
+    '',
+    'What the call established (authoritative):',
+    input.callState?.trim() || '(nothing was looked up)',
     '',
     'Transcript:',
     input.transcript.length > 0 ? formatTranscript(input.transcript) : '(no speech was transcribed)',

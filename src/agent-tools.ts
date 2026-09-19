@@ -1,0 +1,344 @@
+/**
+ * The tools the agent may call mid-turn.
+ *
+ * Two rules shape all of them. A caller hears every millisecond, so each tool is one
+ * request with a hard cap and returns a single short line the agent can read aloud
+ * unchanged — and a tool exists at all only when the agent cannot answer without its
+ * result, since every call costs a second pass of the dialogue model before the caller
+ * hears a word. Note-taking does not qualify and runs beside the call in `extract.ts`.
+ * And nothing a caller acts on is invented: a slot, a doctor, a site or a plan is read
+ * off the API or the cached catalogue, and the exact strings behind it are kept in call
+ * state so the submission at close quotes them rather than the transcript.
+ */
+
+import { llm } from '@livekit/agents';
+import { z } from 'zod';
+import {
+  locationById,
+  providersByName,
+  siteHours,
+  specialtyByName,
+  type Availability,
+  type Catalogue,
+  type ClinicApi,
+} from './clinic-api.js';
+import {
+  knownPlans,
+  recordAccepted,
+  recordMatch,
+  recordQuote,
+  recordRequest,
+  type CallState,
+  type QuotedSlot,
+} from './call-state.js';
+import { geocodeMadrid, rankSites } from './nearest-site.js';
+import { resolveWhen } from './when.js';
+
+export interface ToolDeps {
+  state: CallState;
+  api: ClinicApi;
+  catalogue: Catalogue | null;
+  /** Kept so the decider can name the standing rule that refused a booking. */
+  onAvailability?: (availability: Availability) => void;
+  now?: () => Date;
+  /** Per-tool wall clock. Past it the agent is told to move on, mid-flight or not. */
+  timeoutMs?: number;
+}
+
+/**
+ * A tool that has not answered by now is a tool the caller is listening to silence for:
+ * every millisecond past this is dead air on the line, and a lookup that eventually
+ * arrives is worth less than a sentence that arrives on time. The agent gets a line it
+ * can say out loud, and the request is left to settle or fail on its own.
+ */
+export const DEFAULT_TOOL_TIMEOUT_MS = 4_000;
+
+const SLOW = 'That is taking too long to come back. Tell them the system is slow, and either try again or take their number.';
+
+async function capped<T>(name: string, ms: number, work: Promise<T> | T): Promise<T | string> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve(work).catch((err: unknown) => {
+        console.error(`[tool ${name}] ${String(err)}`);
+        return 'That lookup failed. Say the system is playing up, and offer to take their number.';
+      }),
+      new Promise<string>((resolve) => {
+        timer = setTimeout(() => resolve(SLOW), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Small models fill required-looking fields with `"unknown"` rather than leaving them
+ * out, and looking a patient called Unknown up is a wasted second of the caller's time.
+ */
+const PLACEHOLDERS = new Set(['unknown', 'n/a', 'na', 'none', 'null', 'undefined', '']);
+
+function real(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return PLACEHOLDERS.has(value.trim().toLowerCase()) ? undefined : value;
+}
+
+export function buildTools(deps: ToolDeps): llm.ToolContextLike {
+  const { state, api, catalogue } = deps;
+  const now = deps.now ?? ((): Date => new Date());
+  const timeoutMs = deps.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
+
+  const tools = {
+    identify_patient: llm.tool({
+      description:
+        'Look the patient up in the clinic directory. Call it as soon as you have a name plus one of: DNI/NIE, date of birth, or phone number. Two people share a name more often than you would think, so give everything you have.',
+      parameters: z.object({
+        name: z.string().optional().describe('Full name as the caller said it'),
+        national_id: z.string().optional().describe('DNI or NIE including the letter'),
+        date_of_birth: z.string().optional().describe('YYYY-MM-DD'),
+        phone: z.string().optional().describe('Spanish phone number'),
+      }),
+      execute: async (args) => {
+        const query = {
+          name: real(args.name),
+          national_id: real(args.national_id) ? state.patient.national_id ?? args.national_id : undefined,
+          date_of_birth: real(args.date_of_birth),
+          phone: real(args.phone) ?? state.patient.phone,
+        };
+        if (!query.name && !query.national_id && !query.date_of_birth && !query.phone) {
+          return 'Nothing to search on yet — ask for a name and one identifier.';
+        }
+        const matches = await api.findPatient(query);
+        if (matches.length === 0) return 'No record found. Treat them as a new patient unless they insist otherwise.';
+        if (matches.length > 1) {
+          return `${matches.length} people match that. Ask for their date of birth to tell them apart.`;
+        }
+        const patient = matches[0]!;
+        recordMatch(state, patient);
+        const visited = patient.has_visited_before ? 'has been seen here before' : 'has never been seen here';
+        return `Found ${[patient.given_name, patient.first_surname].filter(Boolean).join(' ')}, ${visited}, plan on record ${patient.insurer ?? 'none'}. Do not read this back.`;
+      },
+    }),
+
+    find_slots: llm.tool({
+      description:
+        'The real diary. Call it before you offer any time at all, then read back only the times it returns. Warn the caller you are checking first — it takes a moment.',
+      parameters: z.object({
+        when_phrase: z
+          .string()
+          .describe('The caller\'s words for when they want to come, e.g. "next Tuesday afternoon" or "as soon as possible"'),
+        specialty_id: z.string().optional(),
+        provider_name: z.string().optional(),
+        location_id: z.string().optional(),
+      }),
+      execute: async (args) => {
+        // The model says "general practice" and "Centro"; the diary takes
+        // `general_practice` and `loc_centro`, and rejects the whole query otherwise. A
+        // filter we cannot resolve is dropped rather than sent: a wider search still
+        // answers the caller, a 422 does not.
+        const saidSpecialty = real(args.specialty_id);
+        const saidLocation = real(args.location_id);
+        const specialty =
+          saidSpecialty && catalogue ? specialtyByName(catalogue, saidSpecialty)?.id : saidSpecialty;
+        const location =
+          saidLocation && catalogue ? locationById(catalogue, saidLocation)?.id : saidLocation;
+
+        const request = recordRequest(state, {
+          when_phrase: args.when_phrase,
+          specialty_id: specialty,
+          provider_name: args.provider_name,
+          location_id: location,
+        });
+
+        let providerId = request.provider_id;
+        if (args.provider_name && catalogue) {
+          const found = providersByName(catalogue, args.provider_name);
+          if (found.length > 1) {
+            return `More than one doctor answers to that name: ${found.map((p) => `${p.name} in ${p.specialty_name ?? 'unknown'}`).join(', ')}. Ask which one they mean.`;
+          }
+          if (found.length === 1) {
+            providerId = found[0]!.id;
+            recordRequest(state, { provider_id: providerId });
+          }
+        }
+
+        const window = resolveWhen(args.when_phrase, now(), {
+          locationId: location ?? request.location_id,
+          closureDays: catalogue?.calendar?.closure_days,
+          maxSpanDays: catalogue?.calendar?.max_span_days ?? undefined,
+        });
+        if (window.part_of_day) recordRequest(state, { part_of_day: window.part_of_day });
+
+        const availability = await api.findAvailability({
+          date_from: window.date_from,
+          date_to: window.date_to,
+          provider_id: providerId,
+          specialty_id: specialty ?? request.specialty_id,
+          location_id: location ?? request.location_id,
+          patient_id: state.matched?.patient_id,
+          insurer: request.insurers.length > 0 ? request.insurers : undefined,
+        });
+        deps.onAvailability?.(availability);
+
+        if (availability.slots.length === 0) {
+          const blocked = availability.blocked[0]?.restriction;
+          return blocked
+            ? `Nothing bookable: ${blocked}. Tell the caller plainly and do not offer a time.`
+            : 'Nothing free in that window. Offer to look at a different day.';
+        }
+
+        const wanted = window.part_of_day;
+        const matching = wanted
+          ? availability.slots.filter((s) => inPart(s.start_time, wanted))
+          : availability.slots;
+        const shortlist = (matching.length > 0 ? matching : availability.slots).slice(0, 3);
+
+        const quoted: QuotedSlot[] = shortlist.map((s) => ({
+          provider_id: s.provider_id,
+          provider_name: s.provider_name ?? undefined,
+          location_id: s.location_id,
+          appointment_type_id: s.appointment_type_id,
+          start_time: s.start_time,
+          payable_with: s.payable_with ?? undefined,
+        }));
+        recordQuote(state, quoted);
+
+        const moved = window.adjusted_from ? `The day they asked for is closed, so this is from ${window.adjusted_from}. ` : '';
+        const lines = quoted.map(
+          (s, i) =>
+            `${i + 1}. ${speakTime(s.start_time)} with ${s.provider_name ?? s.provider_id} at ${siteName(catalogue, s.location_id)}`,
+        );
+        return `${moved}Offer these, and nothing else: ${lines.join('; ')}. When they pick one, call accept_slot.`;
+      },
+    }),
+
+    accept_slot: llm.tool({
+      description: 'The caller said yes to one of the times find_slots returned. Call it straight away, before anything else.',
+      parameters: z.object({ choice: z.number().int().describe('1, 2 or 3 as you read them out') }),
+      execute: async (args) => {
+        const slot = state.quoted[args.choice - 1];
+        if (!slot) return 'That is not one of the times you offered. Read the list again or call find_slots.';
+        recordAccepted(state, slot);
+        const held = `Held ${speakTime(slot.start_time)}.`;
+        // The diary priced this slot against the plans it knew about. None of them
+        // means the visit cannot be billed yet — and a caller with a second policy is
+        // exactly the case, so ask for it rather than booking it to the wrong insurer.
+        const payable = slot.payable_with ?? [];
+        if (payable.length > 0 && !knownPlans(state).some((plan) => payable.includes(plan))) {
+          return `${held} It cannot be billed to the plan we have for them. Ask whether they hold any other insurance policy, and take the insurer's name.`;
+        }
+        return `${held} Confirm it back once, in one sentence, and move on.`;
+      },
+    }),
+
+    list_appointments: llm.tool({
+      description:
+        'The patient\'s appointments already in the diary. Needed before moving or cancelling one: it is the only place the appointment reference comes from.',
+      execute: async () => {
+        const patientId = state.matched?.patient_id;
+        if (!patientId) return 'Identify the patient first with identify_patient.';
+        const appointments = await api.getPatientAppointments(patientId, 'upcoming');
+        if (appointments.length === 0) return 'Nothing booked for them. Nothing to move or cancel.';
+        recordRequest(state, { appointment_id: appointments[0]!.appointment_id });
+        return appointments
+          .map((a) => `${speakTime(a.start_time)} at ${siteName(catalogue, a.location_id ?? '')}`)
+          .join('; ');
+      },
+    }),
+
+    nearest_site: llm.tool({
+      description: 'Which of the clinic\'s sites is closest to an address the caller gives you.',
+      parameters: z.object({
+        address: z.string().describe('The street address or neighbourhood the caller named'),
+        specialty_id: z.string().optional().describe('Only rank sites that offer this'),
+      }),
+      execute: async (args) => {
+        if (!catalogue) return 'Cannot check that from here. Take the request and let the clinic come back to them.';
+        const address = real(args.address);
+        if (address === undefined || address.split(/\s+/).length < 2) {
+          return 'That is not an address. Ask them which street or neighbourhood they are in before calling this again.';
+        }
+        const origin = await geocodeMadrid(address);
+        if (!origin) return 'Could not place that address. Ask which part of Madrid they are in.';
+        const ranked = rankSites(catalogue, origin, { specialty_id: args.specialty_id });
+        if (ranked.length === 0) return 'No site offers that. Say so plainly.';
+        const [first] = ranked;
+        return `Nearest is ${first!.name}, about ${first!.km} kilometres away.`;
+      },
+    }),
+
+    clinic_fact: llm.tool({
+      description:
+        'A standing fact about the clinic: what a named doctor does and where they work, or a site\'s opening hours on a date. Never answer either from memory.',
+      parameters: z.object({
+        doctor_name: z.string().optional(),
+        location_id: z.string().optional(),
+        date: z.string().optional().describe('YYYY-MM-DD, with location_id, for opening hours'),
+      }),
+      execute: async (args) => {
+        if (!catalogue) return 'Cannot check that from here. Tell the caller the clinic will confirm.';
+        if (args.doctor_name) {
+          const found = providersByName(catalogue, args.doctor_name);
+          if (found.length === 0) return 'No doctor of that name here. Say so rather than guessing.';
+          return found
+            .map(
+              (p) =>
+                `${p.name}, ${p.specialty_name ?? 'unknown specialty'}, at ${p.location_names.join(' and ') || 'unknown site'}${p.languages.length > 0 ? `, speaks ${p.languages.join(' and ')}` : ''}`,
+            )
+            .join('; ');
+        }
+        if (args.location_id) {
+          const site = locationById(catalogue, args.location_id);
+          if (!site) return 'No site by that name.';
+          if (args.date) {
+            const hours = siteHours(catalogue, args.location_id, args.date);
+            return hours.length > 0
+              ? `${site.name} is open ${hours.join(' and ')} that day.`
+              : `${site.name} is closed that day.`;
+          }
+          return `${site.name}${site.address ? `, ${site.address}` : ''}.`;
+        }
+        return 'Ask about a doctor or a site.';
+      },
+    }),
+  };
+
+  // One cap, applied once, so no tool can be written without one.
+  type Executable = { execute: (args: never, ctx: never) => unknown };
+  for (const [name, tool] of Object.entries(tools as Record<string, Executable>)) {
+    const execute = tool.execute.bind(tool);
+    tool.execute = (args, ctx) => capped(name, timeoutMs, execute(args, ctx)) as never;
+  }
+  return tools;
+}
+
+function siteName(catalogue: Catalogue | null, locationId: string): string {
+  if (!catalogue) return locationId;
+  return locationById(catalogue, locationId)?.name ?? locationId;
+}
+
+const MADRID_TIME = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Madrid',
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true,
+});
+
+/** Read aloud, never as an ISO string; the exact string stays in call state. */
+export function speakTime(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return iso;
+  return MADRID_TIME.format(at).replace(' at ', ', ');
+}
+
+function inPart(iso: string, part: 'morning' | 'afternoon'): boolean {
+  const hour = Number(
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Madrid', hour: '2-digit', hour12: false }).format(
+      new Date(iso),
+    ),
+  );
+  return part === 'morning' ? hour < 14 : hour >= 14;
+}
