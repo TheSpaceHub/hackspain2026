@@ -159,9 +159,9 @@ export async function dial(opts: DialOptions): Promise<CallOutcome> {
     },
   });
 
-  // A phone line always sends: the bed under the caller is on the wire even when
-  // they are not speaking, which is the whole of problem 12.
-  const quiet = mix(new Int16Array(SAMPLE_RATE), bedOf, 7919 + opts.copy);
+  // A phone line always sends, but it sends nothing: the room is only ever heard
+  // under the caller's own words, never over the agent or into a gap in the call.
+  const quiet = new Int16Array(SAMPLE_RATE);
   let bedAt = 0;
   let pending: Int16Array[] = [];
 
@@ -237,9 +237,9 @@ export async function dial(opts: DialOptions): Promise<CallOutcome> {
       if (line === null) break;
       outcome.caller_turns.push(line);
       // Dead air before the turn is still the line being held open, not a gap in it.
-      if (behaviour.lead_ms > 0) await playTurn(mix(silence(behaviour.lead_ms), bedOf, 31 + turn));
+      if (behaviour.lead_ms > 0) await playTurn(silence(behaviour.lead_ms));
       await playTurn(mix(await say(line, voice), bedOf, 104729 + turn + opts.copy * 31));
-      if (behaviour.tail_ms > 0) await playTurn(mix(silence(behaviour.tail_ms), bedOf, 67 + turn));
+      if (behaviour.tail_ms > 0) await playTurn(silence(behaviour.tail_ms));
       if (behaviour.barge_in) {
         // Cut in on whatever the agent is saying: just long enough to hear its shape.
         await Promise.race([feed.nextReply(callId, heardBefore, 6_000), sleep(2_500)]);

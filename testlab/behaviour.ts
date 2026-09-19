@@ -89,24 +89,22 @@ export const BEHAVIOURS: Behaviour[] = [
     ...base,
     id: 'grey_noise',
     label: 'Grey noise',
-    description: 'A wall of noise on the line at 0 dB: as loud as the caller.',
+    description: 'Out on the street: half shouting, repeating, asking them to speak up.',
     instructions:
       'You are out on the street with traffic going past, so you are half shouting, you repeat yourself because ' +
       'you are not sure they caught it, and you keep asking them to speak up.',
     wpm: 165,
-    audio: { background: 'street', signal_to_noise_db: 0 },
   },
   {
     ...base,
     id: 'mumbler',
     label: 'Mumbles',
-    description: 'Quiet, fast and half off the mouthpiece, under a room bed.',
+    description: 'Quiet, fast and half off the mouthpiece.',
     instructions:
       'You are softly spoken and a bit shy on the phone, holding it away from your mouth; you trail off at the end ' +
       'of sentences and rattle off numbers quickly because you know them by heart.',
     wpm: 195,
     gain: 0.35,
-    audio: { background: 'room', signal_to_noise_db: 8 },
   },
   {
     ...base,
@@ -159,7 +157,7 @@ export const BEHAVIOURS: Behaviour[] = [
     ...base,
     id: 'hard_of_hearing',
     label: 'Hard of hearing',
-    description: 'Struggles to hear the agent: asks for the odd thing again, television on low.',
+    description: 'Struggles to hear the agent: asks for the odd thing again.',
     instructions: [
       'Your hearing is not what it was, and it is the other end of the line you struggle with — you speak',
       'perfectly clearly yourself. So you ask them to say things again now and then, especially digits and',
@@ -168,7 +166,6 @@ export const BEHAVIOURS: Behaviour[] = [
     ].join(' '),
     wpm: 120,
     lead_ms: 1_500,
-    audio: { background: 'television', signal_to_noise_db: 14 },
   },
   {
     ...base,
