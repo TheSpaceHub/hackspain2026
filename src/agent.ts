@@ -1,6 +1,7 @@
 import { llm, voice } from '@livekit/agents';
 import { randomUUID } from 'node:crypto';
 import { buildTools, type ToolDeps } from './agent-tools.js';
+import type { CallState } from './call-state.js';
 
 export const GREETING =
   "Good morning, Clínica Arenal, this is Ana speaking. How can I help you today?";
@@ -19,13 +20,16 @@ You are on a phone call, so keep every turn to one or two sentences. Speak plain
 
 Let the caller lead. Ask one question at a time and wait for the answer. If they interrupt you, stop and listen.
 
+If the line has been quiet for a while, say something — "are you still there?" — rather than waiting it out. Callers hang up on silence.
+
 # What you must find out
 Work these into the conversation naturally. You do not need them in this order, and you should not ask for something the caller has already told you.
 
 1. Who is calling, and whether they are the patient themselves or calling for someone else. If it is for someone else, get the patient's name too.
 2. The patient's full name, and one identifier: their DNI or NIE number, or the phone number the clinic has for them.
    A DNI or NIE is eight digits followed by a single letter, and the letter is part of it. If the caller gives you the digits but not the letter, ask for the letter before moving on. Do not read the number back to them.
-3. What they want: to book an appointment, to move one, to cancel one, or to ask a question.
+   If the clinic's file for this caller is already in front of you, they are identified and you ask for none of this. Greet them by their first name and carry on. Ask for a name or an identifier only if there is no file, or they tell you the file is not them.
+3. What they want: to book an appointment, to move one, to cancel one, or to ask a question. Ask this early — before any identity question you do not still need. A call that runs out of time on who they are has helped nobody.
 4. Which specialty they need, or — if they describe a problem rather than a specialty — what the problem is, in their words. Also note any doctor or site they ask for by name.
 5. When they would like to come: a particular day, a part of the day, or the soonest available.
 6. Which insurance they are covered by, and whether they hold a second policy as well as that one. Ask even if they have already named one — a patient may hold two, and only the one they tell you about on this call can be used.
@@ -87,34 +91,118 @@ You only handle appointments for this clinic. If the caller is selling something
 Once the caller has confirmed the request is right, thank them, tell them the clinic will be in touch to confirm, and say goodbye.`;
 
 /**
- * A small model sometimes prints a tool call instead of making one. Left alone the
- * synthesiser reads the JSON out to the caller, so make the call it meant to make.
+ * The first balanced `{…}` in the text, ignoring braces inside strings. The model
+ * wraps its printed calls in prose, code fences and tool tags, so parsing the whole
+ * buffer fails on text that holds a perfectly good call.
  */
-export function printedToolCall(text: string, known: Set<string>): llm.FunctionCall | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return null;
+export function firstJsonObject(text: string): string | undefined {
+  const start = text.indexOf('{');
+  if (start === -1) return undefined;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (escaped) {
+      escaped = false;
+    } else if (ch === '\\') {
+      escaped = true;
+    } else if (ch === '"') {
+      inString = !inString;
+    } else if (!inString && ch === '{') {
+      depth++;
+    } else if (!inString && ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
   }
-  if (typeof parsed !== 'object' || parsed === null) return null;
-  const obj = parsed as Record<string, unknown>;
+  return undefined;
+}
+
+/** `{name, parameters}`, or one of the wrappers the model puts around it. */
+function callFrom(value: unknown, known: Set<string>): llm.FunctionCall | undefined {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const call = callFrom(item, known);
+      if (call) return call;
+    }
+    return undefined;
+  }
+  if (typeof value !== 'object' || value === null) return undefined;
+  const obj = value as Record<string, unknown>;
+  if (obj.function !== undefined) return callFrom(obj.function, known);
+  if (obj.tool_calls !== undefined) return callFrom(obj.tool_calls, known);
+
   const name = typeof obj.name === 'string' ? obj.name : undefined;
-  if (name === undefined || !known.has(name)) return null;
+  if (name === undefined || !known.has(name)) return undefined;
   const args = obj.parameters ?? obj.arguments ?? {};
   return llm.FunctionCall.create({
     callId: `printed_${randomUUID()}`,
     name,
+    // Llama writes the arguments as an object on some turns and as a JSON string on others.
     args: typeof args === 'string' ? args : JSON.stringify(args),
   });
 }
 
-/** Said in place of a swallowed blob: silence reads as a dropped line. */
-const RECOVER = 'Sorry, could you say that again?';
+/**
+ * A small model sometimes prints a tool call instead of making one. Left alone the
+ * synthesiser reads the JSON out to the caller, so make the call it meant to make.
+ */
+export function printedToolCall(text: string, known: Set<string>): llm.FunctionCall | null {
+  const json = firstJsonObject(text);
+  if (json === undefined) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  return callFrom(parsed, known) ?? null;
+}
+
+/** Text that was meant to be a tool call, whether or not we could read it. */
+function looksPrinted(text: string): boolean {
+  return /"\s*name\s*"\s*:/.test(text) || /"\s*(tool_calls|arguments|parameters)\s*"\s*:/.test(text);
+}
+
+/**
+ * Said only when a printed call could not be salvaged even after a retry. It has to
+ * move the call forwards: "could you say that again?" invited one caller to repeat the
+ * same request seven times while the diary was never read.
+ */
+const RECOVER = 'One moment, let me get that looked up for you.';
+
+/** Handed back to the model when it wrote a call out instead of making one. */
+const CORRECTION =
+  'That turn was printed as text instead of being issued as a tool call. Issue the tool call itself now, and say nothing else.';
+
+/**
+ * What the clinic already knows about whoever is on the line. The directory lookup on
+ * the inbound number lands while the greeting is still playing, but it used to reach
+ * only the decider at hang-up — so the agent went on asking matched callers for their
+ * name and DNI, and two of them hung up before ever saying what they wanted.
+ */
+export function fileOnCaller(state: CallState): string | undefined {
+  const patient = state.matched;
+  if (!patient) return undefined;
+  const name = [patient.given_name, patient.first_surname, patient.second_surname].filter(Boolean).join(' ');
+  const facts = [
+    `patient id ${patient.patient_id}`,
+    name === '' ? undefined : name,
+    patient.has_visited_before ? 'seen here before' : 'never seen here',
+    patient.insurer ? `plan on record ${patient.insurer}` : undefined,
+  ].filter(Boolean);
+  return `The clinic's file for the number they are ringing from: ${facts.join(', ')}. They are identified: do not ask for their name, their DNI or NIE, or their date of birth. Greet them by their first name and get on with what they want.`;
+}
 
 export class ReceptionistAgent extends voice.Agent {
+  /** Turns the model wrote a call out on rather than issuing it. Ends up in the call log. */
+  printedCalls = 0;
+  readonly #state: CallState;
+
   constructor(deps: ToolDeps) {
     super({ instructions: INSTRUCTIONS, tools: buildTools(deps) });
+    this.#state = deps.state;
   }
 
   /**
@@ -126,7 +214,13 @@ export class ReceptionistAgent extends voice.Agent {
     chatCtx: llm.ChatContext,
     toolCtx: llm.ToolContext,
     settings: voice.ModelSettings,
+    retried = false,
   ): Promise<ReadableStream<llm.ChatChunk | string> | null> {
+    const file = fileOnCaller(this.#state);
+    if (file !== undefined) {
+      chatCtx = chatCtx.copy();
+      chatCtx.addMessage({ role: 'system', content: file });
+    }
     const stream = await voice.Agent.default.llmNode(this, chatCtx, toolCtx, settings);
     if (!stream) return stream;
 
@@ -134,9 +228,23 @@ export class ReceptionistAgent extends voice.Agent {
     let held = '';
     let holding = false;
 
+    /** Ask again with the mistake pointed out, and speak whatever comes back. */
+    const retry = async (controller: TransformStreamDefaultController<llm.ChatChunk | string>) => {
+      const retryCtx = chatCtx.copy();
+      retryCtx.addMessage({ role: 'system', content: CORRECTION });
+      const second = await this.llmNode(retryCtx, toolCtx, settings, true);
+      if (!second) return;
+      const reader = second.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        controller.enqueue(value);
+      }
+    };
+
     return stream.pipeThrough(
       new TransformStream<llm.ChatChunk | string, llm.ChatChunk | string>({
-        transform(chunk, controller) {
+        transform: (chunk, controller) => {
           const text = typeof chunk === 'string' ? chunk : (chunk.delta?.content ?? '');
           const isCall = typeof chunk !== 'string' && chunk.delta?.toolCalls !== undefined;
           if (text === '' || isCall) {
@@ -156,19 +264,29 @@ export class ReceptionistAgent extends voice.Agent {
           holding = true;
           held = text.slice(brace);
         },
-        flush(controller) {
+        flush: async (controller) => {
           if (held === '') return;
           const call = printedToolCall(held.trim(), known);
-          if (!call) {
-            // A brace in ordinary speech is harmless; a JSON object is not.
-            controller.enqueue(/"\s*name\s*"\s*:/.test(held) ? RECOVER : held);
+          if (call) {
+            console.warn(`[agent] printed a ${call.name} tool call instead of making it`);
+            controller.enqueue({
+              id: randomUUID(),
+              delta: { role: 'assistant', toolCalls: [call] },
+            });
             return;
           }
-          console.warn(`[agent] printed a ${call.name} tool call instead of making it`);
-          controller.enqueue({
-            id: randomUUID(),
-            delta: { role: 'assistant', toolCalls: [call] },
-          });
+          // A brace in ordinary speech is harmless; a JSON object is not.
+          if (!looksPrinted(held)) {
+            controller.enqueue(held);
+            return;
+          }
+          console.warn(`[agent] unsalvageable printed call: ${held.trim().slice(0, 300)}`);
+          this.printedCalls++;
+          if (retried) {
+            controller.enqueue(RECOVER);
+            return;
+          }
+          await retry(controller);
         },
       }),
     );

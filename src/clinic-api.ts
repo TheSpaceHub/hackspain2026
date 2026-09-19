@@ -10,6 +10,7 @@
  */
 
 import { z } from 'zod';
+import { closest, fold, only } from './fuzzy.js';
 import { patientSchema, type Patient } from './schema.js';
 
 export const appointmentSchema = z.object({
@@ -205,6 +206,10 @@ export class ClinicApi {
 /**
  * A spoken provider name. Two near-miss pairs — Sáez/Sáenz and Iglesias/Iglesia — sit in
  * different specialties, so several hits means ask which, not pick the best.
+ *
+ * Callers say the surname on its own and mishear it while they are at it: "Doctor
+ * Villar" is Tomás Vilar. Substring matching alone denied two real doctors, so a near
+ * miss counts as a hit and the ambiguity is passed up rather than resolved here.
  */
 export function providersByName(catalogue: Catalogue, spoken: string): Provider[] {
   const needle = fold(spoken).replace(/^(dr|dra|d|dna)\.?\s+/, '');
@@ -212,7 +217,13 @@ export function providersByName(catalogue: Catalogue, spoken: string): Provider[
   const folded = catalogue.providers.map((p) => ({ p, name: fold(p.name) }));
   const exact = folded.filter(({ name }) => name === needle || name.endsWith(` ${needle}`));
   if (exact.length > 0) return exact.map(({ p }) => p);
-  return folded.filter(({ name }) => name.includes(needle)).map(({ p }) => p);
+  const substring = folded.filter(({ name }) => name.includes(needle));
+  if (substring.length > 0) return substring.map(({ p }) => p);
+  // Each surname is an alias of its own: they say one word, the catalogue holds three.
+  return closest(
+    catalogue.providers.map((p) => ({ item: p, aliases: [p.name, ...fold(p.name).split(' ')] })),
+    needle,
+  ).map((m) => m.item);
 }
 
 export function providersSpeaking(catalogue: Catalogue, language: string): Provider[] {
@@ -232,15 +243,25 @@ export function providerOnLeave(provider: Provider, isoDate: string): boolean {
  * is a diary. Match on the id, the name, or the id with its underscores said as spaces.
  */
 export function specialtyByName(catalogue: Catalogue, spoken: string): { id: string; name: string } | undefined {
-  const needle = fold(spoken).replace(/[_\s]+/g, ' ');
-  if (!needle) return undefined;
-  const same = (value: string): boolean => fold(value).replace(/[_\s]+/g, ' ') === needle;
-  return catalogue.specialties.find((s) => same(s.id) || same(s.name));
+  // "gynecology" is one edit from `gynaecology`, and an unmatched specialty is a 404.
+  return only(
+    catalogue.specialties.map((s) => ({ item: s, aliases: [s.id, s.name] })),
+    spoken,
+  );
+}
+
+/** The plan the caller named, or nothing: "sonita" for sanitas is a 422 on availability. */
+export function planByName(catalogue: Catalogue, spoken: string): { id: string; name: string } | undefined {
+  return only(
+    catalogue.plans.map((p) => ({ item: p, aliases: [p.id, p.name] })),
+    spoken,
+  );
 }
 
 export function locationById(catalogue: Catalogue, id: string): Location | undefined {
   const needle = fold(id);
-  return catalogue.locations.find((l) => fold(l.id) === needle || fold(l.name).includes(needle));
+  const direct = catalogue.locations.find((l) => fold(l.id) === needle || fold(l.name).includes(needle));
+  return direct ?? only(catalogue.locations.map((l) => ({ item: l, aliases: [l.id, l.name] })), needle);
 }
 
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -257,7 +278,4 @@ export function isClosureDay(catalogue: Catalogue, isoDate: string): boolean {
   return (catalogue.calendar?.closure_days ?? []).includes(isoDate);
 }
 
-/** Lower-case, accent-stripped: "Sáenz" and "saenz" are the same spoken name. */
-function fold(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-}
+

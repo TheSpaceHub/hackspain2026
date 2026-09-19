@@ -15,6 +15,7 @@ import { llm } from '@livekit/agents';
 import { z } from 'zod';
 import {
   locationById,
+  planByName,
   providersByName,
   siteHours,
   specialtyByName,
@@ -83,6 +84,27 @@ function real(value: string | undefined): string | undefined {
   return PLACEHOLDERS.has(value.trim().toLowerCase()) ? undefined : value;
 }
 
+/**
+ * A spoken filter as an id the clinic knows, or nothing at all. Without the catalogue
+ * there is nothing to check a guess against, so the guess does not travel.
+ */
+function resolve(
+  catalogue: Catalogue | null,
+  spoken: string | undefined,
+  lookup: (catalogue: Catalogue, spoken: string) => string | undefined,
+): string | undefined {
+  const said = real(spoken);
+  if (said === undefined || !catalogue) return undefined;
+  return lookup(catalogue, said);
+}
+
+/** Plans the clinic actually sells. A misheard insurer is dropped, not priced against. */
+function knownPlanIds(catalogue: Catalogue | null, spoken: string[]): string[] {
+  if (!catalogue) return [];
+  const ids = spoken.map((plan) => planByName(catalogue, plan)?.id).filter((id): id is string => id !== undefined);
+  return [...new Set(ids)];
+}
+
 export function buildTools(deps: ToolDeps): llm.ToolContextLike {
   const { state, api, catalogue } = deps;
   const now = deps.now ?? ((): Date => new Date());
@@ -136,12 +158,11 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         // `general_practice` and `loc_centro`, and rejects the whole query otherwise. A
         // filter we cannot resolve is dropped rather than sent: a wider search still
         // answers the caller, a 422 does not.
-        const saidSpecialty = real(args.specialty_id);
-        const saidLocation = real(args.location_id);
-        const specialty =
-          saidSpecialty && catalogue ? specialtyByName(catalogue, saidSpecialty)?.id : saidSpecialty;
-        const location =
-          saidLocation && catalogue ? locationById(catalogue, saidLocation)?.id : saidLocation;
+        const request0 = state.request;
+        const saidSpecialty = real(args.specialty_id) ?? request0.specialty_id;
+        const saidLocation = real(args.location_id) ?? request0.location_id;
+        const specialty = resolve(catalogue, saidSpecialty, (c, v) => specialtyByName(c, v)?.id);
+        const location = resolve(catalogue, saidLocation, (c, v) => locationById(c, v)?.id);
 
         const request = recordRequest(state, {
           when_phrase: args.when_phrase,
@@ -162,8 +183,10 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           }
         }
 
+        const plans = knownPlanIds(catalogue, request.insurers);
+
         const window = resolveWhen(args.when_phrase, now(), {
-          locationId: location ?? request.location_id,
+          locationId: location,
           closureDays: catalogue?.calendar?.closure_days,
           maxSpanDays: catalogue?.calendar?.max_span_days ?? undefined,
         });
@@ -173,10 +196,12 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           date_from: window.date_from,
           date_to: window.date_to,
           provider_id: providerId,
-          specialty_id: specialty ?? request.specialty_id,
-          location_id: location ?? request.location_id,
+          // Unresolved is dropped, never forwarded: "gynecology" for `gynaecology` is a
+          // 404 and "sonita" for sanitas a 422, and a wider search still answers them.
+          specialty_id: specialty,
+          location_id: location,
           patient_id: state.matched?.patient_id,
-          insurer: request.insurers.length > 0 ? request.insurers : undefined,
+          insurer: plans.length > 0 ? plans : undefined,
         });
         deps.onAvailability?.(availability);
 
@@ -260,7 +285,9 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         }
         const origin = await geocodeMadrid(address);
         if (!origin) return 'Could not place that address. Ask which part of Madrid they are in.';
-        const ranked = rankSites(catalogue, origin, { specialty_id: args.specialty_id });
+        const ranked = rankSites(catalogue, origin, {
+          specialty_id: resolve(catalogue, args.specialty_id, (c, v) => specialtyByName(c, v)?.id),
+        });
         if (ranked.length === 0) return 'No site offers that. Say so plainly.';
         const [first] = ranked;
         return `Nearest is ${first!.name}, about ${first!.km} kilometres away.`;
@@ -291,7 +318,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           const site = locationById(catalogue, args.location_id);
           if (!site) return 'No site by that name.';
           if (args.date) {
-            const hours = siteHours(catalogue, args.location_id, args.date);
+            const hours = siteHours(catalogue, site.id, args.date);
             return hours.length > 0
               ? `${site.name} is open ${hours.join(' and ')} that day.`
               : `${site.name} is closed that day.`;

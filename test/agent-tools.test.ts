@@ -264,6 +264,14 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   await loose.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'wizardry' });
   const wide = loose.clinic.requests.find((r) => r.path === '/api/v1/availability');
   check('a specialty nobody has is dropped, not sent', wide?.query.specialty_id, undefined);
+
+  // The burst sent "gynecology" and "sonita" straight through and got 404s and a 422.
+  const misheard = harness();
+  recordRequest(misheard.state, { insurers: ['sonitas', 'not an insurer'] });
+  await misheard.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'dermatolagy' });
+  const near = misheard.clinic.requests.find((r) => r.path === '/api/v1/availability');
+  check('a specialty misheard by a letter still reaches the diary', near?.query.specialty_id?.[0], 'spec_derm');
+  check('a misheard insurer is billed as the real one', near?.query.insurer, ['sanitas']);
 }
 
 // --- which plan the visit is billed to ---------------------------------------
