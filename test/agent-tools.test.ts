@@ -340,6 +340,42 @@ function harness(
 
 {
   const h = harness();
+  const first = await h.call('find_slots', { when_phrase: 'as soon as possible', specialty_id: 'spec_gp' });
+  const firstStart = h.state.quoted[0]?.start_time;
+  const second = await h.call('find_slots', { when_phrase: 'as soon as possible', specialty_id: 'spec_gp' });
+  check('the next search does not repeat a declined slot', h.state.quoted[0]?.start_time !== firstStart, true);
+  check('the next search still offers a real slot', /The soonest there is/.test(second), true);
+}
+
+{
+  const h = harness();
+  h.state.upcoming = [
+    { appointment_id: 'apt-a', start_time: '2026-10-20T09:00:00+02:00', location_id: 'loc_centro' },
+    { appointment_id: 'apt-b', start_time: '2026-10-22T10:45:00+02:00', location_id: 'loc_centro' },
+  ];
+  const picked = await h.call('pick_appointment', { said: 'the second one' });
+  check('pick_appointment resolves an ordinal', h.state.request.appointment_id, 'apt-b');
+  check('pick_appointment marks caller selection', h.state.appointment_picked_by, 'caller');
+  check('pick_appointment confirms the selected number', /That is 2/.test(picked), true);
+}
+
+{
+  const h = harness();
+  const filtered = await h.call('find_slots', {
+    when_phrase: 'Thursday after 2 pm',
+    specialty_id: 'spec_gp',
+  });
+  check('hard clock constraints filter diary slots', h.state.quoted.every((slot) => slot.start_time.includes('16:00')), true);
+  check('hard clock response quotes the constrained slot', /4:00 pm/.test(filtered), true);
+  const none = await h.call('find_slots', {
+    when_phrase: 'Thursday after 5 pm',
+    specialty_id: 'spec_gp',
+  });
+  check('hard clock misses do not offer elsewhere', /nothing|no/.test(none.toLowerCase()) && h.state.quoted.length === 0, true);
+}
+
+{
+  const h = harness();
   const closed = await h.call('find_slots', { when_phrase: 'Monday the twelfth of October', specialty_id: 'spec_gp' });
   check('the published closure moves them on, and they are told', /closed, so this is from 2026-10-12/.test(closed), true);
   check('onto the next open day', h.state.quoted[0]!.start_time.slice(0, 10), '2026-10-13');

@@ -104,6 +104,16 @@ check('a Spanish month and day', resolveWhen('el 14 de octubre', call).date_from
 const soonest = resolveWhen('as soon as possible', call);
 check('no day named searches a window', [soonest.earliest, soonest.date_from, soonest.date_to], [true, '2026-10-08', '2026-10-21']);
 check('the window never exceeds the 14-day cap', addDays(soonest.date_from, 13), soonest.date_to);
+const constraintNow = new Date('2026-09-19T12:20:00Z');
+const fromClock = resolveWhen('Wednesday from 2 pm onwards', constraintNow);
+check('from clock sets a hard afternoon bound', fromClock.after_clock, { hour: 14, minute: 0 });
+check('from clock keeps the named Wednesday', fromClock.date_from, '2026-09-23');
+const afterDate = resolveWhen('the soonest after Wednesday the 30th of September', constraintNow);
+check('after named date starts the next day', afterDate.date_from, '2026-10-01');
+check('after named date is an earliest window', afterDate.earliest, true);
+check('bare STT clock becomes an exact clock', resolveWhen('at 2 30', constraintNow).at_clock, { hour: 2, minute: 30 });
+check('half past two parses as thirty minutes', resolveWhen('half past two', constraintNow).at_clock, { hour: 2, minute: 30 });
+check('named date beats weekday parsing', resolveWhen('Wednesday the 30th of September', constraintNow).date_from, '2026-09-30');
 
 // --- nearest site ----------------------------------------------------------
 

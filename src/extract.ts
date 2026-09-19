@@ -25,6 +25,7 @@ import {
 } from './call-state.js';
 import { config } from './config.js';
 import { clog } from './log.js';
+import { distance, fold } from './fuzzy.js';
 
 const PATIENT_FIELDS = [
   'given_name', 'first_surname', 'second_surname', 'national_id',
@@ -89,6 +90,7 @@ const RELATIONSHIPS = new Set([
   'partner', 'spouse', 'carer', 'guardian', 'brother', 'sister', 'grandmother',
   'grandfather', 'friend', 'madre', 'padre', 'hijo', 'hija', 'esposo', 'esposa',
   'pareja', 'cuidador', 'tutor', 'hermano', 'hermana', 'abuelo', 'abuela',
+  'patient', 'client', 'ward', 'neighbour', 'neighbor',
 ]);
 
 const SELF = /\b(for|para) (myself|me|mi|m[ií] mism[oa])\b|\bpara m[ií]\b/i;
@@ -96,11 +98,24 @@ const FOR_KIN = new RegExp(
   `\\b(?:for|para) (?:my|our|mi|nuestr[oa]) (?:(?:little |young |old |elderly )?)(${[...RELATIONSHIPS].join('|')}|kid|boy|girl|baby|mum|mom|dad|grandma|grandpa|ni[nñ][oa]|beb[eé]|mam[aá]|pap[aá])\\b`,
   'i',
 );
+const CARER = /\b(?:(?:the|a)\s+(?:person|man|woman|lady|gentleman|patient)\s+i\s+(?:care|look after|am caring)\s+for|someone\s+i\s+care\s+for|my\s+(?:patient|client|ward|neighbou?r|friend|partner|husband|wife|boyfriend|girlfriend|carer)|on behalf of|la persona\s+(?:que|a la que)\s+cuido|en nombre de)\b/i;
+const NAMED_FOR = /\b(?:for|para)\s+([A-ZÁÉÍÓÚÑ][\p{L}'-]+(?:\s+[A-ZÁÉÍÓÚÑ][\p{L}'-]+)+)/u;
 
 /** "for my daughter" → "daughter"; "for myself" → "self"; nothing said → undefined. */
-export function whoIsItFor(heard: string): string | undefined {
+export function namedPatientName(heard: string, state?: Pick<CallState, 'matched'>): string | undefined {
+  const named = NAMED_FOR.exec(heard)?.[1]?.trim();
+  if (!named) return undefined;
+  const existing = state?.matched
+    ? [state.matched.given_name, state.matched.first_surname, state.matched.second_surname].filter(Boolean).join(' ')
+    : '';
+  return existing && distance(fold(named), fold(existing)) <= 2 ? undefined : named;
+}
+
+export function whoIsItFor(heard: string, state?: Pick<CallState, 'matched'>): string | undefined {
   const kin = FOR_KIN.exec(heard);
   if (kin) return kin[1]!.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  if (CARER.test(heard)) return 'carer';
+  if (namedPatientName(heard, state)) return 'named';
   if (SELF.test(heard)) return 'self';
   return undefined;
 }
@@ -421,12 +436,19 @@ export function applyPatch(state: CallState, patch: ExtractedPatch, heard?: stri
   // The caller's own words settle who the appointment is for; the model's guess does not
   // override them (Oliver said "for myself" and was marked a parent; Cristina said "for my
   // child" and was booked herself).
-  const said = heard ? whoIsItFor(heard) : undefined;
+  const said = heard ? whoIsItFor(heard, state) : undefined;
   if (said === 'self') {
     if (!state.caller_is_patient) recordThirdParty(state, true, { relationship: undefined });
   } else if (said) {
     if (state.caller_is_patient || state.caller?.relationship !== said) {
       recordThirdParty(state, false, { relationship: said });
+    }
+    if (said === 'named' && heard) {
+      const name = namedPatientName(heard, state);
+      const [given_name, ...surnames] = name?.split(/\s+/) ?? [];
+      if (given_name) recordPatientField(state, 'given_name', given_name);
+      if (surnames[0]) recordPatientField(state, 'first_surname', surnames[0]);
+      if (surnames[1]) recordPatientField(state, 'second_surname', surnames.slice(1).join(' '));
     }
   }
 

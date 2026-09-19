@@ -20,6 +20,7 @@ import { describeBrief } from './patient-brief.js';
 import { clog } from './log.js';
 import type { PatientBrief } from './patient-brief.js';
 import type { Patient } from './schema.js';
+import { madridDate, resolveWhen } from './when.js';
 
 /** Everything the caller can tell us about the patient, before the directory confirms it. */
 export interface PatientDraft {
@@ -67,6 +68,13 @@ export interface QuotedSlot {
   payable_with?: string[];
 }
 
+export interface UpcomingAppointment {
+  appointment_id: string;
+  start_time: string;
+  location_id?: string;
+  provider_id?: string;
+}
+
 export interface CallState {
   readonly call_id: string;
   /**
@@ -83,7 +91,11 @@ export interface CallState {
   caller_is_patient: boolean;
   caller?: { name?: string; relationship?: string };
   request: CallRequest;
+  upcoming: UpcomingAppointment[];
+  appointment_ids: string[];
+  appointment_picked_by?: 'only_one' | 'caller';
   quoted: QuotedSlot[];
+  declined: string[];
   quoted_spoken: boolean;
   turns_seen: number;
   quoted_at?: number;
@@ -93,6 +105,8 @@ export interface CallState {
   last_caller_text?: string;
   accepted: QuotedSlot | null;
   phone_match_rejected?: string;
+  invented_offer?: string;
+  invented_provider?: string;
   /** Doctor names (folded) the caller has already been asked to spell. */
   spelling_asked: string[];
   rejected: Partial<Record<PatientField, { spoken: string; problem: string }>>;
@@ -107,7 +121,10 @@ export function createCallState(callId: string, fromNumber?: string): CallState 
     matched: null,
     caller_is_patient: true,
     request: { insurers: [] },
+    upcoming: [],
+    appointment_ids: [],
     quoted: [],
+    declined: [],
     quoted_spoken: false,
     turns_seen: 0,
     caller_turns: 0,
@@ -361,7 +378,7 @@ export function callerAccepted(text: string): 'yes' | 'no' | 'unclear' {
 }
 
 export function sameClock(
-  slot: QuotedSlot,
+  slot: Pick<QuotedSlot, 'start_time'>,
   said: { hour: number; minute: number },
 ): boolean {
   const face = clockFace(slot.start_time);
@@ -370,6 +387,39 @@ export function sameClock(
   return face.hour === said.hour ||
     face.hour === said.hour + 12 ||
     face.hour + 12 === said.hour;
+}
+
+export function appointmentKey(appointment: Pick<UpcomingAppointment, 'start_time' | 'provider_id'>): string {
+  return `${appointment.start_time}|${appointment.provider_id ?? ''}`;
+}
+
+/**
+ * Resolve a caller's words against the appointments already read from the diary.
+ * A day or clock is accepted only when it identifies exactly one appointment; an
+ * ordinal is the explicit list choice and is resolved before the other clues.
+ */
+export function appointmentsMatching(
+  appointments: UpcomingAppointment[],
+  said: string,
+  now: Date,
+): UpcomingAppointment[] {
+  const text = said.toLowerCase();
+  if (/\b(?:both|all|the two|los dos|todas?)\b/.test(text)) return [...appointments];
+  const ordinal = /\b(?:the\s+)?(first|second|third|last|1|2|3)\b/.exec(text)?.[1];
+  if (ordinal) {
+    const index = ordinal === 'last' ? appointments.length - 1 : ordinal === 'first' || ordinal === '1' ? 0 : ordinal === 'second' || ordinal === '2' ? 1 : ordinal === 'third' || ordinal === '3' ? 2 : -1;
+    return index >= 0 && index < appointments.length ? [appointments[index]!] : [];
+  }
+
+  const times = saidTimes(said);
+  const window = resolveWhen(said, now);
+  let matches = window.earliest
+    ? appointments
+    : appointments.filter((appointment) => madridDate(new Date(appointment.start_time)) === window.date_from);
+  if (times.length > 0) {
+    matches = matches.filter((appointment) => times.some((time) => sameClock(appointment, time)));
+  }
+  return matches;
 }
 
 /**
@@ -475,6 +525,15 @@ export function readCallState(state: CallState): string {
     .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(',') : String(v)}`)
     .join(' ');
   lines.push(`Request: ${request || '(nothing yet)'}`);
+  if (state.upcoming.length > 0) {
+    lines.push(
+      `Upcoming appointments: ${state.upcoming.map((appointment, index) =>
+        `${index + 1}=${appointment.appointment_id} ${appointment.start_time}`).join(' · ')}` +
+      (state.appointment_picked_by ? ` · picked_by=${state.appointment_picked_by}` : ''),
+    );
+  }
+  if (state.invented_offer) lines.push(`Invented offer: ${state.invented_offer}`);
+  if (state.invented_provider) lines.push(`Invented provider: ${state.invented_provider}`);
   if (state.request.blocked_by) lines.push(`Rule that stopped the diary: ${state.request.blocked_by}`);
 
   // The plan the booking is billed against: the right slot on the wrong plan fails.

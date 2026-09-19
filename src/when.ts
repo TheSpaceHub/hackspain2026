@@ -18,6 +18,9 @@ export interface WhenWindow {
   date_from: string;
   date_to: string;
   part_of_day?: PartOfDay;
+  after_clock?: { hour: number; minute: number };
+  before_clock?: { hour: number; minute: number };
+  at_clock?: { hour: number; minute: number };
   /** Set when the day the caller named was closed and we moved them on. */
   adjusted_from?: string;
   /** True when the caller named no day at all: search from tomorrow and take the first. */
@@ -71,17 +74,47 @@ export function resolveWhen(phrase: string, now: Date, options: ResolveOptions =
   const maxSpan = options.maxSpanDays ?? 14;
   const today = madridDate(now);
   const text = phrase.toLowerCase().replace(/\s+/g, ' ').trim();
-  const part = partOfDay(text);
+  const clocks = clocksIn(text);
+  const afterClock = /\b(?:after|from|no earlier than|not before)\b/.test(text) ? clocks[0] : undefined;
+  const beforeClock = /\b(?:before|by|no later than)\b/.test(text) ? clocks[0] : undefined;
+  const atClock = afterClock || beforeClock ? undefined : clocks[0];
+  const part = partOfDay(text, afterClock, beforeClock, atClock);
   const isOpen = options.isOpen ?? defaultIsOpen(options);
 
   const named = namedDate(text, today) ?? relativeDate(text, today) ?? weekdayDate(text, today);
+  const afterDateMarker = /\b(?:after|from|a partir del|a partir de)\b/.test(text) &&
+    !/\b(?:day after tomorrow|a week from today|in a week|two weeks from today)\b/.test(text);
+  const afterDate = !afterClock && afterDateMarker && named
+    ? addDays(named, 1)
+    : null;
 
   // Nothing is booked same-day: the earliest is the day after the call.
   const earliestDay = addDays(today, 1);
 
+  if (afterDate) {
+    const from = firstOpenFrom(afterDate, part, isOpen) ?? afterDate;
+    return {
+      date_from: from,
+      date_to: addDays(from, maxSpan - 1),
+      part_of_day: part,
+      after_clock: afterClock,
+      before_clock: beforeClock,
+      at_clock: atClock,
+      earliest: true,
+    };
+  }
+
   if (!named) {
     const from = firstOpenFrom(earliestDay, part, isOpen) ?? earliestDay;
-    return { date_from: from, date_to: addDays(from, maxSpan - 1), part_of_day: part, earliest: true };
+    return {
+      date_from: from,
+      date_to: addDays(from, maxSpan - 1),
+      part_of_day: part,
+      after_clock: afterClock,
+      before_clock: beforeClock,
+      at_clock: atClock,
+      earliest: true,
+    };
   }
 
   const wanted = named < earliestDay ? earliestDay : named;
@@ -90,16 +123,57 @@ export function resolveWhen(phrase: string, now: Date, options: ResolveOptions =
     date_from: open,
     date_to: open,
     part_of_day: part,
+    after_clock: afterClock,
+    before_clock: beforeClock,
+    at_clock: atClock,
     adjusted_from: open === wanted ? undefined : wanted,
     earliest: false,
   };
 }
 
 /** "morning" is before 14:00 and "afternoon" from 14:00; "first thing" is the morning. */
-function partOfDay(text: string): PartOfDay | undefined {
+function partOfDay(
+  text: string,
+  afterClock?: { hour: number; minute: number },
+  beforeClock?: { hour: number; minute: number },
+  atClock?: { hour: number; minute: number },
+): PartOfDay | undefined {
+  if (afterClock && afterClock.hour * 60 + afterClock.minute >= 14 * 60) return 'afternoon';
+  if (beforeClock && beforeClock.hour * 60 + beforeClock.minute <= 14 * 60) return 'morning';
+  if (atClock && atClock.hour * 60 + atClock.minute >= 14 * 60) return 'afternoon';
   if (/\b(morning|first thing|ma(ñ|n)ana temprano|por la ma(ñ|n)ana)\b/.test(text)) return 'morning';
   if (/\b(afternoon|evening|por la tarde|la tarde|por la noche)\b/.test(text)) return 'afternoon';
   return undefined;
+}
+
+const CLOCK_WORDS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+  seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6,
+  siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12,
+};
+
+function clocksIn(text: string): { hour: number; minute: number }[] {
+  const clocks: { hour: number; minute: number }[] = [];
+  const add = (hour: number, minute: number, meridiem?: string, context = text): void => {
+    if (meridiem?.toLowerCase() === 'pm' && hour < 12) hour += 12;
+    if (meridiem?.toLowerCase() === 'am' && hour === 12) hour = 0;
+    if (!meridiem && hour <= 12 && /\b(?:afternoon|evening|de la tarde|por la tarde|noche)\b/.test(context) && hour < 12) hour += 12;
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) clocks.push({ hour, minute });
+  };
+  for (const match of text.matchAll(/\b(\d{1,2})(?:\s*[:.]\s*|\s+)(\d{2})\s*(am|pm)?\b/gi)) {
+    add(Number(match[1]), Number(match[2]), match[3], text.slice(Math.max(0, match.index ?? 0) - 20, (match.index ?? 0) + match[0].length + 20));
+  }
+  for (const match of text.matchAll(/\b(\d{1,2})\s*(am|pm)\b/gi)) add(Number(match[1]), 0, match[2]);
+  const words = Object.keys(CLOCK_WORDS).join('|');
+  const wordClock = new RegExp(`\\b(?:half past\\s+|a las\\s+|a la\\s+)?(${words})(?:\\s+(?:in the|de la)\\s+(?:afternoon|evening|tarde|noche))?\\b`, 'gi');
+  for (const match of text.matchAll(wordClock)) {
+    const before = text.slice(Math.max(0, match.index ?? 0) - 12, match.index ?? 0);
+    const after = text.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 20);
+    const halfPast = /\bhalf past\b/i.test(before) || /^half past\b/i.test(match[0]!);
+    add(CLOCK_WORDS[match[1]!.toLowerCase()]!, halfPast ? 30 : 0, undefined, `${before} ${match[0]} ${after}`);
+  }
+  return clocks;
 }
 
 /** "Monday the twelfth of October", "12 October", "the 3rd of November". */

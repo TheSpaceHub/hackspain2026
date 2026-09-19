@@ -10,6 +10,7 @@
 import { applyPatch, createExtractor, parsePatch, setProviderVocabulary, type Complete } from '../src/extract.js';
 import { catalogueSchema } from '../src/clinic-api.js';
 import { createCallState, readCallState, recordMatch, setPlanVocabulary } from '../src/call-state.js';
+import { forWhomUnknown } from '../src/agent-tools.js';
 
 let failed = 0;
 setPlanVocabulary([{ id: 'nueva_mutua_sanitaria', name: 'Nueva Mutua Sanitaria' }]);
@@ -337,6 +338,32 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
   check('the final transcript pass fills registration notes', state.patient.given_name, 'Ana');
   check('the final transcript pass fills the date', state.patient.date_of_birth, '1990-03-14');
   check('the final transcript pass fills contact details', state.patient.phone, '600999888');
+}
+
+{
+  const cases = [
+    ['David Gutierrez, the person I care for', 'David', 'Gutierrez'],
+    ['Rebecca Hall, the person I care for. I am Francisco Sánchez.', 'Rebecca', 'Hall'],
+    ['I am calling for the person I care for.', undefined, undefined],
+  ] as const;
+  for (const [heard, given_name, first_surname] of cases) {
+    const state = createCallState(`call-carer-${heard.slice(0, 4)}`);
+    recordMatch(state, {
+      patient_id: 'P00001',
+      given_name: 'Montserrat',
+      first_surname: 'López',
+    }, undefined, 'phone');
+    applyPatch(
+      state,
+      {
+        patient: given_name ? { given_name, first_surname } : undefined,
+        caller_is_patient: false,
+      },
+      heard,
+    );
+    check(`${heard} is third-party`, state.caller_is_patient, false);
+    check(`${heard} blocks diary until patient identification`, Boolean(forWhomUnknown(state)), true);
+  }
 }
 
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);

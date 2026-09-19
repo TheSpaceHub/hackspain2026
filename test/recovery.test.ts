@@ -13,6 +13,7 @@ import { createCallState, readCallState, recordMatch, recordPatientField } from 
 import { withoutDuplicates } from '../src/decider.js';
 import { catalogueSchema } from '../src/clinic-api.js';
 import { fakeCatalogue } from './fake-clinic.js';
+import { inventedAssistantFacts } from '../src/call-session.js';
 
 const catalogue = catalogueSchema.parse(fakeCatalogue);
 
@@ -23,6 +24,23 @@ function check(name: string, actual: unknown, expected: unknown): void {
   const ok = a === e;
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `\n        expected ${e}\n        actual   ${a}`}`);
+}
+
+{
+  const state = createCallState('invented-detector');
+  state.quoted = [{
+    provider_id: 'prov_saez',
+    location_id: 'loc_centro',
+    appointment_type_id: 'apt_review',
+    start_time: '2026-10-12T09:30:00+02:00',
+  }];
+  const facts = inventedAssistantFacts(
+    'Thursday at 1:00 pm with Doctor Sofia Garcia.',
+    state,
+    catalogue,
+  );
+  check('invented offer detector flags an unquoted time', facts.offer, 'Thursday at 1:00 pm with Doctor Sofia Garcia.');
+  check('invented provider detector flags an unknown doctor', facts.provider, 'Sofia Garcia');
 }
 
 // --- salvaging a printed tool call -----------------------------------------

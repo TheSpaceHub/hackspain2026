@@ -29,6 +29,8 @@ import {
   releaseAccepted,
   recordMatch,
   recordQuote,
+  appointmentKey,
+  appointmentsMatching,
   callerSilentSinceQuote,
   callerAccepted,
   recordRequest,
@@ -37,10 +39,11 @@ import {
   sameClock,
   type CallState,
   type QuotedSlot,
+  type UpcomingAppointment,
 } from './call-state.js';
 import { attachBrief, describeBrief } from './patient-brief.js';
 import { geocodeMadrid, rankSites, type Placed } from './nearest-site.js';
-import { resolveWhen } from './when.js';
+import { addDays, madridDate, resolveWhen, type WhenWindow } from './when.js';
 import { clog } from './log.js';
 import { fold } from './fuzzy.js';
 
@@ -77,6 +80,35 @@ const SLOW = 'That is taking too long to come back. Tell them the system is slow
 function alternateSpecialtyLabel(name: string): string {
   if (name.toLowerCase() === 'dermatology') return 'dermatologist';
   return `${name.replace(/\b\w/g, (letter) => letter.toUpperCase())} doctor`;
+}
+
+function appointmentText(catalogue: Catalogue | null, appointment: UpcomingAppointment): string {
+  return `${speakTime(appointment.start_time)} at ${siteName(catalogue, appointment.location_id ?? '')}`;
+}
+
+function clockMinutes(clock: { hour: number; minute: number }): number {
+  return clock.hour * 60 + clock.minute;
+}
+
+function slotClock(startTime: string): { hour: number; minute: number } {
+  return clockForLog(startTime);
+}
+
+function withdrawOpenQuote(state: CallState): boolean {
+  if (state.accepted || state.quoted.length === 0) return false;
+  for (const slot of state.quoted) {
+    const key = `${slot.start_time}|${slot.provider_id}`;
+    if (!state.declined.includes(key)) state.declined.push(key);
+  }
+  recordQuote(state, []);
+  return true;
+}
+
+function hardWindowPhrase(window: { after_clock?: { hour: number; minute: number }; before_clock?: { hour: number; minute: number }; at_clock?: { hour: number; minute: number } }): string | undefined {
+  if (window.at_clock) return `at ${formatClock(window.at_clock)}`;
+  if (window.after_clock) return `after ${formatClock(window.after_clock)}`;
+  if (window.before_clock) return `before ${formatClock(window.before_clock)}`;
+  return undefined;
 }
 
 async function capped<T>(name: string, ms: number, work: Promise<T> | T): Promise<T | string> {
@@ -300,11 +332,31 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
 
         const plans = knownPlanIds(catalogue, request.insurers);
 
-        const window = resolveWhen(args.when_phrase, now(), {
+        const laterThanAppointment = (state.request.intent === 'reschedule' || state.request.appointment_id !== undefined) &&
+          /\b(?:later than|after (?:my|the|that) (?:current|existing)?\s*appointment|the one i (?:have|already have)|m[aá]s tarde que|despu[eé]s de mi cita)\b/i.test(args.when_phrase);
+        let window: WhenWindow = resolveWhen(args.when_phrase, now(), {
           locationId: location,
           closureDays: catalogue?.calendar?.closure_days,
           maxSpanDays: catalogue?.calendar?.max_span_days ?? undefined,
         });
+        if (laterThanAppointment) {
+          const selected = state.upcoming.find((appointment) =>
+            appointment.appointment_id === state.request.appointment_id,
+          );
+          if (selected) {
+            const selectedDate = madridDate(new Date(selected.start_time));
+            const [year, month, day] = selectedDate.split('-').map(Number) as [number, number, number];
+            const monthName = new Intl.DateTimeFormat('en', { month: 'long', timeZone: 'UTC' }).format(
+              new Date(Date.UTC(year, month - 1, day)),
+            );
+            window = resolveWhen(`after ${day} ${monthName}`, now(), {
+              locationId: location,
+              closureDays: catalogue?.calendar?.closure_days,
+              maxSpanDays: catalogue?.calendar?.max_span_days ?? undefined,
+            });
+            window = { ...window, date_from: window.date_from || addDays(selectedDate, 1), earliest: true };
+          }
+        }
         if (window.part_of_day) recordRequest(state, { part_of_day: window.part_of_day });
 
         let availability = await api.findAvailability({
@@ -348,8 +400,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
               recordRequest(state, { blocked_by: blocked });
               clog.warn(`[find_slots] blocked: ${blocked}`);
             }
-            const withdrew = state.quoted.length > 0 && !state.accepted;
-            if (withdrew) recordQuote(state, []);
+            const withdrew = withdrawOpenQuote(state);
             return `Nothing bookable: ${blocked || providerRestriction.restriction}. Tell the caller plainly and do not offer a time.${withdrew ? ' The earlier offer is withdrawn — if they want it after all, call find_slots for that day again.' : ''}${specialtyNote}`;
           }
         }
@@ -360,8 +411,15 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
             recordRequest(state, { blocked_by: blocked });
             clog.warn(`[find_slots] blocked: ${blocked}`);
           }
-          const withdrew = state.quoted.length > 0 && !state.accepted;
-          if (withdrew) recordQuote(state, []);
+          const withdrew = withdrawOpenQuote(state);
+          const hardPhrase = hardWindowPhrase(window);
+          const hardDate = !hardPhrase && /\b(?:after|from|a partir del|a partir de)\b/i.test(args.when_phrase);
+          if (hardPhrase || hardDate) {
+            const specialtyLabel = specialty ?? 'that specialty';
+            const locationLabel = location ? ` at ${siteName(catalogue, location)}` : '';
+            const constraint = hardPhrase ?? `after ${args.when_phrase.replace(/^.*?\b(?:after|from|a partir del|a partir de)\b\s*/i, '')}`;
+            return `Nothing ${constraint} for ${specialtyLabel}${locationLabel} in that window. Tell the caller plainly and ask whether another day, another site, or a different time would do. Do not offer any other time.${withdrew ? ' The earlier offer is withdrawn — if they want it after all, call find_slots for that day again.' : ''}`;
+          }
           return (blocked
             ? `Nothing bookable: ${blocked}. Tell the caller plainly and do not offer a time.`
             : 'Nothing free in that window. Offer to look at a different day.') +
@@ -370,10 +428,41 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         }
 
         if (state.request.blocked_by) retract(state, 'blocked_by');
+        if (!state.accepted) {
+          for (const slot of state.quoted) {
+            const key = appointmentKey(slot);
+            if (!state.declined.includes(key)) state.declined.push(key);
+          }
+        }
+        const declined = new Set(state.declined);
+        availability = {
+          ...availability,
+          slots: availability.slots.filter((slot) => !declined.has(`${slot.start_time}|${slot.provider_id}`)),
+        };
+        if (availability.slots.length === 0) {
+          const withdrew = withdrawOpenQuote(state);
+          return `Nothing free in that window. Offer to look at a different day.${withdrew ? ' The earlier offer is withdrawn — if they want it after all, call find_slots for that day again.' : ''}${specialtyNote}`;
+        }
         const wanted = window.part_of_day;
-        const matching = wanted
-          ? availability.slots.filter((s) => inPart(s.start_time, wanted))
-          : availability.slots;
+        const hardClock = hardWindowPhrase(window);
+        const hardDate = !hardClock && /\b(?:after|from|a partir del|a partir de)\b/i.test(args.when_phrase);
+        const matching = availability.slots.filter((slot) => {
+          const inRequestedPart = wanted ? inPart(slot.start_time, wanted) : true;
+          if (!inRequestedPart) return false;
+          if (!hardClock) return true;
+          const actual = clockMinutes(slotClock(slot.start_time));
+          if (window.after_clock && actual < clockMinutes(window.after_clock)) return false;
+          if (window.before_clock && actual > clockMinutes(window.before_clock)) return false;
+          if (window.at_clock && actual !== clockMinutes(window.at_clock)) return false;
+          return true;
+        });
+        if ((hardClock || hardDate) && matching.length === 0) {
+          const constraint = hardClock ?? `after ${args.when_phrase.replace(/^.*?\b(?:after|from|a partir del|a partir de)\b\s*/i, '')}`;
+          const specialtyLabel = specialty ?? 'that specialty';
+          const locationLabel = location ? ` at ${siteName(catalogue, location)}` : '';
+          const withdrew = withdrawOpenQuote(state);
+          return `Nothing ${constraint} for ${specialtyLabel}${locationLabel} in that window. Tell the caller plainly and ask whether another day, another site, or a different time would do. Do not offer any other time.${withdrew ? ' The earlier offer is withdrawn — if they want it after all, call find_slots for that day again.' : ''}`;
+        }
         // Nothing in the half of the day they asked for is worth saying out loud: a
         // caller who wanted the afternoon and hears ten forty-five thinks they were
         // ignored, not accommodated.
@@ -396,6 +485,8 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           payable_with: s.payable_with ?? undefined,
         }));
         recordQuote(state, quoted);
+        state.invented_offer = undefined;
+        state.invented_provider = undefined;
 
         const moved = window.adjusted_from ? `The day they asked for is closed, so this is from ${window.adjusted_from}. ` : '';
         const partNote = elsewhere ? `Nothing in the ${wanted} that day, so say so before you offer these. ` : '';
@@ -486,6 +577,8 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           }
         }
         recordAccepted(state, slot);
+        state.invented_offer = undefined;
+        state.invented_provider = undefined;
         const held = `Held ${speakTime(slot.start_time)}.`;
         // The diary priced this slot against the plans it knew about. None of them
         // means the visit cannot be billed yet — and a caller with a second policy is
@@ -517,10 +610,51 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         if (!patientId) return 'Identify the patient first with identify_patient.';
         const appointments = await api.getPatientAppointments(patientId, 'upcoming');
         if (appointments.length === 0) return 'Nothing booked for them. Nothing to move or cancel.';
-        recordRequest(state, { appointment_id: appointments[0]!.appointment_id });
-        return appointments
-          .map((a) => `${speakTime(a.start_time)} at ${siteName(catalogue, a.location_id ?? '')}`)
+        state.upcoming = appointments.map((appointment) => ({
+          appointment_id: appointment.appointment_id,
+          start_time: appointment.start_time,
+          location_id: appointment.location_id ?? undefined,
+          provider_id: appointment.provider_id ?? undefined,
+        }));
+        state.appointment_ids = [];
+        state.appointment_picked_by = undefined;
+        if (appointments.length === 1) {
+          state.appointment_picked_by = 'only_one';
+          state.appointment_ids = [appointments[0]!.appointment_id];
+          recordRequest(state, { appointment_id: appointments[0]!.appointment_id });
+          return `${appointmentText(catalogue, state.upcoming[0]!)}.`;
+        }
+        retract(state, 'appointment_id');
+        const numbered = state.upcoming
+          .map((appointment, index) => `${index + 1}. ${appointmentText(catalogue, appointment)}`)
           .join('; ');
+        return `${numbered}. Ask which one they mean, then call pick_appointment with their words.`;
+      },
+    }),
+    pick_appointment: llm.tool({
+      description: 'Choose one of the patient appointments from the caller\'s own words before moving or cancelling it.',
+      parameters: z.object({ said: z.string().describe('The caller\'s words for the appointment, such as "Thursday 8 October" or "the 10:45 one"') }),
+      execute: async (args) => {
+        if (state.upcoming.length === 0) return 'Call list_appointments first.';
+        const matches = appointmentsMatching(state.upcoming, args.said, now());
+        if (matches.length === state.upcoming.length && state.upcoming.length > 1) {
+          state.appointment_ids = matches.map((appointment) => appointment.appointment_id);
+          state.appointment_picked_by = 'caller';
+          recordRequest(state, { appointment_id: matches[0]!.appointment_id });
+          return `That is all of them: ${matches.map((appointment) => appointmentText(catalogue, appointment)).join('; ')}. Confirm each one before cancelling.`;
+        }
+        if (matches.length !== 1) {
+          const remaining = state.upcoming
+            .map((appointment, index) => `${index + 1}. ${appointmentText(catalogue, appointment)}`)
+            .join('; ');
+          return `${matches.length === 0 ? 'I could not match that to one appointment' : 'That still matches more than one appointment'}: ${remaining}. Ask which one they mean and call pick_appointment with their words.`;
+        }
+        const picked = matches[0]!;
+        state.appointment_picked_by = 'caller';
+        if (!state.appointment_ids.includes(picked.appointment_id)) state.appointment_ids.push(picked.appointment_id);
+        recordRequest(state, { appointment_id: picked.appointment_id });
+        const index = state.upcoming.indexOf(picked) + 1;
+        return `That is ${index}. ${appointmentText(catalogue, picked)}. Confirm it back before cancelling or moving.`;
       },
     }),
 

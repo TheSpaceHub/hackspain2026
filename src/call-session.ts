@@ -9,10 +9,12 @@ import { MediaStreamAudioOutput } from './audio-output.js';
 import { writeCallLog, type CallLog } from './call-log.js';
 import {
   acceptFromTranscript,
+  appointmentsMatching,
   createCallState,
   missingForRegistration,
   readCallState,
   recordMatch,
+  recordRequest,
   saidTimes,
   sameClock,
   type CallState,
@@ -40,6 +42,7 @@ import type { Action } from './schema.js';
 import { submitActions, type SubmitResult } from './submit.js';
 import type { Store } from './store/index.js';
 import { buildCallTranscript, formatTranscript, type TranscriptTurn } from './transcript.js';
+import { fold } from './fuzzy.js';
 import { SAMPLE_RATE, type InboundMessage, type StartMessage } from './twilio.js';
 
 /**
@@ -47,6 +50,29 @@ import { SAMPLE_RATE, type InboundMessage, type StartMessage } from './twilio.js
  * decider reads the transcript for that detail instead, which is slower but not wrong.
  */
 const EXTRACT_SETTLE_MS = 4_000;
+
+export function inventedAssistantFacts(
+  text: string,
+  state: Pick<CallState, 'quoted' | 'accepted'>,
+  catalogue: Catalogue | null,
+): { offer?: string; provider?: string } {
+  const times = saidTimes(text);
+  const offer =
+    !state.accepted && times.some((time) => !state.quoted.some((slot) => sameClock(slot, time)))
+      ? text
+      : undefined;
+  const knownTokens = new Set(
+    (catalogue?.providers ?? [])
+      .flatMap((provider) => fold(provider.name ?? '').split(/\s+/))
+      .filter(Boolean),
+  );
+  const providerMatch = /\b(?:[Dd]r\.?|[Dd]ra\.?|[Dd]octor)\s+([A-ZÁÉÍÓÚÑ][\p{L}'-]*(?:\s+[A-ZÁÉÍÓÚÑ][\p{L}'-]*)?)/u.exec(text);
+  const providerName = providerMatch?.[1];
+  const provider = providerName && providerName.split(/\s+/).some((token) => !knownTokens.has(fold(token)))
+    ? providerName
+    : undefined;
+  return { offer, provider };
+}
 
 function sanitizeCallId(callId: string): string {
   return callId.replace(/[^A-Za-z0-9_-]/g, '_');
@@ -445,7 +471,20 @@ export class CallSession {
     const at = new Date().toISOString();
     for (let i = this.#turnsWritten; i < turns.length; i++) {
       const turn = turns[i]!;
-      if (turn.role === 'assistant') this.#rememberAgentQuestion(turn.text);
+      if (turn.role === 'assistant') {
+        this.#rememberAgentQuestion(turn.text);
+        if (this.#state) {
+          const facts = inventedAssistantFacts(turn.text, this.#state, this.#shared.catalogue);
+          if (facts.offer) {
+            this.#state.invented_offer = facts.offer;
+            clog.warn(`[agent] spoke a time the diary never returned: ${facts.offer}`);
+          }
+          if (facts.provider) {
+            this.#state.invented_provider = facts.provider;
+            clog.warn(`[agent] spoke a provider the catalogue never returned: ${facts.provider}`);
+          }
+        }
+      }
       if (
         this.#state &&
         turn.role === 'assistant' &&
@@ -459,7 +498,33 @@ export class CallSession {
       }
       // Queued, not awaited: the agent is already answering this turn.
       if (turn.role !== 'assistant') {
-        if (this.#state) this.#state.last_caller_text = turn.text;
+        if (this.#state) {
+          this.#state.last_caller_text = turn.text;
+          if (
+            this.#state.upcoming.length > 1 &&
+            (this.#state.request.intent === 'cancel' || !this.#state.request.appointment_id || this.#state.appointment_ids.length > 0)
+          ) {
+            const picked = appointmentsMatching(this.#state.upcoming, turn.text, new Date());
+            if (
+              picked.length > 0 &&
+              (this.#state.request.intent === 'cancel' || this.#state.appointment_ids.length > 0 || !this.#state.request.appointment_id)
+            ) {
+              for (const appointment of picked) {
+                if (!this.#state.appointment_ids.includes(appointment.appointment_id)) {
+                  this.#state.appointment_ids.push(appointment.appointment_id);
+                }
+              }
+              this.#state.appointment_picked_by = 'caller';
+              recordRequest(this.#state, { appointment_id: this.#state.appointment_ids[0] });
+            } else if (picked.length === 1) {
+              recordRequest(this.#state, { appointment_id: picked[0]!.appointment_id });
+              this.#state.appointment_picked_by = 'caller';
+              if (!this.#state.appointment_ids.includes(picked[0]!.appointment_id)) {
+                this.#state.appointment_ids.push(picked[0]!.appointment_id);
+              }
+            }
+          }
+        }
         const before = turns[i - 1];
         // "5 4 8 8 4 9 3 9." then "Q." — one answer, two finals; ground on both.
         const heard =
@@ -636,6 +701,18 @@ export class CallSession {
       actions = [FLOOR_ACTION];
     }
     if (this.#state) {
+      if (this.#state.request.intent === 'cancel') {
+        const ids = this.#state.appointment_ids.length > 0
+          ? this.#state.appointment_ids
+          : this.#state.request.appointment_id
+            ? [this.#state.request.appointment_id]
+            : [];
+        if (ids.length === 0 || (this.#state.upcoming.length > 1 && this.#state.appointment_picked_by !== 'caller')) {
+          this.#errors.push('appointment not identified by caller');
+          return [{ action: 'no_action', reason: 'patient_history' }];
+        }
+        return ids.map((appointment_id) => ({ action: 'cancel' as const, appointment_id }));
+      }
       const overridden = overrideFlooredBooking(actions, this.#state);
       if (overridden !== actions) {
         const reason = actions.find((action) => action.action === 'no_action')?.reason ?? 'unknown';
@@ -675,6 +752,16 @@ export class CallSession {
         const billed = enforcePolicy(fixed, state);
         if (billed.corrected) this.#errors.push(`policy corrected to ${billed.action.policy_id}`);
         fixed = billed.action;
+      }
+      if ((fixed.action === 'cancel' || fixed.action === 'reschedule') && state) {
+        const appointmentId = 'appointment_id' in fixed ? fixed.appointment_id : undefined;
+        const validId = appointmentId !== undefined &&
+          state.upcoming.some((appointment) => appointment.appointment_id === appointmentId);
+        const picked = state.upcoming.length <= 1 || state.appointment_picked_by === 'caller' || state.appointment_picked_by === 'only_one';
+        if (!validId || !picked) {
+          this.#errors.push('appointment not identified by caller');
+          fixed = { action: 'no_action', reason: 'patient_history' };
+        }
       }
       return fixed;
     });
