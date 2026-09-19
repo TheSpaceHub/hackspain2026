@@ -88,6 +88,41 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
 }
 
 {
+  const noRelationship = createCallState('call-caller-default');
+  applyPatch(noRelationship, { caller_is_patient: false, caller_name: 'Ana' });
+  check('caller_is_patient false without a relationship is ignored', noRelationship.caller_is_patient, true);
+
+  const different = createCallState('call-caller-third-party');
+  applyPatch(different, {
+    caller_is_patient: false,
+    caller_name: 'Ana',
+    relationship: 'mother',
+    patient: { given_name: 'Beatriz' },
+  });
+  check('a related caller with a different name is a third party', different.caller_is_patient, false);
+
+  // The number is on file for the mother; "it's for my child" must still demote her.
+  const phoneOwner = createCallState('call-caller-phone-owner');
+  recordMatch(phoneOwner, { patient_id: 'P9', given_name: 'Sara', first_surname: 'Ruiz' } as never, undefined, 'phone');
+  applyPatch(phoneOwner, { caller_is_patient: false, caller_name: 'Sara', relationship: 'mother' });
+  check('a kinship word demotes even the phone owner', phoneOwner.caller_is_patient, false);
+
+  const phoneMatch = createCallState('call-caller-phone-match');
+  recordMatch(phoneMatch, {
+    patient_id: 'P-phone',
+    given_name: 'Charlotte',
+    first_surname: 'Cooper',
+    second_surname: 'Roberts',
+  });
+  applyPatch(phoneMatch, {
+    caller_is_patient: false,
+    caller_name: 'Charlotte Cooper Roberts',
+    relationship: 'RNL Norte (other)',
+  });
+  check('an invalid relationship does not demote a matched patient', phoneMatch.caller_is_patient, true);
+}
+
+{
   const state = createCallState('call-match');
   recordMatch(state, {
     patient_id: 'P1',

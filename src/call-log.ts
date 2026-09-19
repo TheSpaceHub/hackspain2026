@@ -23,6 +23,7 @@ export interface CallLog {
     submit_ms?: number;
     /** Socket close to last POST returning — the 30 s window. */
     close_to_submitted_ms?: number;
+    dead_air: { turn: number; ms: number }[];
   };
   audio: {
     frames_in: number;

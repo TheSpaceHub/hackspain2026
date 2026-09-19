@@ -19,7 +19,7 @@ import {
   recordRequest,
   setPlanVocabulary,
 } from '../src/call-state.js';
-import { enforcePolicy, overrideFlooredBooking } from '../src/guards.js';
+import { bookFromState, enforcePolicy, overrideFlooredBooking } from '../src/guards.js';
 import { applyPatch } from '../src/extract.js';
 import { ClinicApi, catalogueSchema } from '../src/clinic-api.js';
 import { FakeClinic, fakeCatalogue } from './fake-clinic.js';
@@ -50,7 +50,10 @@ interface Harness {
   availability: () => unknown;
 }
 
-function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Harness {
+function harness(
+  options: ConstructorParameters<typeof FakeClinic>[0] = {},
+  lastCallerText?: string,
+): Harness {
   const clinic = new FakeClinic(options);
   const api = new ClinicApi({ baseUrl: 'https://fake.local', apiKey: 'k', fetch: clinic.fetch });
   const state = createCallState('call-test');
@@ -60,6 +63,7 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
     api,
     catalogue,
     now: () => NOW,
+    lastCallerText: () => lastCallerText,
     onAvailability: (a) => {
       availability = a;
     },
@@ -81,6 +85,42 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
       return String(result);
     },
   };
+}
+
+{
+  const refused = harness({}, 'Yes. Monday at 6 30 PM is fine');
+  refused.state.quoted = [{
+    provider_id: 'prov_gp',
+    location_id: 'loc_centro',
+    appointment_type_id: 'apt_review',
+    start_time: '2026-10-12T09:15:00+02:00',
+  }];
+  const response = await refused.call('accept_slot', { choice: 1 });
+  check('a spoken time that was not offered is refused', /caller said 06:30/.test(response), true);
+  check('a refused spoken time is not accepted', refused.state.accepted, null);
+
+  const corrected = harness({}, 'the 9 15 please');
+  corrected.state.quoted = [
+    {
+      provider_id: 'prov_gp',
+      location_id: 'loc_centro',
+      appointment_type_id: 'apt_review',
+      start_time: '2026-10-12T11:45:00+02:00',
+    },
+    {
+      provider_id: 'prov_gp',
+      location_id: 'loc_centro',
+      appointment_type_id: 'apt_review',
+      start_time: '2026-10-12T09:15:00+02:00',
+    },
+  ];
+  await corrected.call('accept_slot', { choice: 2 });
+  check('a matching spoken time accepts the matching quoted slot', corrected.state.accepted?.start_time, corrected.state.quoted[1]!.start_time);
+
+  const numeric = harness({}, 'Yes, that one');
+  numeric.state.quoted = [corrected.state.quoted[0]!];
+  await numeric.call('accept_slot', { choice: 1 });
+  check('without a spoken time the numeric choice is honored', numeric.state.accepted?.start_time, numeric.state.quoted[0]!.start_time);
 }
 
 // --- identification --------------------------------------------------------
@@ -366,6 +406,28 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   check('the matched record plan is primary when both plans pay', choosePolicy(state), 'dkv');
   state.accepted!.payable_with = ['sanitas'];
   check('the heard plan wins when it is the only payable plan', choosePolicy(state), 'sanitas');
+}
+
+{
+  setPlanVocabulary(catalogue.plans);
+  const state = createCallState('call-phone-third-party');
+  recordMatch(state, {
+    patient_id: 'pat_001',
+    given_name: 'Marta',
+    first_surname: 'Ruiz',
+    has_visited_before: true,
+    insurer: 'sanitas',
+  }, undefined, 'phone');
+  state.caller_is_patient = false;
+  recordRequest(state, { insurers: ['sanitas'] });
+  recordAccepted(state, {
+    provider_id: 'prov_gp',
+    location_id: 'loc_centro',
+    appointment_type_id: 'apt_review',
+    start_time: '2026-10-08T09:00:00+02:00',
+    payable_with: ['sanitas'],
+  });
+  check('a third-party phone match cannot trigger fallback booking', bookFromState(state), undefined);
 }
 
 {

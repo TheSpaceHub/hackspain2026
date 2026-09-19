@@ -91,6 +91,9 @@ export class CallSession {
   #silenceTimer: NodeJS.Timeout | null = null;
   #nudges = 0;
   #greetingFinished = false;
+  #deadAir: { turn: number; ms: number }[] = [];
+  #pendingDeadAir: { turn: number; at: number }[] = [];
+  #deadAirTurn = 0;
 
   constructor(ws: WebSocket, shared: Shared) {
     this.#ws = ws;
@@ -230,6 +233,10 @@ export class CallSession {
         state: this.#state ?? createCallState(this.#callId, this.#fromNumber),
         api: this.#shared.api,
         catalogue: this.#shared.catalogue,
+        lastCallerText: () => {
+          const turns = this.#session ? buildCallTranscript(this.#session.history) : [];
+          return [...turns].reverse().find((turn) => turn.role === 'user')?.text;
+        },
         onAvailability: (availability) => {
           this.#availability = availability;
         },
@@ -241,7 +248,10 @@ export class CallSession {
       // leaves the conversation on disk. The write crosses to the worker thread.
       session.on(voice.AgentSessionEventTypes.ConversationItemAdded, () => this.#flushTurns());
       session.on(voice.AgentSessionEventTypes.UserInputTranscribed, (event) => {
-        if (event.isFinal) this.#nudges = 0;
+        if (event.isFinal) {
+          this.#nudges = 0;
+          this.#pendingDeadAir.push({ turn: ++this.#deadAirTurn, at: Date.now() });
+        }
         this.#clearSilenceTimer();
       });
       session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
@@ -249,6 +259,12 @@ export class CallSession {
           this.#armSilenceTimer();
         } else {
           this.#clearSilenceTimer();
+        }
+        if (event.newState === 'speaking' && this.#pendingDeadAir.length > 0) {
+          const pending = this.#pendingDeadAir.shift()!;
+          const ms = Date.now() - pending.at;
+          this.#deadAir.push({ turn: pending.turn, ms });
+          clog.info(`[latency] caller→agent audio ${ms} ms`);
         }
       });
       session.on(voice.AgentSessionEventTypes.UserStateChanged, (event) => {
@@ -343,7 +359,7 @@ export class CallSession {
       .then((matches) => {
         // Two people on one landline is a household, not an identification.
         if (matches.length === 1 && !state.matched) {
-          recordMatch(state, matches[0]!);
+          recordMatch(state, matches[0]!, undefined, 'phone');
           attachBrief(state, this.#shared.catalogue, new Date());
         }
       })
@@ -622,6 +638,7 @@ export class CallSession {
         decider_ms: decided.durationMs,
         submit_ms: endedAt - submitStartedAt,
         close_to_submitted_ms: this.#closedAt ? endedAt - this.#closedAt : undefined,
+        dead_air: this.#deadAir,
       },
       audio: {
         frames_in: this.#framesIn,
