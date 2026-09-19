@@ -65,7 +65,11 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
     call: async (name, args = {}) => {
       const tool = tools[name];
       if (!tool) throw new Error(`no tool ${name}`);
-      const result = await tool.execute(args as never, {} as never);
+      // Through the schema, as the live model's arguments go: a rejected call is a
+      // silent turn, and it is the coercions that decide whether one is rejected.
+      const schema = (tool as { parameters?: { parse(v: unknown): unknown } }).parameters;
+      const parsed = schema?.parse ? schema.parse(args) : args;
+      const result = await tool.execute(parsed as never, {} as never);
       return String(result);
     },
   };
@@ -110,6 +114,10 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
   check('and the type the diary chose', notes.includes('appointment_type_id=apt_review'), true);
 
   check('a choice that was never offered is refused', /not one of the times/.test(await h.call('accept_slot', { choice: 7 })), true);
+
+  // The model writes the number as a word of JSON as often as a number of it.
+  await h.call('accept_slot', { choice: '1' });
+  check('a choice sent as a string still lands', h.state.accepted?.start_time, h.state.quoted[0]!.start_time);
 }
 
 {
@@ -138,7 +146,8 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
 
   const open = await h.call('find_slots', { when_phrase: 'as soon as possible', specialty_id: 'spec_gp' });
   check('the soonest search skips the full day', h.state.quoted[0]!.start_time.slice(0, 10), '2026-10-09');
-  check('and offers three', h.state.quoted.length, 3);
+  check('and offers that one alone, not a menu they can pick a later time off', h.state.quoted.length, 1);
+  check('which is the one it read out', /Offer that one and no other/.test(open), true);
   check('spoken, not as ISO', /2026-10-09T/.test(open), false);
 }
 

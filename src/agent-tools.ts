@@ -233,7 +233,13 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         const matching = wanted
           ? availability.slots.filter((s) => inPart(s.start_time, wanted))
           : availability.slots;
-        const shortlist = (matching.length > 0 ? matching : availability.slots).slice(0, 3);
+        const inOrder = [...(matching.length > 0 ? matching : availability.slots)].sort((a, b) =>
+          a.start_time.localeCompare(b.start_time),
+        );
+        // Someone who asked for the soonest gets the soonest, not a menu: read three out
+        // and they pick the one they heard last, which is a later appointment than the
+        // one they rang for. Alternatives come after they turn this one down.
+        const shortlist = inOrder.slice(0, window.earliest ? 1 : 3);
 
         const quoted: QuotedSlot[] = shortlist.map((s) => ({
           provider_id: s.provider_id,
@@ -250,13 +256,16 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           (s, i) =>
             `${i + 1}. ${speakTime(s.start_time)} with ${s.provider_name ?? s.provider_id} at ${siteName(catalogue, s.location_id)}`,
         );
-        return `${moved}Offer these, and nothing else: ${lines.join('; ')}. When they pick one, call accept_slot.`;
+        return window.earliest
+          ? `${moved}The soonest there is: ${lines[0]}. Offer that one and no other. When they say yes, call accept_slot. Only if they turn it down, ask which day would suit and look again.`
+          : `${moved}Offer these, and nothing else: ${lines.join('; ')}. When they pick one, call accept_slot.`;
       },
     }),
 
     accept_slot: llm.tool({
       description: 'The caller said yes to one of the times find_slots returned. Call it straight away, before anything else.',
-      parameters: z.object({ choice: z.number().int().describe('1, 2 or 3 as you read them out') }),
+      // The model sends "3" as often as 3, and a rejected call is a silent turn.
+      parameters: z.object({ choice: z.coerce.number().int().describe('1, 2 or 3 as you read them out') }),
       execute: async (args) => {
         const slot = state.quoted[args.choice - 1];
         if (!slot) return 'That is not one of the times you offered. Read the list again or call find_slots.';
