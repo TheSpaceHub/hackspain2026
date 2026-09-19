@@ -3,3 +3,4 @@ node_modules/
 /calls/
 *.log
 sim/data/
+/prompt-search-runs/
