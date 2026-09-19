@@ -23,7 +23,13 @@ while :; do
   sleep 5
 done
 
-pkill -f 'tsx src/index.ts' || true
+# Only the agent on this port: live (:7860) and sim (:7861) run as separate processes.
+for pid in $(pgrep -f 'tsx src/index.ts'); do
+  if tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qx "PORT=$PORT" \
+     || { [ "$PORT" = 7860 ] && ! tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -q '^PORT='; }; then
+    kill "$pid" || true
+  fi
+done
 sleep 2
 cd "$(dirname "$0")/.."
 # tsx is a node shebang script; a nohup'd shell may not carry the nvm PATH.
