@@ -1,7 +1,8 @@
-import { FlaskConical, Globe, Phone } from 'lucide-react';
+import { FlaskConical, Globe, Hospital, Phone } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useNow } from '@/hooks/use-now';
 import { formatClock, formatDay } from '@/lib/format';
+import { isSimUrl } from '@/lib/sim/client';
 import { cn } from '@/lib/utils';
 
 export interface NavItem {
@@ -18,6 +19,8 @@ interface AppShellProps {
   onNavigate: (id: string) => void;
   /** The clinic API the agent is wired to, from its /health. */
   clinicApi: string | null;
+  /** A shared clinic (sim/) answers on /__sim — a local clinic API is then that, not the mock. */
+  simRunning: boolean;
   children: ReactNode;
 }
 
@@ -84,13 +87,14 @@ function Tabs({ nav, active, onNavigate }: Pick<AppShellProps, 'nav' | 'active' 
  * Which clinic the agent submits to. Worth having in sight at all times: a test run
  * against the real board leaves real records.
  */
-function ClinicApi({ url }: { url: string | null }) {
+function ClinicApi({ url, simRunning }: { url: string | null; simRunning: boolean }) {
   const local = !!url && /\/\/(127\.0\.0\.1|localhost|\[::1\])/.test(url);
-  const Icon = local ? FlaskConical : Globe;
+  const sim = local && simRunning && isSimUrl(url);
+  const Icon = sim ? Hospital : local ? FlaskConical : Globe;
   return (
     <span className="flex items-center gap-1.5" title={url ? `Clinic API · ${url}` : 'Clinic API unknown'}>
       <Icon className="size-4" />
-      {url ? (local ? 'Local mock' : 'Prosper') : '—'}
+      {url ? (sim ? 'Shared clinic' : local ? 'Local mock' : 'Prosper') : '—'}
     </span>
   );
 }
@@ -106,14 +110,14 @@ function Clock() {
   );
 }
 
-export function AppShell({ nav, active, onNavigate, clinicApi, children }: AppShellProps) {
+export function AppShell({ nav, active, onNavigate, clinicApi, simRunning, children }: AppShellProps) {
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background">
       <header className="flex h-12 shrink-0 items-center gap-6 border-b px-4">
         <Brand />
         <Tabs nav={nav} active={active} onNavigate={onNavigate} />
         <div className="ml-auto flex items-center gap-4 text-sm text-muted-foreground">
-          <ClinicApi url={clinicApi} />
+          <ClinicApi url={clinicApi} simRunning={simRunning} />
           <span className="h-4 w-px bg-border" />
           <Clock />
         </div>

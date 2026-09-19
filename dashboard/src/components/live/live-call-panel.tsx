@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
 import { OutcomeBadge } from '@/components/calls/outcome-badge';
 import { RecordCard } from '@/components/calls/record-card';
 import { AlertsPanel, flaggedSeqs } from '@/components/calls/alerts';
+import { ClinicTrace } from '@/components/clinic/clinic-trace';
 import { TimelineEvent, Transcript } from '@/components/calls/transcript';
 import { Badge, BadgeDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -76,6 +77,7 @@ export function LiveCallPanel({ call, now, onClose, onOpenFinished }: LiveCallPa
       <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto bg-muted/40">
         <div className="space-y-5 px-4 py-5">
           <AlertsPanel alerts={call.alerts} />
+          <ClinicTrace callId={call.id} now={now} />
           <TimelineEvent>
             <PhoneIncoming className="size-3.5" />
             Call connected · {formatClock(call.startedAt, true)}

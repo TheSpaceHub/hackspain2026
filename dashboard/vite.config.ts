@@ -5,6 +5,8 @@ import { defineConfig } from 'vite';
 
 /** The agent process from the repo root: its HTTP/SSE console lives on :7860. */
 const AGENT_ORIGIN = process.env.VITE_AGENT_ORIGIN ?? 'http://localhost:7860';
+/** The shared clinic (`pnpm sim`), when the agent is pointed at it: its /__sim routes on :8788. */
+const SIM_ORIGIN = process.env.VITE_SIM_ORIGIN ?? 'http://localhost:8788';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -23,6 +25,7 @@ export default defineConfig({
       '/calls': AGENT_ORIGIN,
       '/stats': AGENT_ORIGIN,
       '/events': { target: AGENT_ORIGIN, changeOrigin: true, ws: false },
+      '/__sim': { target: SIM_ORIGIN, changeOrigin: true, ws: false },
     },
   },
 });
