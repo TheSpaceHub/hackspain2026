@@ -35,6 +35,7 @@ db.exec(`
     decider_notes TEXT,
     decider_conf  REAL,
     recording_path TEXT,
+    clinic_mode   TEXT,
     recording_ms   INTEGER,
     used_floor    INTEGER NOT NULL DEFAULT 0,
     errors        TEXT
@@ -73,9 +74,10 @@ if (!hasAlerts) db.exec(`ALTER TABLE calls ADD COLUMN alerts TEXT`);
 const callColumns = db.prepare(`PRAGMA table_info(calls)`).all() as { name: string }[];
 if (!callColumns.some((c) => c.name === 'recording_path')) db.exec(`ALTER TABLE calls ADD COLUMN recording_path TEXT`);
 if (!callColumns.some((c) => c.name === 'recording_ms')) db.exec(`ALTER TABLE calls ADD COLUMN recording_ms INTEGER`);
+if (!callColumns.some((c) => c.name === 'clinic_mode')) db.exec(`ALTER TABLE calls ADD COLUMN clinic_mode TEXT`);
 
 const insertCall = db.prepare(
-  `INSERT INTO calls (call_id, stream_sid, from_number, started_at) VALUES (?, ?, ?, ?)
+  `INSERT INTO calls (call_id, stream_sid, from_number, started_at, clinic_mode) VALUES (?, ?, ?, ?, ?)
    ON CONFLICT(call_id) DO NOTHING`,
 );
 const insertTurn = db.prepare(
@@ -98,6 +100,12 @@ const recentCalls = db.prepare(
             FROM submissions s WHERE s.call_id = c.call_id) AS outcome
    FROM calls c ORDER BY c.started_at DESC LIMIT ?`,
 );
+const recentCallsByMode = db.prepare(
+  `SELECT c.*, (SELECT COUNT(*) FROM turns t WHERE t.call_id = c.call_id) AS turn_count,
+          (SELECT group_concat(s.action || '=' || s.status || COALESCE(':' || CASE WHEN json_valid(s.body) THEN json_extract(s.body, '$.reason') END, ''))
+            FROM submissions s WHERE s.call_id = c.call_id) AS outcome
+   FROM calls c WHERE COALESCE(c.clinic_mode, 'live') = ? ORDER BY c.started_at DESC LIMIT ?`,
+);
 const oneCall = db.prepare(`SELECT * FROM calls WHERE call_id = ?`);
 const callTurns = db.prepare(`SELECT seq, role, text, at FROM turns WHERE call_id = ? ORDER BY seq`);
 const callSubs = db.prepare(`SELECT * FROM submissions WHERE call_id = ? ORDER BY seq`);
@@ -111,6 +119,16 @@ const statsRows = db.prepare(
           (SELECT COUNT(*) FROM submissions s WHERE s.call_id = c.call_id) AS submissions,
           c.alerts
    FROM calls c WHERE c.started_at >= ? ORDER BY c.started_at`,
+);
+const statsRowsByMode = db.prepare(
+  `SELECT c.started_at, c.ended_at, c.call_ms, c.session_start_ms, c.decider_ms, c.close_to_submitted_ms, c.used_floor,
+          (SELECT s.action FROM submissions s WHERE s.call_id = c.call_id AND s.status IN (200, 409)
+            ORDER BY s.seq LIMIT 1) AS outcome,
+          (SELECT CASE WHEN json_valid(s.body) THEN json_extract(s.body, '$.reason') END FROM submissions s WHERE s.call_id = c.call_id AND s.status IN (200, 409)
+            ORDER BY s.seq LIMIT 1) AS outcome_reason,
+          (SELECT COUNT(*) FROM submissions s WHERE s.call_id = c.call_id) AS submissions,
+          c.alerts
+   FROM calls c WHERE c.started_at >= ? AND COALESCE(c.clinic_mode, 'live') = ? ORDER BY c.started_at`,
 );
 
 const alertCall = db.prepare(
@@ -172,7 +190,7 @@ parentPort?.on('message', (msg: StoreMessage) => {
   switch (msg.type) {
     case 'call_started': {
       const m = msg as CallStarted;
-      guard(() => insertCall.run(m.call_id, m.stream_sid ?? null, m.from_number ?? null, m.started_at));
+      guard(() => insertCall.run(m.call_id, m.stream_sid ?? null, m.from_number ?? null, m.started_at, m.clinic_mode));
       break;
     }
     case 'turn': {
@@ -211,10 +229,12 @@ parentPort?.on('message', (msg: StoreMessage) => {
       try {
         const rows =
           m.name === 'recent'
-            ? recentCalls.all(m.limit ?? 50)
+            ? m.mode
+              ? recentCallsByMode.all(m.mode, m.limit ?? 50)
+              : recentCalls.all(m.limit ?? 50)
             : m.name === 'stats'
               ? computeStats(
-                  statsRows.all(m.since ?? '') as unknown as StatsRow[],
+                  (m.mode ? statsRowsByMode.all(m.since ?? '', m.mode) : statsRows.all(m.since ?? '')) as unknown as StatsRow[],
                   m.since ?? null,
                   m.bucket_ms ?? 3_600_000,
                   Date.now(),

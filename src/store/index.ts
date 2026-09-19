@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { config } from '../config.js';
-import type { CallAlerts, QueryResult, StoreMessage } from './protocol.js';
+import type { CallAlerts, ClinicMode, QueryResult, StoreMessage } from './protocol.js';
 
 /**
  * Handle to the central store. Writes are fire-and-forget postMessage: they cross to the
@@ -51,7 +51,7 @@ export class Store extends EventEmitter {
 
   query(
     name: 'recent' | 'call' | 'stats',
-    opts: { call_id?: string; limit?: number; since?: string; bucket_ms?: number } = {},
+    opts: { call_id?: string; limit?: number; since?: string; bucket_ms?: number; mode?: ClinicMode } = {},
   ): Promise<unknown> {
     const id = this.#nextId++;
     return new Promise((resolve) => {

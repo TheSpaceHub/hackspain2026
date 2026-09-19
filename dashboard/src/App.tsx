@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FinishedCallsView } from '@/components/calls/finished-calls-view';
 import { ClinicView } from '@/components/clinic/clinic-view';
 import { AppShell, type NavItem } from '@/components/layout/app-shell';
@@ -15,15 +15,18 @@ import { useTestCall } from '@/hooks/use-test-call';
 import { callStatus } from '@/lib/agent/model';
 import { consoleMode } from '@/lib/mode';
 import { liveHolds } from '@/lib/sim/model';
+import type { AgentMode } from '@/lib/agent/stats';
 
 /**
  * One feed for the whole console: a single SSE connection to the agent, whatever
  * view is open — plus one to the shared clinic when a sim is running.
  */
 export function App() {
-  const feed = useCallFeed();
+  const [agentMode, setAgentMode] = useState<AgentMode | undefined>();
+  const feed = useCallFeed(agentMode);
   const sim = useSimFeed();
   const { health, setMode, switching, switchError } = useAgentHealth(feed.connected);
+  useEffect(() => setAgentMode(health?.mode), [health?.mode]);
   const [route, navigate] = useRoute();
   const now = useNow(5_000);
   const clinicApi = health?.clinic_api ?? null;
@@ -81,7 +84,7 @@ export function App() {
         switchError={switchError}
       >
         {route.view === 'overview' ? (
-          <OverviewView feed={feed} />
+          <OverviewView feed={feed} mode={agentMode} />
         ) : route.view === 'clinic' ? (
           <ClinicView
             sim={sim}

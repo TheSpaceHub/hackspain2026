@@ -41,8 +41,7 @@ export function feedReducer(state: FeedState, action: FeedAction): FeedState {
       return { ...state, connected: action.connected };
 
     case 'hydrated-list': {
-      const calls = { ...state.calls };
-      for (const call of action.calls) calls[call.id] = mergeCall(calls[call.id], call);
+      const calls = Object.fromEntries(action.calls.map((call) => [call.id, call]));
       return { ...state, calls, live: action.live };
     }
 
@@ -116,6 +115,7 @@ export function mergeCall(prev: Call | undefined, next: Call): Call {
 
   return {
     id: prev.id,
+    clinicMode: prev.clinicMode === 'simulation' ? prev.clinicMode : next.clinicMode,
     // A stub is stamped with whatever moment first mentioned the call; the true start
     // is always the earliest one anyone reported.
     startedAt: earliest(prev.startedAt, next.startedAt),

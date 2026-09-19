@@ -2,12 +2,15 @@
 
 import type { Alert } from './alerts.js';
 
+export type ClinicMode = 'live' | 'simulation';
+
 export interface CallStarted {
   type: 'call_started';
   call_id: string;
   stream_sid?: string;
   from_number?: string;
   started_at: string;
+  clinic_mode: ClinicMode;
 }
 
 export interface TurnRow {
@@ -64,6 +67,7 @@ export interface Query {
   since?: string;
   /** stats: width of each bucket in the volume series. */
   bucket_ms?: number;
+  mode?: ClinicMode;
 }
 
 export type StoreMessage = CallStarted | TurnRow | CallEnded | SubmissionRow | Query;

@@ -191,6 +191,7 @@ export class CallSession {
         stream_sid: this.#streamSid,
         from_number: this.#fromNumber,
         started_at: new Date(this.#startedAt).toISOString(),
+        clinic_mode: this.#clinic.mode,
       });
       this.#recorder = new CallRecorder({
         path: join(config.logDir, 'recordings', sanitizeCallId(this.#callId) + '.wav'),

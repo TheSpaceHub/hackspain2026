@@ -71,10 +71,11 @@ export const RANGES: Range[] = [
 
 const ORIGIN = import.meta.env.PROD ? (import.meta.env.VITE_AGENT_ORIGIN ?? '') : '';
 
-export async function fetchStats(range: Range, now: number, signal?: AbortSignal): Promise<Stats> {
+export async function fetchStats(range: Range, now: number, signal?: AbortSignal, mode?: AgentMode): Promise<Stats> {
   const q = new URLSearchParams({ bucket_ms: String(range.bucketMs) });
   const since = range.since(now);
   if (since) q.set('since', since);
+  if (mode) q.set('mode', mode);
   const res = await fetch(`${ORIGIN}/stats?${q}`, { signal });
   if (!res.ok) throw new Error(`GET /stats → ${res.status}`);
   return (await res.json()) as Stats;

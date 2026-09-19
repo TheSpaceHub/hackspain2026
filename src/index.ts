@@ -158,8 +158,10 @@ async function main(): Promise<void> {
 
     // Read-only console: what happened on a call, and why it decided what it did.
     if (url.pathname === '/calls') {
+      const rawMode = url.searchParams.get('mode');
+      const mode = isClinicMode(rawMode) ? rawMode : undefined;
       void store
-        .query('recent', { limit: Number(url.searchParams.get('limit') ?? 50) })
+        .query('recent', { limit: Number(url.searchParams.get('limit') ?? 50), mode })
         .then((rows) => json({ live: wss.clients.size, calls: rows }));
       return;
     }
@@ -236,8 +238,10 @@ async function main(): Promise<void> {
       const raw = url.searchParams.get('since');
       const since = raw && !Number.isNaN(Date.parse(raw)) ? new Date(raw).toISOString() : undefined;
       const bucket = Number(url.searchParams.get('bucket_ms') ?? 3_600_000);
+      const rawMode = url.searchParams.get('mode');
+      const mode = isClinicMode(rawMode) ? rawMode : undefined;
       void store
-        .query('stats', { since, bucket_ms: Number.isFinite(bucket) ? bucket : 3_600_000 })
+        .query('stats', { since, bucket_ms: Number.isFinite(bucket) ? bucket : 3_600_000, mode })
         .then((stats) => json({ live: wss.clients.size, ...(stats as object) }, stats ? 200 : 503));
       return;
     }

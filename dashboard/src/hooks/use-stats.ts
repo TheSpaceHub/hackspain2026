@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Call } from '@/lib/agent/model';
-import { fetchStats, type Range, type Stats } from '@/lib/agent/stats';
+import { fetchStats, type AgentMode, type Range, type Stats } from '@/lib/agent/stats';
 
 /** A sliding window keeps sliding even when no call ends. */
 const REFRESH_MS = 30_000;
@@ -15,6 +15,7 @@ const DEBOUNCE_MS = 800;
 export function useStats(
   range: Range,
   calls: Call[],
+  mode?: AgentMode,
 ): { stats: Stats | null; updatedAt: number | null; refreshing: boolean; error: boolean; stale: boolean } {
   const [stats, setStats] = useState<Stats | null>(null);
   /** Which range the numbers on screen belong to — a new range dims them until it lands. */
@@ -36,7 +37,7 @@ export function useStats(
       const controller = new AbortController();
       inflight.current = controller;
       setRefreshing(true);
-      fetchStats(range, Date.now(), controller.signal)
+      fetchStats(range, Date.now(), controller.signal, mode)
         .then((s) => {
           setStats(s);
           setLoadedFor(range.id);
@@ -59,7 +60,7 @@ export function useStats(
       clearTimeout(debounce);
       clearInterval(timer);
     };
-  }, [range, signal]);
+  }, [range, signal, mode]);
 
   useEffect(() => () => inflight.current?.abort(), []);
 

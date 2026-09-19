@@ -4,6 +4,7 @@
  * dashboard straight at one — the agent sends `Access-Control-Allow-Origin: *`.
  */
 import { type Call, fromDetail, fromRecentRecord } from './model';
+import type { AgentMode } from './stats';
 import type { CallDetailResponse, FeedEvent, RecentCallsResponse } from './wire';
 
 const ORIGIN = import.meta.env.PROD ? (import.meta.env.VITE_AGENT_ORIGIN ?? '') : '';
@@ -25,8 +26,11 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
 export async function fetchRecentCalls(
   limit = 50,
   signal?: AbortSignal,
+  mode?: AgentMode,
 ): Promise<{ live: number; calls: Call[] }> {
-  const r = await getJson<RecentCallsResponse>(`/calls?limit=${limit}`, signal);
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (mode) q.set('mode', mode);
+  const r = await getJson<RecentCallsResponse>(`/calls?${q}`, signal);
   return { live: r.live, calls: r.calls.map(fromRecentRecord) };
 }
 

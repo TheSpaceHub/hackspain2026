@@ -7,6 +7,7 @@ import { useNow } from '@/hooks/use-now';
 import { useStats } from '@/hooks/use-stats';
 import { callStatus } from '@/lib/agent/model';
 import { RANGES, type RangeId } from '@/lib/agent/stats';
+import type { AgentMode } from '@/lib/agent/stats';
 import { formatClock, formatDuration } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { KpiTile } from './kpi-tile';
@@ -16,6 +17,7 @@ import { VolumeCard } from './volume-card';
 
 interface OverviewViewProps {
   feed: CallFeed;
+  mode?: AgentMode;
 }
 
 /**
@@ -23,11 +25,11 @@ interface OverviewViewProps {
  * shape behind them. One range filter scopes everything below it; "in progress"
  * is the exception, because it is now by definition.
  */
-export function OverviewView({ feed }: OverviewViewProps) {
+export function OverviewView({ feed, mode }: OverviewViewProps) {
   const [rangeId, setRangeId] = useState<RangeId>('today');
   const range = RANGES.find((r) => r.id === rangeId)!;
   const now = useNow(5_000);
-  const { stats, updatedAt, refreshing, error, stale } = useStats(range, feed.calls);
+  const { stats, updatedAt, refreshing, error, stale } = useStats(range, feed.calls, mode);
 
   const inProgress = useMemo(() => feed.calls.filter((c) => callStatus(c, now) === 'live').length, [feed.calls, now]);
 
