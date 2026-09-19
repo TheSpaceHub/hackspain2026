@@ -240,7 +240,10 @@ export class CallSession {
       // A turn lands in the store as soon as it is final, so a crash mid-call still
       // leaves the conversation on disk. The write crosses to the worker thread.
       session.on(voice.AgentSessionEventTypes.ConversationItemAdded, () => this.#flushTurns());
-      session.on(voice.AgentSessionEventTypes.UserInputTranscribed, () => this.#clearSilenceTimer());
+      session.on(voice.AgentSessionEventTypes.UserInputTranscribed, (event) => {
+        if (event.isFinal) this.#nudges = 0;
+        this.#clearSilenceTimer();
+      });
       session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
         if (event.newState === 'listening') {
           this.#armSilenceTimer();
