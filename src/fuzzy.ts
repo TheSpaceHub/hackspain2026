@@ -54,7 +54,7 @@ export function distance(a: string, b: string): number {
  * little more room without letting "Vilar" reach "Molina".
  */
 export function tolerance(needle: string): number {
-  return Math.max(1, Math.floor(needle.length / 5));
+  return Math.max(1, Math.floor(needle.length / 5), needle.length >= 6 ? 2 : 1);
 }
 
 export interface Candidate<T> {

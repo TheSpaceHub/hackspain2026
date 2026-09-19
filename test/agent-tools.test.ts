@@ -35,6 +35,12 @@ function check(name: string, actual: unknown, expected: unknown): void {
 
 const catalogue = catalogueSchema.parse(fakeCatalogue);
 const NOW = new Date('2026-10-07T10:00:00+02:00');
+setPlanVocabulary([
+  ...catalogue.plans,
+  { id: 'cigna', name: 'Cigna' },
+  { id: 'nueva_mutua_sanitaria', name: 'Nueva Mutua Sanitaria' },
+  { id: 'mapfre', name: 'Mapfre Salud' },
+]);
 
 interface Harness {
   clinic: FakeClinic;
