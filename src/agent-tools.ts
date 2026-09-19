@@ -198,7 +198,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         let providerId = request.provider_id;
         let namedProvider: Catalogue['providers'][number] | undefined;
         if (args.provider_name && catalogue) {
-          const found = providersByName(catalogue, args.provider_name);
+          const found = providersByName(catalogue, args.provider_name, true);
           if (found.length > 1) {
             return `The name was unclear; the doctors it could be: ${found.map((p) => `${p.name} in ${p.specialty_name ?? 'unknown'}`).join(', ')}. Ask which one they mean (never say we have no such doctor).`;
           }
@@ -461,7 +461,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
       execute: async (args) => {
         if (!catalogue) return 'Cannot check that from here. Tell the caller the clinic will confirm.';
         if (args.doctor_name) {
-          const found = providersByName(catalogue, args.doctor_name);
+          const found = providersByName(catalogue, args.doctor_name, true);
           if (found.length > 1) {
             return `The name was unclear; it could be: ${found.map((p) => `${p.name} in ${p.specialty_name ?? 'unknown'}`).join(', ')}. Ask which one they mean (never say we have no such doctor).`;
           }

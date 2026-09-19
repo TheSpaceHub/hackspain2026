@@ -228,8 +228,13 @@ export class ClinicApi {
  * Callers say the surname on its own and mishear it while they are at it: "Doctor
  * Villar" is Tomás Vilar. Substring matching alone denied two real doctors, so a near
  * miss counts as a hit and the ambiguity is passed up rather than resolved here.
+ *
+ * `nearest`: the caller is asking for a doctor, so a garbled name still means one of
+ * ours — fall back to the nearest surname(s). Off by default: the extractor and the
+ * identity guard use this to ask "is this word a doctor's name?", where a caller's own
+ * surname must not resolve to a doctor.
  */
-export function providersByName(catalogue: Catalogue, spoken: string): Provider[] {
+export function providersByName(catalogue: Catalogue, spoken: string, nearest = false): Provider[] {
   const needle = fold(spoken).replace(/^(dr|dra|d|dna)\.?\s+/, '');
   if (!needle) return [];
   const folded = catalogue.providers.map((p) => ({ p, name: fold(p.name) }));
@@ -244,9 +249,7 @@ export function providersByName(catalogue: Catalogue, spoken: string): Provider[
     undefined,
     true,
   ).map((m) => m.item);
-  if (near.length > 0) return near;
-  // The caller always means one of our doctors; the line garbled it. Take the nearest
-  // surname(s) by edit distance so the agent asks "Dr X?" instead of denying the doctor.
+  if (near.length > 0 || !nearest) return near;
   const scored = catalogue.providers.map((p) => ({
     p,
     d: Math.min(

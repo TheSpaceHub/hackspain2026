@@ -134,8 +134,9 @@ check('an exact Vilar stays Vilar', providersByName({
 } as Catalogue, 'Vilar').map((p) => p.id), ['PR4']);
 // A garbled name always means one of our doctors: fall back to the nearest surname(s)
 // so the agent asks "Dr X?" rather than denying the doctor exists.
-check('a far-off name still yields the nearest doctor to confirm', providersByName(catalogue, 'Molina').length >= 1, true);
-check('a far-off name never yields nobody', providersByName(catalogue, 'Pérez').length >= 1, true);
+check('a far-off name still yields the nearest doctor to confirm', providersByName(catalogue, 'Molina', true).length >= 1, true);
+check('a far-off surname is not a doctor for the identity guard', providersByName(catalogue, 'Molina'), []);
+check('a far-off name never yields nobody', providersByName(catalogue, 'Pérez', true).length >= 1, true);
 check('closure day has no hours anywhere', siteHours(catalogue, 'LOC_CENTRO', '2026-10-12'), []);
 check('Saturday hours at Centro', siteHours(catalogue, 'LOC_CENTRO', '2026-10-10'), ['09:00-14:00']);
 
