@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button';
 import { type Call, callStatus } from '@/lib/agent/model';
 import { formatClock, formatDuration, formatPhone, shortId } from '@/lib/format';
 import { elapsedMs } from '@/lib/live';
+import { recordingUrl } from '@/lib/agent/client';
+import { ListenButton } from './listen-button';
 
 interface LiveCallPanelProps {
   call: Call;
@@ -68,6 +70,11 @@ export function LiveCallPanel({ call, now, onClose, onOpenFinished }: LiveCallPa
             {formatDuration(elapsedMs(call, now))} · {call.turnCount} {call.turnCount === 1 ? 'turn' : 'turns'} ·{' '}
             <span className="font-mono text-xs">{shortId(call.id)}</span>
           </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {live ? <ListenButton id={call.id} live={live} /> : call.recording.available ? (
+            <audio controls preload="none" src={recordingUrl(call.id)} className="h-8 w-full max-w-xs" />
+          ) : null}
         </div>
         <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close" className="-mr-1 text-muted-foreground">
           <X />

@@ -152,5 +152,9 @@ export function mergeCall(prev: Call | undefined, next: Call): Call {
           ? next.outcomes
           : prev.outcomes,
     alerts: known(next.alerts, prev.alerts),
+    recording: {
+      available: prev.recording.available || next.recording.available,
+      durationMs: known(next.recording.durationMs, prev.recording.durationMs),
+    },
   };
 }

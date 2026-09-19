@@ -1,6 +1,7 @@
 import { PhoneIncoming, PhoneOff } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { type Call, callStatus } from '@/lib/agent/model';
+import { recordingUrl } from '@/lib/agent/client';
 import { formatClock, formatDay, formatDuration, formatPhone, shortId } from '@/lib/format';
 import { ClinicTrace } from '@/components/clinic/clinic-trace';
 import { AlertsPanel, flaggedSeqs } from './alerts';
@@ -79,7 +80,14 @@ export function CallDetail({ call, loading, now }: CallDetailProps) {
             </TimelineEvent>
           )}
 
-          {!loading && <RecordCard call={call} />}
+          {!loading && (
+            <>
+              <RecordCard call={call} />
+              {call.recording.available && (
+                <audio controls preload="none" src={recordingUrl(call.id)} className="h-8 w-full max-w-xs" />
+              )}
+            </>
+          )}
         </div>
       </div>
     </div>
