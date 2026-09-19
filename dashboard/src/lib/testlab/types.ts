@@ -76,11 +76,11 @@ export interface Insight {
   code: string;
   severity: 'blocker' | 'major' | 'minor';
   detail: string;
-  /** The mechanism behind the symptom. */
-  why: string;
+  /** The mechanism behind the symptom. Absent on runs recorded before the lab explained itself. */
+  why?: string;
   suggestion: string;
-  /** The turns the finding was read off. */
-  evidence: string[];
+  /** The turns the finding was read off. Likewise absent on older runs. */
+  evidence?: string[];
 }
 
 export interface Turn {

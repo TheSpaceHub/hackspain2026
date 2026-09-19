@@ -117,9 +117,9 @@ export function ResultDetail({ result, kase }: { result: CaseResult; kase?: Case
                   {i.why}
                 </p>
               )}
-              {i.evidence.length > 0 && (
+              {(i.evidence ?? []).length > 0 && (
                 <pre className="mt-2 overflow-x-auto rounded-md bg-muted/50 px-3 py-2 text-xs whitespace-pre-wrap">
-                  {i.evidence.join('\n')}
+                  {(i.evidence ?? []).join('\n')}
                 </pre>
               )}
               <p className="mt-1 text-muted-foreground">{i.suggestion}</p>

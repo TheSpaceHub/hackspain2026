@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { draftFix } from '@/lib/testlab/client';
 import type { Case, FixPlan, Run } from '@/lib/testlab/types';
+import { DetailBoundary } from './detail-boundary';
 import { Markdown } from './markdown';
 import { ResultDetail } from './result-detail';
 
@@ -119,7 +120,11 @@ export function RunPanel({
                       <Badge variant="outline">{r.vocabulary.replace(/_/g, ' ')}</Badge>
                     )}
                   </button>
-                  {isOpen && <ResultDetail result={r} kase={cases.get(r.case_id)} />}
+                  {isOpen && (
+                    <DetailBoundary key={key}>
+                      <ResultDetail result={r} kase={cases.get(r.case_id)} />
+                    </DetailBoundary>
+                  )}
                 </li>
               );
             })}

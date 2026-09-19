@@ -97,6 +97,35 @@ ok('and quotes the turns it was read off', () => {
   assert.ok(quoted.every((l) => l.startsWith('caller') || l.startsWith('agent')));
 });
 
+ok('a missing record is not diagnosed as a wrong slot or the wrong patient', () => {
+  const refused = insightsFor(kase, {
+    ...base,
+    actions: [{ action: 'NO_ACTION', reason: 'specialty_not_covered' }],
+    grade: {
+      pass: false,
+      misses: [
+        'action: expected "BOOK", got "NO_ACTION"',
+        'patient_id: expected any value, got undefined',
+        'slot.start_time: expected any value, got undefined',
+      ],
+      variant: 0,
+    },
+  });
+  const codes = refused.map((i) => i.code);
+  assert.ok(codes.includes('wrong_action'));
+  assert.ok(!codes.includes('wrong_patient'), 'no patient was named, so nothing was mixed up');
+  assert.ok(!codes.includes('wrong_slot'), 'no time was submitted, so nothing shifted');
+});
+
+ok('but a right record with a hole in it is', () => {
+  const partial = insightsFor(kase, {
+    ...base,
+    actions: [{ action: 'BOOK' }],
+    grade: { pass: false, misses: ['slot.start_time: expected any value, got undefined'], variant: 0 },
+  });
+  assert.ok(partial.some((i) => i.code === 'missing_field'));
+});
+
 ok('the issue carries the why and the transcript with it', () => {
   const [issue] = issueDrafts([{ ...base, insights: found }], new Map([[kase.id, kase]]));
   assert.ok(issue);

@@ -156,9 +156,24 @@ export function insightsFor(kase: Case, result: Omit<CaseResult, 'insights'>): I
     });
   }
 
-  for (const miss of result.grade.misses) {
+  // Field-level diagnosis only means anything once the record is the right kind. When a
+  // BOOK never arrived, every field of it is "missing", and calling that a wrong slot or a
+  // namesake mix-up invents a mechanism the call does not show.
+  const sameShape = wanted.length > 0 && got.join('+') === wanted.join('+');
+  for (const miss of sameShape ? result.grade.misses : []) {
     const field = /^(\w[\w.]*)\b/.exec(miss)?.[1];
-    if (field === 'reason') {
+    if (/got (undefined|null|"")$/.test(miss)) {
+      found.push({
+        code: 'missing_field',
+        severity: 'major',
+        detail: miss,
+        why:
+          `The record is the right kind but went out without its ${field ?? 'field'}, so whatever the agent worked ` +
+          'out on the call never made it as far as the submission.',
+        suggestion: `Carry the ${field ?? 'field'} through from the tool result into the record instead of rebuilding the record from the conversation.`,
+        evidence: near(result.call.transcript, null),
+      });
+    } else if (field === 'reason') {
       found.push({
         code: 'wrong_reason',
         severity: 'major',
@@ -314,8 +329,10 @@ function caseSection(f: CaseResult, kase: Case | undefined): string[] {
   if (f.leaked.length > 0) lines.push(`- said out loud what it must not: ${f.leaked.join(', ')}`);
   if (f.summary) lines.push('', f.summary);
   for (const i of f.insights) {
-    lines.push('', `**${i.code}** — ${i.detail} *Why:* ${i.why}`);
-    if (i.evidence.length > 0) lines.push('', 'Where it shows:', '```', ...i.evidence, '```');
+    // Runs written before the lab explained itself have neither of the last two.
+    lines.push('', `**${i.code}** — ${i.detail}${i.why ? ` *Why:* ${i.why}` : ''}`);
+    const shown = i.evidence ?? [];
+    if (shown.length > 0) lines.push('', 'Where it shows:', '```', ...shown, '```');
   }
   const said = tail(f);
   if (said.length > 0) lines.push('', 'The end of the call:', '```', ...said, '```');
@@ -338,7 +355,7 @@ export function issueDrafts(results: CaseResult[], byId?: Map<string, Case>): Is
     for (const f of failures) {
       for (const i of f.insights) {
         const held = codes.get(i.code);
-        if (!held || (held.evidence.length === 0 && i.evidence.length > 0)) codes.set(i.code, i);
+        if (!held || ((held.evidence ?? []).length === 0 && (i.evidence ?? []).length > 0)) codes.set(i.code, i);
       }
     }
     const worst: Severity = [...codes.values()].some((i) => i.severity === 'blocker')
@@ -354,11 +371,8 @@ export function issueDrafts(results: CaseResult[], byId?: Map<string, Case>): Is
       '',
       ...[...codes.values()].flatMap((i) => [
         `**${i.code}** (${i.severity}) — ${i.detail}`,
-        '',
-        `*Why:* ${i.why}`,
-        ...(i.evidence.length > 0
-          ? ['', 'Heard on the line:', '```', ...i.evidence, '```']
-          : []),
+        ...(i.why ? ['', `*Why:* ${i.why}`] : []),
+        ...((i.evidence ?? []).length > 0 ? ['', 'Heard on the line:', '```', ...i.evidence, '```'] : []),
         '',
       ]),
       '### Suggested fix',
