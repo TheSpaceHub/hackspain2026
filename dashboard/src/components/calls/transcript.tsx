@@ -1,4 +1,4 @@
-import { Headset, User } from 'lucide-react';
+import { Headset, TriangleAlert, User } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Role, Turn } from '@/lib/agent/model';
 import { cn } from '@/lib/utils';
@@ -33,7 +33,7 @@ function Avatar({ role }: { role: Role }) {
   );
 }
 
-function MessageGroup({ role, turns }: { role: Role; turns: Turn[] }) {
+function MessageGroup({ role, turns, flagged }: { role: Role; turns: Turn[]; flagged: ReadonlySet<number> }) {
   const agent = role === 'assistant';
   return (
     <div className={cn('flex items-end gap-2.5', agent && 'flex-row-reverse')}>
@@ -48,11 +48,19 @@ function MessageGroup({ role, turns }: { role: Role; turns: Turn[] }) {
               className={cn(
                 'rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap shadow-xs',
                 agent ? 'border border-brand-100 bg-brand-50 text-neutral-900' : 'border bg-card',
+                // An alert points here: the words that may have leaked another patient's data.
+                flagged.has(turn.seq) && 'border-brand-400 ring-2 ring-brand-600/40',
                 // The tail sits on the last bubble, on the speaker's side.
                 last && (agent ? 'rounded-br-md' : 'rounded-bl-md'),
               )}
             >
               {turn.text || <span className="text-muted-foreground italic">(no words recognised)</span>}
+              {flagged.has(turn.seq) && (
+                <span className="mt-1 flex items-center gap-1 text-xs font-medium text-brand-700">
+                  <TriangleAlert className="size-3" aria-hidden />
+                  Possible leak
+                </span>
+              )}
             </p>
           );
         })}
@@ -72,14 +80,14 @@ export function TimelineEvent({ children }: { children: ReactNode }) {
   );
 }
 
-export function Transcript({ turns }: { turns: Turn[] }) {
+export function Transcript({ turns, flagged = new Set() }: { turns: Turn[]; flagged?: ReadonlySet<number> }) {
   if (turns.length === 0) {
     return <p className="py-6 text-center text-sm text-muted-foreground">Nobody said anything on this call.</p>;
   }
   return (
     <div className="space-y-5">
       {groupTurns(turns).map((g) => (
-        <MessageGroup key={g.turns[0]!.seq} role={g.role} turns={g.turns} />
+        <MessageGroup key={g.turns[0]!.seq} role={g.role} turns={g.turns} flagged={flagged} />
       ))}
     </div>
   );

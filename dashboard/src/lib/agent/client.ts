@@ -29,7 +29,7 @@ export async function fetchCall(id: string, signal?: AbortSignal): Promise<Call 
 
 // --- the live stream --------------------------------------------------------
 
-const ROW_EVENTS = ['call_started', 'turn', 'call_ended', 'submission'] as const;
+const ROW_EVENTS = ['call_started', 'turn', 'call_ended', 'submission', 'call_alerts'] as const;
 
 export interface FeedHandlers {
   onEvent: (event: FeedEvent) => void;

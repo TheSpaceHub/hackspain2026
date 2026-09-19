@@ -1,5 +1,7 @@
 /** Messages between a CallSession and the store worker. Structured-cloned, so keep them small. */
 
+import type { Alert } from './alerts.js';
+
 export interface CallStarted {
   type: 'call_started';
   call_id: string;
@@ -63,6 +65,16 @@ export interface Query {
 }
 
 export type StoreMessage = CallStarted | TurnRow | CallEnded | SubmissionRow | Query;
+
+/**
+ * Worker → main, whenever a call's alerts change: after an agent turn (a leak shows while
+ * the call is live), a submission, or the end. Broadcast to the console like a row.
+ */
+export interface CallAlerts {
+  type: 'call_alerts';
+  call_id: string;
+  alerts: Alert[];
+}
 export interface QueryResult {
   type: 'query_result';
   id: number;

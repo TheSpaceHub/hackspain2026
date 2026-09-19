@@ -1,31 +1,12 @@
-import type { LucideIcon } from 'lucide-react';
-import { CalendarDays, FlaskConical, Globe, Phone } from 'lucide-react';
+import { FlaskConical, Globe, Phone } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Separator } from '@/components/ui/separator';
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuBadge,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarRail,
-  SidebarTrigger,
-} from '@/components/ui/sidebar';
 import { useNow } from '@/hooks/use-now';
 import { formatClock, formatDay } from '@/lib/format';
+import { cn } from '@/lib/utils';
 
 export interface NavItem {
   id: string;
   label: string;
-  icon: LucideIcon;
   count?: number;
   /** Something is happening here right now. */
   pulse?: boolean;
@@ -35,7 +16,6 @@ interface AppShellProps {
   nav: NavItem[];
   active: string;
   onNavigate: (id: string) => void;
-  title: string;
   /** The clinic API the agent is wired to, from its /health. */
   clinicApi: string | null;
   children: ReactNode;
@@ -43,28 +23,60 @@ interface AppShellProps {
 
 function Pulse() {
   return (
-    <span className="relative flex size-2">
+    <span className="relative flex size-1.5">
       <span className="absolute inset-0 animate-ping rounded-full bg-brand-500/60" />
-      <span className="relative size-2 rounded-full bg-brand-500" />
+      <span className="relative size-1.5 rounded-full bg-brand-500" />
     </span>
   );
 }
 
 function Brand() {
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <SidebarMenuButton size="lg" render={<div />} className="hover:bg-transparent active:bg-transparent">
-          <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-brand-500 text-white">
-            <Phone className="size-4" />
-          </div>
-          <div className="grid flex-1 text-left text-sm leading-tight">
-            <span className="truncate font-medium">El Turno</span>
-            <span className="truncate text-xs text-muted-foreground">Agent console</span>
-          </div>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    </SidebarMenu>
+    <div className="flex items-center gap-2">
+      <div className="flex size-7 items-center justify-center rounded-md bg-brand-500 text-white">
+        <Phone className="size-3.5" />
+      </div>
+      <span className="text-sm font-semibold tracking-tight">Agent la L</span>
+    </div>
+  );
+}
+
+/** Underlined tabs: the active one in ink with a 2px rule on the header's bottom edge. */
+function Tabs({ nav, active, onNavigate }: Pick<AppShellProps, 'nav' | 'active' | 'onNavigate'>) {
+  return (
+    <nav className="flex h-full items-stretch gap-1">
+      {nav.map((item) => {
+        const isActive = item.id === active;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onNavigate(item.id)}
+            aria-current={isActive ? 'page' : undefined}
+            className={cn(
+              'relative flex items-center gap-2 px-3 text-sm transition-colors',
+              'after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:rounded-full after:transition-colors',
+              isActive
+                ? 'font-medium text-foreground after:bg-foreground'
+                : 'text-muted-foreground after:bg-transparent hover:text-foreground',
+            )}
+          >
+            {item.label}
+            {!!item.count && (
+              <span
+                className={cn(
+                  'tabular flex h-5 min-w-5 items-center justify-center gap-1 rounded-full px-1.5 text-xs',
+                  item.pulse ? 'bg-brand-600/10 text-brand-700' : 'bg-muted text-muted-foreground',
+                )}
+              >
+                {item.pulse && <Pulse />}
+                {item.count}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -74,96 +86,39 @@ function Brand() {
  */
 function ClinicApi({ url }: { url: string | null }) {
   const local = !!url && /\/\/(127\.0\.0\.1|localhost|\[::1\])/.test(url);
-  const host = url ? url.replace(/^https?:\/\//, '') : 'unknown';
-  const name = url ? (local ? 'Local mock' : 'Prosper') : '—';
+  const Icon = local ? FlaskConical : Globe;
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <SidebarMenuButton size="lg" render={<div />} tooltip={`Clinic API · ${name}`} className="hover:bg-transparent active:bg-transparent">
-          <div className="flex aspect-square size-8 items-center justify-center rounded-lg border">
-            {local ? <FlaskConical className="size-4" /> : <Globe className="size-4" />}
-          </div>
-          <div className="grid flex-1 text-left text-sm leading-tight">
-            <span className="truncate font-medium">{name}</span>
-            <span className="truncate font-mono text-xs text-muted-foreground" title={url ?? undefined}>
-              {host}
-            </span>
-          </div>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    </SidebarMenu>
+    <span className="flex items-center gap-1.5" title={url ? `Clinic API · ${url}` : 'Clinic API unknown'}>
+      <Icon className="size-4" />
+      {url ? (local ? 'Local mock' : 'Prosper') : '—'}
+    </span>
   );
 }
 
-function AppSidebar({ nav, active, onNavigate, clinicApi }: Pick<AppShellProps, 'nav' | 'active' | 'onNavigate' | 'clinicApi'>) {
-  return (
-    <Sidebar collapsible="icon">
-      <SidebarHeader>
-        <Brand />
-      </SidebarHeader>
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Console</SidebarGroupLabel>
-          <SidebarMenu>
-            {nav.map((item) => (
-              <SidebarMenuItem key={item.id}>
-                <SidebarMenuButton tooltip={item.label} isActive={item.id === active} onClick={() => onNavigate(item.id)}>
-                  <item.icon />
-                  <span>{item.label}</span>
-                </SidebarMenuButton>
-                {item.count !== undefined && (
-                  <SidebarMenuBadge className="gap-1.5">
-                    {item.pulse && <Pulse />}
-                    {item.count}
-                  </SidebarMenuBadge>
-                )}
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
-        </SidebarGroup>
-      </SidebarContent>
-      <SidebarFooter>
-        <SidebarGroupLabel>Clinic API</SidebarGroupLabel>
-        <ClinicApi url={clinicApi} />
-      </SidebarFooter>
-      <SidebarRail />
-    </Sidebar>
-  );
-}
-
-function Header({ title }: { title: string }) {
+function Clock() {
   const now = useNow(1_000);
   const iso = new Date(now).toISOString();
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 px-4">
-      <SidebarTrigger className="-ml-1" />
-      <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-center" />
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>El Turno</BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>{title}</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
-      <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground" title="Clinic time, Europe/Madrid">
-        <CalendarDays className="size-4" />
-        <span>{formatDay(iso, now)}</span>
-        <span className="tabular text-foreground">{formatClock(iso, true)}</span>
-      </div>
-    </header>
+    <span className="flex items-center gap-1.5" title="Clinic time, Europe/Madrid">
+      {formatDay(iso, now)}
+      <span className="tabular text-foreground">{formatClock(iso, true)}</span>
+    </span>
   );
 }
 
-export function AppShell({ nav, active, onNavigate, title, clinicApi, children }: AppShellProps) {
+export function AppShell({ nav, active, onNavigate, clinicApi, children }: AppShellProps) {
   return (
-    <SidebarProvider className="h-svh overflow-hidden">
-      <AppSidebar nav={nav} active={active} onNavigate={onNavigate} clinicApi={clinicApi} />
-      <SidebarInset className="min-w-0 overflow-hidden">
-        <Header title={title} />
-        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
-      </SidebarInset>
-    </SidebarProvider>
+    <div className="flex h-svh flex-col overflow-hidden bg-background">
+      <header className="flex h-12 shrink-0 items-center gap-6 border-b px-4">
+        <Brand />
+        <Tabs nav={nav} active={active} onNavigate={onNavigate} />
+        <div className="ml-auto flex items-center gap-4 text-sm text-muted-foreground">
+          <ClinicApi url={clinicApi} />
+          <span className="h-4 w-px bg-border" />
+          <Clock />
+        </div>
+      </header>
+      <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
+    </div>
   );
 }
