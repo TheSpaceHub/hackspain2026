@@ -23,7 +23,7 @@ import {
   overrideFlooredBooking,
 } from './guards.js';
 import { mulawToPcm16 } from './mulaw.js';
-import { callContext } from './log.js';
+import { callContext, clog } from './log.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
 import { submitActions, type SubmitResult } from './submit.js';
@@ -85,6 +85,9 @@ export class CallSession {
   #availability: Availability | null = null;
   /** Turns already handed to the store, so a live flush never re-sends one. */
   #turnsWritten = 0;
+  #deadAir: { turn: number; ms: number }[] = [];
+  #pendingDeadAir: { turn: number; at: number }[] = [];
+  #deadAirTurn = 0;
 
   constructor(ws: WebSocket, shared: Shared) {
     this.#ws = ws;
@@ -224,6 +227,10 @@ export class CallSession {
         state: this.#state ?? createCallState(this.#callId, this.#fromNumber),
         api: this.#shared.api,
         catalogue: this.#shared.catalogue,
+        lastCallerText: () => {
+          const turns = this.#session ? buildCallTranscript(this.#session.history) : [];
+          return [...turns].reverse().find((turn) => turn.role === 'user')?.text;
+        },
         onAvailability: (availability) => {
           this.#availability = availability;
         },
@@ -237,6 +244,18 @@ export class CallSession {
       // A turn lands in the store as soon as it is final, so a crash mid-call still
       // leaves the conversation on disk. The write crosses to the worker thread.
       session.on(voice.AgentSessionEventTypes.ConversationItemAdded, () => this.#flushTurns());
+      session.on(voice.AgentSessionEventTypes.UserInputTranscribed, (event) => {
+        if (!event.isFinal) return;
+        this.#pendingDeadAir.push({ turn: ++this.#deadAirTurn, at: Date.now() });
+      });
+      session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
+        if (event.newState !== 'speaking' || this.#pendingDeadAir.length === 0) return;
+        const pending = this.#pendingDeadAir.shift()!;
+        const ms = Date.now() - pending.at;
+        const turn = pending.turn;
+        this.#deadAir.push({ turn, ms });
+        clog.info(`[latency] caller→agent audio ${ms} ms`);
+      });
     } catch (err) {
       this.#errors.push(`session start: ${String(err)}`);
       console.error(`[call ${this.#callId}] session start failed: ${String(err)}`);
@@ -251,7 +270,7 @@ export class CallSession {
       .findPatient({ phone })
       .then((matches) => {
         // Two people on one landline is a household, not an identification.
-        if (matches.length === 1 && !state.matched) recordMatch(state, matches[0]!);
+        if (matches.length === 1 && !state.matched) recordMatch(state, matches[0]!, undefined, 'phone');
       })
       .catch((err: unknown) => this.#errors.push(`phone lookup: ${String(err)}`));
   }
@@ -502,6 +521,7 @@ export class CallSession {
         decider_ms: decided.durationMs,
         submit_ms: endedAt - submitStartedAt,
         close_to_submitted_ms: this.#closedAt ? endedAt - this.#closedAt : undefined,
+        dead_air: this.#deadAir,
       },
       audio: {
         frames_in: this.#framesIn,
