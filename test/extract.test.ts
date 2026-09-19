@@ -73,6 +73,37 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
   check('the notes say whose appointment it is', /Caller is NOT the patient/.test(readCallState(state)), true);
 }
 
+// --- a name the caller never said -------------------------------------------
+
+{
+  const heard = 'My name is Josefa Domínguez.';
+  const state = createCallState('call-grounded');
+  applyPatch(
+    state,
+    { patient: { given_name: 'Josefa', first_surname: 'Domínguez', second_surname: 'Navarro' } },
+    heard,
+  );
+  check('what was said is written down', state.patient.first_surname, 'Domínguez');
+  check('a second surname nobody gave is not', state.patient.second_surname, undefined);
+
+  const spelled = createCallState('call-spelled');
+  applyPatch(spelled, { patient: { national_id: '48064716Y' } }, 'It is 4 8 0 6 4 7 1 6 Y.');
+  check('an id spelled out still counts as said', spelled.patient.national_id, '48064716Y');
+}
+
+{
+  const state = createCallState('call-dob');
+  applyPatch(state, { patient: { date_of_birth: '2001-09-19' } }, 'Um, 2001 19 19.');
+  check('three numbers that are not a date are left off', state.patient.date_of_birth, undefined);
+
+  applyPatch(state, { patient: { date_of_birth: '2001-09-19' } }, '19 September 2001.');
+  check('a date with its month named is taken', state.patient.date_of_birth, '2001-09-19');
+
+  const digits = createCallState('call-dob-2');
+  applyPatch(digits, { patient: { date_of_birth: '2001-09-19' } }, '19 09 2001');
+  check('and so is one said in digits', digits.patient.date_of_birth, '2001-09-19');
+}
+
 // --- and what it costs the caller -------------------------------------------
 
 {

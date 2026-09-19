@@ -67,7 +67,8 @@ Rules:
 - Omit any key you did not hear. An empty object is the right answer for small talk.
 - Never guess, never infer, never fill a gap with "unknown" or a placeholder. If it was not said, it is not there.
 - Copy values as the caller said them; spelled-out letters and digits are normalised downstream, so pass "4 8 0 6 4 7 1 6 Y" through unchanged.
-- Spanish names carry two surnames: "Josefa Dominguez Navarro" is given_name Josefa, first_surname Dominguez, second_surname Navarro.
+- Spanish names carry two surnames: "Josefa Dominguez Navarro" is given_name Josefa, first_surname Dominguez, second_surname Navarro. A caller who gives one surname has given one surname — leave second_surname out rather than completing the name for them.
+- date_of_birth is ISO yyyy-mm-dd, and only when the caller gave a day, a month and a year that make a real date. "2001 19 19" is not one: leave it out so the receptionist asks again.
 - caller_is_patient is false only when the caller says the appointment is for someone else; set relationship when they name it.
 - retracted lists fields the caller corrected and has not yet replaced.
 - when_phrase is the caller's own words for when they want to come ("Thursday morning"), never a date you computed.
@@ -128,7 +129,7 @@ export function createExtractor(deps: ExtractorDeps): Extractor {
 
     const raw = await complete(SYSTEM_PROMPT, user, AbortSignal.timeout(timeoutMs));
     const patch = parsePatch(raw);
-    if (patch) applyPatch(state, patch);
+    if (patch) applyPatch(state, patch, userText);
   };
 
   return {
@@ -184,15 +185,73 @@ export function parsePatch(raw: string): ExtractedPatch | null {
   return null;
 }
 
+function tight(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+const MONTH_NAMES =
+  /january|february|march|april|may|june|july|august|september|october|november|december|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre/i;
+
+/** Fields a model completes from the shape of a Spanish name or a date rather than from speech. */
+const MUST_BE_HEARD = new Set<PatientField>([
+  'given_name',
+  'first_surname',
+  'second_surname',
+  'date_of_birth',
+  'national_id',
+  'phone',
+]);
+
+/**
+ * Was this actually said? A surname the caller never spoke and a date assembled out of
+ * three numbers that do not make one are both worse than an empty field: the receptionist
+ * asks again for what is missing, and never asks about what she has wrong.
+ */
+export function heardIt(field: PatientField, value: string, heard: string): boolean {
+  if (!MUST_BE_HEARD.has(field)) return true;
+  const hay = tight(heard);
+  const saidDigits = heard.replace(/\D/g, '');
+
+  // A number said in words ("six hundred, nine nine nine") has no digits to check
+  // against, and a wrong drop costs more than a wrong keep.
+  if (/\d/.test(value) && saidDigits === '') return true;
+
+  if (field === 'date_of_birth') {
+    const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (parts === null) return hay.includes(tight(value));
+    const [, year, month, day] = parts;
+    const said: string[] = heard.match(/\d+/g) ?? [];
+    const has = (n: string): boolean => said.includes(n) || said.includes(String(Number(n)));
+    return (
+      has(year!) && has(day!) && (has(month!) || MONTH_NAMES.test(heard))
+    );
+  }
+
+  const digits = value.replace(/\D/g, '');
+  if (digits.length >= 4) return saidDigits.includes(digits);
+  const spoken = tight(value);
+  return spoken.length >= 2 && hay.includes(spoken);
+}
+
 /**
  * The patch is speech, so every value goes through the same normalizers a tool call
  * used to, and a repeat of something already on the notes is dropped rather than
  * re-journalled — the caller confirming their name three times is one fact.
+ *
+ * `heard` is the turn the patch came from; pass it and anything not in it is dropped.
  */
-export function applyPatch(state: CallState, patch: ExtractedPatch): void {
+export function applyPatch(state: CallState, patch: ExtractedPatch, heard?: string): void {
   for (const field of PATIENT_FIELDS) {
     const value = real(patch.patient?.[field]);
     if (value === undefined) continue;
+    if (heard !== undefined && !heardIt(field, value, heard)) {
+      console.warn(`[extract] dropped ${field} "${value}": not in what the caller said`);
+      continue;
+    }
     const before = state.patient[field];
     const result = recordPatientField(state, field, value);
     if (before === result.value) state.journal.pop();
