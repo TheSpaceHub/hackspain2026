@@ -264,7 +264,11 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         const matching = wanted
           ? availability.slots.filter((s) => inPart(s.start_time, wanted))
           : availability.slots;
-        const inOrder = [...(matching.length > 0 ? matching : availability.slots)].sort((a, b) =>
+        // Nothing in the half of the day they asked for is worth saying out loud: a
+        // caller who wanted the afternoon and hears ten forty-five thinks they were
+        // ignored, not accommodated.
+        const elsewhere = wanted !== undefined && matching.length === 0;
+        const inOrder = [...(elsewhere ? availability.slots : matching)].sort((a, b) =>
           a.start_time.localeCompare(b.start_time),
         );
         // Someone who asked for the soonest gets the soonest, not a menu: read three out
@@ -283,13 +287,14 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         recordQuote(state, quoted);
 
         const moved = window.adjusted_from ? `The day they asked for is closed, so this is from ${window.adjusted_from}. ` : '';
+        const partNote = elsewhere ? `Nothing in the ${wanted} that day, so say so before you offer these. ` : '';
         const lines = quoted.map(
           (s, i) =>
             `${i + 1}. ${speakTime(s.start_time)} with ${s.provider_name ?? s.provider_id} at ${siteName(catalogue, s.location_id)}`,
         );
         return (window.earliest
-          ? `${moved}The soonest there is: ${lines[0]}. Offer that one and no other. When they say yes, call accept_slot. Only if they turn it down, ask which day would suit and look again.`
-          : `${moved}Offer these, and nothing else: ${lines.join('; ')}. When they pick one, call accept_slot.`) + specialtyNote;
+          ? `${moved}${partNote}The soonest there is: ${lines[0]}. Offer that one and no other. When they say yes, call accept_slot. Only if they turn it down, ask which day would suit and look again.`
+          : `${moved}${partNote}Offer these, and nothing else: ${lines.join('; ')}. When they pick one, call accept_slot.`) + specialtyNote;
       },
     }),
 
