@@ -1,0 +1,95 @@
+/**
+ * The two rules the model is not allowed to get wrong.
+ *
+ * Both were tools in the first draft and are not: a red flag that the model may choose
+ * not to call is not a safeguard, and an appointment type it may choose to pick is a
+ * boolean off the record dressed up as a decision. They run over the transcript and the
+ * lookups after the call, on the way to submission.
+ */
+
+import type { Action, Patient } from './schema.js';
+import type { Availability } from './clinic-api.js';
+
+export type RedFlag =
+  | 'chest_pain_breathless'
+  | 'stroke_signs'
+  | 'sudden_breathlessness'
+  | 'uncontrolled_bleeding'
+  | 'head_injury_confusion';
+
+/**
+ * Each of the five published cases needs two things said, not one word. "Chest pain" on
+ * its own is an ordinary complaint and the clinic books it; with breathlessness it is a
+ * 112 call. Escalating an ordinary complaint is as wrong as missing a real one.
+ */
+const RED_FLAGS: { flag: RedFlag; all: RegExp[] }[] = [
+  {
+    flag: 'chest_pain_breathless',
+    all: [/\bchest\b/, /\b(pain|tight|tightness|pressure|crushing)\b/, /\b(breath|breathing|breathless|winded)\b/],
+  },
+  {
+    flag: 'stroke_signs',
+    all: [/\b(face|facial|mouth|eye)\b/, /\b(droop|drooping|drooped|fallen|numb|weak|weakness)\b/, /\b(arm|speech|slur|slurred|talk|words)\b/],
+  },
+  {
+    flag: 'sudden_breathlessness',
+    all: [/\b(sudden|suddenly|out of nowhere|all at once)\b/, /\b(can'?t|cannot|struggling to|unable to)\b/, /\bbreath|breathe\b/],
+  },
+  {
+    flag: 'uncontrolled_bleeding',
+    all: [/\b(bleed|bleeding|blood)\b/, /\b(heavy|heavily|badly|won'?t stop|will not stop|pouring|soaking)\b/],
+  },
+  {
+    flag: 'head_injury_confusion',
+    all: [/\b(head|skull)\b/, /\b(bang|banged|hit|knock|knocked|fell|injury)\b/, /\b(confus|vomit|sick|sickness|drowsy)\w*\b/],
+  },
+];
+
+export interface EmergencyFinding {
+  flag: RedFlag;
+  /** The sentence that tripped it, for the call log — never for the caller. */
+  evidence: string;
+}
+
+/** The first published case the transcript describes, if any. */
+export function detectMedicalEmergency(transcript: string): EmergencyFinding | null {
+  for (const sentence of transcript.split(/(?<=[.!?\n])\s+/)) {
+    const text = sentence.toLowerCase();
+    for (const { flag, all } of RED_FLAGS) {
+      if (all.every((re) => re.test(text))) return { flag, evidence: sentence.trim() };
+    }
+  }
+  return null;
+}
+
+/**
+ * A call that described a red flag escalates and books nothing, whatever else was agreed
+ * on it. Ordering matters: a booking submitted alongside the escalation is still a
+ * booking the clinic has to honour.
+ */
+export function applyEmergencyGuard(actions: Action[], transcript: string): { actions: Action[]; finding: EmergencyFinding | null } {
+  const finding = detectMedicalEmergency(transcript);
+  if (!finding) return { actions, finding: null };
+  return { actions: [{ action: 'escalate', reason: 'medical_emergency' }], finding };
+}
+
+export type AppointmentKind = 'first_visit' | 'review';
+
+/** Follows the record, never the caller's phrasing: they will call a review a check-up. */
+export function appointmentKindFor(matched: Patient | null): AppointmentKind {
+  return matched?.has_visited_before === true ? 'review' : 'first_visit';
+}
+
+/**
+ * /availability already applied history and eligibility, so the type it returns is the
+ * one to submit. Anything else the model produced is dropped rather than corrected: an
+ * id we invented is an id the clinic rejects.
+ */
+export function enforceAppointmentType(
+  action: Extract<Action, { action: 'book' }>,
+  availability: Availability,
+): { action: Extract<Action, { action: 'book' }>; corrected: boolean } {
+  const id = availability.appointment_type?.id ?? availability.slots.find((s) => s.start_time === action.slot)?.appointment_type_id;
+  if (!id || id === action.appointment_type_id) return { action, corrected: false };
+  return { action: { ...action, appointment_type_id: id }, corrected: true };
+}
