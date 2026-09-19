@@ -11,6 +11,7 @@ import type { RunRequest, SuiteResponse } from '@/lib/testlab/types';
 interface RunControlsProps {
   suite: SuiteResponse;
   busy: boolean;
+  generating: boolean;
   onRun: (req: RunRequest) => void;
   onRegenerate: (req: { seed: number; random: number; viable: boolean }) => void;
 }
@@ -21,7 +22,7 @@ interface RunControlsProps {
  * between them, which is how "all of problem 6, from someone who talks over you
  * and will not listen" is expressed — one call each, not one call per trait.
  */
-export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsProps) {
+export function RunControls({ suite, busy, generating, onRun, onRegenerate }: RunControlsProps) {
   const [problems, setProblems] = useState<ReadonlySet<string>>(() => new Set());
   const [behaviours, setBehaviours] = useState<ReadonlySet<string>>(() => new Set(['cooperative']));
   const [mode, setMode] = useState<'persona' | 'script'>(suite.persona_caller ? 'persona' : 'script');
@@ -239,8 +240,8 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
                     onChange={(e) => setRandom(Number(e.target.value))}
                   />
                 </label>
-                <Button variant="outline" size="sm" onClick={() => onRegenerate({ seed, random, viable })} disabled={busy}>
-                  <Dices /> Generate
+                <Button variant="outline" size="sm" onClick={() => onRegenerate({ seed, random, viable })} disabled={busy || generating}>
+                  <Dices /> {generating ? 'Generating…' : 'Generate'}
                 </Button>
               </div>
               <div className="mt-2 flex items-center justify-between gap-2">
@@ -254,13 +255,19 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
                 <Button
                   size="sm"
                   onClick={runGenerated}
-                  disabled={busy || generated.length === 0 || behaviours.size === 0 || vocabularies.size === 0}
+                  disabled={busy || generating || generated.length === 0 || behaviours.size === 0 || vocabularies.size === 0}
                   title="Run only the generated asks, with the caller set above"
                 >
-                  <Play /> Run {generated.length} generated
+                  <Play /> {generating ? 'Generating…' : `Run ${generated.length} generated`}
                 </Button>
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">Generated asks are listed under “The real call” below.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {generated.length} in the suite (seed {suite.generation.seed}
+                {suite.generation.viable ? ', viable only' : ''}) · listed under “The real call” below.
+                {random !== suite.generation.random || viable !== suite.generation.viable || seed !== suite.generation.seed
+                  ? ' Press Generate to apply the new settings.'
+                  : ''}
+              </p>
             </>
           ) : (
             <p className="text-xs text-muted-foreground">Start the mock with MOCK_MIRROR=1 for real-clinic cases.</p>

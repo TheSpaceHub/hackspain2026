@@ -17,6 +17,7 @@ export interface TestLab {
   runs: RunSummary[];
   run: Run | null;
   running: boolean;
+  generating: boolean;
   select: (runId: string | null) => void;
   start: (req: RunRequest) => Promise<void>;
   stop: (runId: string) => Promise<void>;
@@ -31,6 +32,7 @@ export function useTestLab(): TestLab {
   const [error, setError] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [run, setRun] = useState<Run | null>(null);
+  const [generating, setGenerating] = useState(false);
   const selected = useRef<string | null>(null);
 
   const refreshRuns = useCallback(async (): Promise<void> => {
@@ -118,12 +120,15 @@ export function useTestLab(): TestLab {
 
   const regenerate = useCallback(async (req: { seed?: number; random?: number; viable?: boolean }) => {
     setError(null);
+    setGenerating(true);
     try {
       setSuite(await regenerateSuite(req));
     } catch (err) {
       setError(String(err));
+    } finally {
+      setGenerating(false);
     }
   }, []);
 
-  return { suite, error, runs, run, regenerate, running: run?.status === 'running', select, start, stop };
+  return { suite, error, runs, run, regenerate, running: run?.status === 'running', generating, select, start, stop };
 }

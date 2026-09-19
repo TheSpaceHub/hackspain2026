@@ -30,6 +30,7 @@ export function TestingView() {
           <RunControls
             suite={lab.suite}
             busy={lab.running}
+            generating={lab.generating}
             onRun={(req) => void lab.start(req)}
             onRegenerate={(req) => void lab.regenerate(req)}
           />
