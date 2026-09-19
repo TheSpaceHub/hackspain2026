@@ -65,10 +65,9 @@ class PlannerStream extends llm.LLMStream {
     const say = await this.#planner.turn(transcript);
     clog.info(`[planner] turn llm_calls=${this.#planner.llmCalls - before} rounds=${this.#planner.rounds} ${this.#planner.lastTurnMs} ms`);
     if (this.closed) return;
-    this.output.put({
+    this.queue.put({
       id: randomUUID(),
       delta: { role: 'assistant', content: say },
     });
-    this.close();
   }
 }
