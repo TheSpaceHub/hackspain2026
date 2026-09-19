@@ -2,9 +2,10 @@
  * How they talk, as opposed to what they are like to deal with.
  *
  * A behaviour decides whether the caller listens; a vocabulary decides what their
- * sentences are made of — whether "the knee thing, the usual place, soon" ever
- * becomes a specialty, a site and a date. The two multiply: a vague caller who
- * also will not listen is a different call from either on its own.
+ * sentences are made of — none of it put on for the occasion — and so whether
+ * "the knee thing, the usual place, soon" ever becomes a specialty, a site and a
+ * date. The two multiply: a vague caller who also will not listen is a different
+ * call from either on its own.
  */
 export interface Vocabulary {
   id: string;
@@ -26,9 +27,9 @@ export const VOCABULARIES: Vocabulary[] = [
     label: 'Vague',
     description: 'Never names the specialty, the doctor or the day outright.',
     instructions: [
-      'You speak in vague terms and you avoid naming things. It is "the bone people", "the usual place",',
-      '"my regular one", "soon-ish, after work". When pressed for a specific you give another approximation',
-      'first, and only name the actual thing if they ask you twice.',
+      'You are not very sure of the names for any of this, so you describe things instead: "the bone people",',
+      '"the usual place", "my regular one", "soon-ish, after work". Asked to be exact you reach for another',
+      'rough description first, and the actual name only comes to you if they keep at it.',
     ].join(' '),
   },
   {
@@ -55,9 +56,9 @@ export const VOCABULARIES: Vocabulary[] = [
     label: 'Over-specific',
     description: 'Medical jargon and self-diagnosis instead of a plain request.',
     instructions: [
-      'You have read about your condition and you talk in its language: you name syndromes, procedures and',
-      'medication doses, you self-diagnose confidently, and you ask for the test you have decided you need',
-      'rather than describing what is wrong.',
+      'You have read a great deal about your condition and you talk in its language: syndromes, procedures,',
+      'doses. You are confident you know what it is, so you ask for the test you have decided on rather than',
+      'describing what is actually wrong.',
     ].join(' '),
   },
   {
@@ -65,8 +66,8 @@ export const VOCABULARIES: Vocabulary[] = [
     label: 'One-word answers',
     description: 'Says as little as a sentence can carry.',
     instructions: [
-      'You answer in one or two words. "Yes." "Monday." "No." You volunteer nothing, you never explain, and',
-      'you make them ask for every single field separately.',
+      'You are not one for talking on the phone. "Yes." "Monday." "No." You answer what you were asked and',
+      'nothing more — not to be difficult, it just does not occur to you to add anything.',
     ].join(' '),
   },
 ];
@@ -87,7 +88,7 @@ export function blendVocabularies(ids: readonly string[]): Vocabulary {
     label: chosen.map((v) => v.label).join(' + '),
     description: `All at once: ${chosen.map((v) => v.description.replace(/\.$/, '')).join('; ')}.`,
     instructions: [
-      'Your way of speaking is all of these at the same time:',
+      'You talk in all of these ways at once, in the same sentences:',
       ...chosen.map((v) => `- ${v.label}: ${v.instructions}`),
     ].join('\n'),
   };
