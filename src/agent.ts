@@ -198,7 +198,8 @@ export function fileOnCaller(state: CallState): string | undefined {
   };
   const rejected = Object.entries(state.rejected).map(([field, value]) => {
     const label = fieldLabels[field as PatientField];
-    return `The ${label} they gave ("${value.spoken}") does not check out: ${value.problem}. Tell them the number does not add up and ask them to repeat it slowly, digits then letter, before moving on.`;
+    const how = field === 'national_id' ? 'Tell them the number does not add up and ask them to repeat it slowly, digits then letter,' : 'Tell them so and ask them to repeat it,';
+    return `The ${label} they gave ("${value.spoken}") does not check out: ${value.problem}. ${how} before moving on.`;
   });
   const missing =
     state.request.intent === 'register'
