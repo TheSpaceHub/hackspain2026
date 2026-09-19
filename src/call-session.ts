@@ -16,7 +16,12 @@ import { createExtractor, type Extractor } from './extract.js';
 import type { Availability, Catalogue, ClinicApi } from './clinic-api.js';
 import { config } from './config.js';
 import { FLOOR_ACTION, decide, type DeciderResult } from './decider.js';
-import { applyEmergencyGuard, enforceAppointmentType, enforcePolicy } from './guards.js';
+import {
+  applyEmergencyGuard,
+  enforceAppointmentType,
+  enforcePolicy,
+  overrideFlooredBooking,
+} from './guards.js';
 import { mulawToPcm16 } from './mulaw.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
@@ -378,9 +383,25 @@ export class CallSession {
 
   /** Always yields at least one action. */
   #actionsFor(decided: DeciderResult): Action[] {
-    if (decided.output.actions.length > 0) return decided.output.actions;
-    this.#errors.push('decider returned no actions');
-    return [FLOOR_ACTION];
+    if (decided.usedFloor) {
+      this.#errors.push(`floor: ${decided.error ?? decided.output.notes ?? 'unknown'}`);
+    }
+    let actions = decided.output.actions;
+    if (actions.length === 0) {
+      this.#errors.push('decider returned no actions');
+      actions = [FLOOR_ACTION];
+    }
+    if (this.#state) {
+      const overridden = overrideFlooredBooking(actions, this.#state);
+      if (overridden !== actions) {
+        const reason = actions.find((action) => action.action === 'no_action')?.reason ?? 'unknown';
+        this.#errors.push(
+          `decider said no_action/${reason} with an accepted slot on file; booked from state`,
+        );
+        actions = overridden;
+      }
+    }
+    return actions;
   }
 
   /**
@@ -502,4 +523,3 @@ export class CallSession {
     await writeCallLog(entry);
   }
 }
-

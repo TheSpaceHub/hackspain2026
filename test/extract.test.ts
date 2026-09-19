@@ -8,7 +8,7 @@
  */
 
 import { applyPatch, createExtractor, parsePatch, type Complete } from '../src/extract.js';
-import { createCallState, readCallState } from '../src/call-state.js';
+import { createCallState, readCallState, recordMatch } from '../src/call-state.js';
 
 let failed = 0;
 function check(name: string, actual: unknown, expected: unknown): void {
@@ -71,6 +71,37 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
   const state = createCallState('call-4');
   applyPatch(state, { caller_is_patient: false, caller_name: 'Ana', relationship: 'daughter' });
   check('the notes say whose appointment it is', /Caller is NOT the patient/.test(readCallState(state)), true);
+}
+
+{
+  const state = createCallState('call-match');
+  recordMatch(state, {
+    patient_id: 'P1',
+    given_name: 'Guillermo',
+    first_surname: 'Torres',
+    second_surname: 'Molina',
+  });
+  applyPatch(state, { patient: { given_name: 'Fernando', first_surname: 'Serrano' } });
+  check('a caller contradicting the phone match drops it', state.matched, null);
+  check('and keeps the name that contradicted it', state.phone_match_rejected, 'Fernando Serrano');
+
+  const givenOnly = createCallState('call-match-given');
+  recordMatch(givenOnly, { patient_id: 'P1', given_name: 'Guillermo', first_surname: 'Torres' });
+  applyPatch(givenOnly, { patient: { given_name: 'Guillermo' } });
+  check('a matching given name keeps the phone match', givenOnly.matched?.patient_id, 'P1');
+
+  const stt = createCallState('call-match-stt');
+  recordMatch(stt, { patient_id: 'P1', given_name: 'Guillermo', first_surname: 'Torres' });
+  applyPatch(stt, { patient: { given_name: 'Gillermo', first_surname: 'Torres' } });
+  check('a small STT name error keeps the phone match', stt.matched?.patient_id, 'P1');
+
+  const thirdParty = createCallState('call-match-third-party');
+  recordMatch(thirdParty, { patient_id: 'P1', given_name: 'Guillermo', first_surname: 'Torres' });
+  applyPatch(thirdParty, {
+    caller_is_patient: false,
+    patient: { given_name: 'Fernando', first_surname: 'Serrano' },
+  });
+  check('a third-party patient name does not drop the phone match', thirdParty.matched?.patient_id, 'P1');
 }
 
 // --- a name the caller never said -------------------------------------------

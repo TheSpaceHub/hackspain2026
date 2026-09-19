@@ -184,6 +184,9 @@ const CORRECTION =
  */
 export function fileOnCaller(state: CallState): string | undefined {
   const patient = state.matched;
+  if (!patient && state.phone_match_rejected) {
+    return `The number they are ringing from is on file for someone else, and the caller has said they are ${state.phone_match_rejected}. Treat them as not identified: take their details as for any caller, and do not use the other person's record or name.`;
+  }
   if (!patient) return undefined;
   const name = [patient.given_name, patient.first_surname, patient.second_surname].filter(Boolean).join(' ');
   const facts = [

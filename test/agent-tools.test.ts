@@ -14,10 +14,12 @@ import {
   createCallState,
   planId,
   readCallState,
+  recordAccepted,
+  recordMatch,
   recordRequest,
   setPlanVocabulary,
 } from '../src/call-state.js';
-import { enforcePolicy } from '../src/guards.js';
+import { enforcePolicy, overrideFlooredBooking } from '../src/guards.js';
 import { applyPatch } from '../src/extract.js';
 import { ClinicApi, catalogueSchema } from '../src/clinic-api.js';
 import { FakeClinic, fakeCatalogue } from './fake-clinic.js';
@@ -136,6 +138,8 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
   const blocked = await h.call('find_slots', { when_phrase: 'next week', specialty_id: 'spec_physio' });
   check('a refusing insurer is reported as the rule, not as a full diary', /does not accept asisa/.test(blocked), true);
   check('and nothing is quoted', h.state.quoted.length, 0);
+  check('and the restriction is kept in the call notes', h.state.request.blocked_by, 'D. Álvaro Cid does not accept asisa');
+  check('and the decider can see the restriction', /Rule that stopped the diary: D\. Álvaro Cid does not accept asisa/.test(readCallState(h.state)), true);
 }
 
 {
@@ -321,6 +325,49 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
     h.state,
   );
   check('a placeholder never reaches the clinic', invented.action.policy_id, 'sanitas');
+}
+
+{
+  setPlanVocabulary(catalogue.plans);
+  const state = createCallState('call-fallback');
+  recordMatch(state, {
+    patient_id: 'pat_001',
+    given_name: 'Marta',
+    first_surname: 'Ruiz',
+    has_visited_before: true,
+    insurer: 'sanitas',
+  });
+  recordAccepted(state, {
+    provider_id: 'prov_saez',
+    location_id: 'loc_centro',
+    appointment_type_id: 'apt_review',
+    start_time: '2026-10-08T09:00:00+02:00',
+    payable_with: ['sanitas'],
+  });
+  const floored = overrideFlooredBooking(
+    [{ action: 'no_action', reason: 'referral_required' }],
+    state,
+  );
+  check('an accepted slot turns a floored no-action into a booking', floored, [{
+    action: 'book',
+    patient_id: 'pat_001',
+    provider_id: 'prov_saez',
+    location_id: 'loc_centro',
+    appointment_type_id: 'apt_review',
+    slot: '2026-10-08T09:00:00+02:00',
+    policy_id: 'sanitas',
+  }]);
+  check(
+    'caller authorisation still outranks the booking fallback',
+    overrideFlooredBooking([{ action: 'no_action', reason: 'caller_not_authorised' }], state),
+    [{ action: 'no_action', reason: 'caller_not_authorised' }],
+  );
+  state.accepted = null;
+  check(
+    'without an accepted slot the decider action is unchanged',
+    overrideFlooredBooking([{ action: 'no_action', reason: 'referral_required' }], state),
+    [{ action: 'no_action', reason: 'referral_required' }],
+  );
 }
 
 {

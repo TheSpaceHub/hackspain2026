@@ -11,6 +11,37 @@ import type { Action, Patient } from './schema.js';
 import type { Availability } from './clinic-api.js';
 import { choosePolicy, type CallState } from './call-state.js';
 
+export function bookFromState(state: CallState): Extract<Action, { action: 'book' }> | undefined {
+  const accepted = state.accepted;
+  const matched = state.matched;
+  const policy_id = choosePolicy(state);
+  if (!accepted || !matched || !policy_id) return undefined;
+  return {
+    action: 'book',
+    patient_id: matched.patient_id,
+    provider_id: accepted.provider_id,
+    location_id: accepted.location_id,
+    appointment_type_id: accepted.appointment_type_id,
+    slot: accepted.start_time,
+    policy_id,
+  };
+}
+
+export function overrideFlooredBooking(actions: Action[], state: CallState): Action[] {
+  if (
+    actions.length === 0 ||
+    !actions.every((action) => action.action === 'no_action') ||
+    actions.some(
+      (action) => action.action === 'no_action' &&
+        (action.reason === 'caller_not_authorised' || action.reason === 'medical_emergency'),
+    )
+  ) {
+    return actions;
+  }
+  const booking = bookFromState(state);
+  return booking ? [booking] : actions;
+}
+
 export type RedFlag =
   | 'chest_pain_breathless'
   | 'stroke_signs'

@@ -29,6 +29,7 @@ import {
   recordMatch,
   recordQuote,
   recordRequest,
+  retract,
   type CallState,
   type QuotedSlot,
 } from './call-state.js';
@@ -223,12 +224,17 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         deps.onAvailability?.(availability);
 
         if (availability.slots.length === 0) {
-          const blocked = availability.blocked[0]?.restriction;
+          const blocked = availability.blocked.map((entry) => entry.restriction).join('; ');
+          if (blocked) {
+            recordRequest(state, { blocked_by: blocked });
+            console.warn(`[find_slots] blocked: ${blocked}`);
+          }
           return blocked
             ? `Nothing bookable: ${blocked}. Tell the caller plainly and do not offer a time.`
             : 'Nothing free in that window. Offer to look at a different day.';
         }
 
+        if (state.request.blocked_by) retract(state, 'blocked_by');
         const wanted = window.part_of_day;
         const matching = wanted
           ? availability.slots.filter((s) => inPart(s.start_time, wanted))

@@ -15,6 +15,7 @@ import {
   normalizePhone,
   type Normalized,
 } from './normalize.js';
+import { distance, fold as fuzzyFold, tolerance } from './fuzzy.js';
 import type { Patient } from './schema.js';
 
 /** Everything the caller can tell us about the patient, before the directory confirms it. */
@@ -48,6 +49,7 @@ export type CallRequest = {
   /** The symptom in the caller's words, when they describe one instead of a specialty. */
   complaint?: string;
   appointment_id?: string;
+  blocked_by?: string;
 };
 
 /** A slot we read out loud. The one the caller accepted is the one we submit, exactly. */
@@ -77,6 +79,7 @@ export interface CallState {
   request: CallRequest;
   quoted: QuotedSlot[];
   accepted: QuotedSlot | null;
+  phone_match_rejected?: string;
   /** Every write, in order, including the ones that were later retracted. */
   journal: { at: string; field: string; value: string | null; note?: string }[];
 }
@@ -166,9 +169,28 @@ export function recordThirdParty(
 }
 
 /** The directory row. Everything downstream — patient_id, appointment type — reads this. */
-export function recordMatch(state: CallState, patient: Patient | null): void {
+export function recordMatch(state: CallState, patient: Patient | null, note?: string): void {
   state.matched = patient;
-  record(state, 'matched', patient?.patient_id ?? null);
+  record(state, 'matched', patient?.patient_id ?? null, note);
+}
+
+export function contradictsMatch(state: CallState, given?: string, surname?: string): boolean {
+  if (!state.matched) return false;
+  const pieces: { spoken: string | undefined; record: string | null | undefined; prefix?: boolean }[] = [
+    { spoken: given, record: state.matched.given_name, prefix: true },
+    { spoken: surname, record: state.matched.first_surname },
+  ];
+  const present = pieces.filter((piece) => piece.spoken?.trim());
+  if (present.length === 0) return false;
+  return !present.some(({ spoken, record, prefix }) => {
+    if (!record) return false;
+    const needle = fuzzyFold(spoken!);
+    const haystack = fuzzyFold(record);
+    if (!needle) return false;
+    if (needle === haystack) return true;
+    if (prefix && (haystack.startsWith(needle) || needle.startsWith(haystack))) return true;
+    return distance(needle, haystack) <= tolerance(needle);
+  });
 }
 
 /** Slots we actually said out loud, so the submitted `slot` is the quoted string exactly. */
@@ -282,7 +304,10 @@ export function readCallState(state: CallState): string {
       ` · visited before: ${String(state.matched.has_visited_before ?? 'unknown')}` +
       ` · plan on record: ${state.matched.insurer ?? 'unknown'}`
     : 'not identified yet';
-  lines.push(`Patient: ${patient}`);
+  lines.push(
+    `Patient: ${patient}` +
+      (!state.matched && state.phone_match_rejected ? ' · number on file belongs to someone else' : ''),
+  );
 
   const draft = Object.entries(state.patient)
     .map(([k, v]) => `${k}=${v}`)
@@ -297,6 +322,7 @@ export function readCallState(state: CallState): string {
     .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(',') : String(v)}`)
     .join(' ');
   lines.push(`Request: ${request || '(nothing yet)'}`);
+  if (state.request.blocked_by) lines.push(`Rule that stopped the diary: ${state.request.blocked_by}`);
 
   // The plan the booking is billed against: the right slot on the wrong plan fails.
   const policy = choosePolicy(state);

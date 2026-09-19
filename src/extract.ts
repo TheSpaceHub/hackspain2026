@@ -12,7 +12,9 @@
 
 import { z } from 'zod';
 import {
+  contradictsMatch,
   recordPatientField,
+  recordMatch,
   recordRequest,
   recordThirdParty,
   readCallState,
@@ -116,41 +118,60 @@ export function createExtractor(deps: ExtractorDeps): Extractor {
   // exchange must win. A slow one therefore holds the next, which is fine — the caller
   // is not waiting on either.
   let chain: Promise<void> = Promise.resolve();
+  let queued = 0;
 
   const run = async (userText: string, agentText?: string): Promise<void> => {
-    const user = [
-      'What the notes already hold:',
-      readCallState(state),
-      '',
-      'The exchange, newest speech last:',
-      agentText ? `Receptionist: ${agentText}` : null,
-      `Caller: ${userText}`,
-    ]
-      .filter((line) => line !== null)
-      .join('\n');
+    const startedAt = Date.now();
+    try {
+      const user = [
+        'What the notes already hold:',
+        readCallState(state),
+        '',
+        'The exchange, newest speech last:',
+        agentText ? `Receptionist: ${agentText}` : null,
+        `Caller: ${userText}`,
+      ]
+        .filter((line) => line !== null)
+        .join('\n');
 
-    const raw = await complete(SYSTEM_PROMPT, user, AbortSignal.timeout(timeoutMs));
-    const patch = parsePatch(raw);
-    if (patch) applyPatch(state, patch, userText);
+      const raw = await complete(SYSTEM_PROMPT, user, AbortSignal.timeout(timeoutMs));
+      const patch = parsePatch(raw);
+      if (patch) applyPatch(state, patch, userText);
+      else onError(`unparseable patch: ${raw.slice(0, 200)}`);
+    } finally {
+      const duration = Date.now() - startedAt;
+      if (duration > 6_000) console.warn(`[extract] slow: ${(duration / 1000).toFixed(1)}s`);
+    }
   };
 
   return {
     observe(userText, agentText) {
       if (!userText.trim()) return;
+      queued++;
       chain = chain.then(() =>
         run(userText, agentText).catch((err: unknown) => onError(String(err))),
-      );
+      ).finally(() => {
+        queued--;
+      });
     },
 
     async settle(waitMs) {
       let timer: NodeJS.Timeout | undefined;
+      let timedOut = false;
+      const startedAt = Date.now();
       try {
         await Promise.race([
           chain,
           new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, waitMs);
+            timer = setTimeout(() => {
+              timedOut = true;
+              resolve();
+            }, waitMs);
           }),
         ]);
+        if (timedOut && queued > 0) {
+          console.warn(`[extract] settle: ${queued} exchanges still queued after ${Date.now() - startedAt}ms`);
+        }
       } finally {
         clearTimeout(timer);
       }
@@ -260,6 +281,18 @@ export function applyPatch(state: CallState, patch: ExtractedPatch, heard?: stri
     const before = state.patient[field];
     const result = recordPatientField(state, field, value);
     if (before === result.value) state.journal.pop();
+  }
+
+  const given = real(patch.patient?.given_name);
+  const surname = real(patch.patient?.first_surname);
+  if (
+    state.caller_is_patient &&
+    patch.caller_is_patient !== false &&
+    contradictsMatch(state, given, surname)
+  ) {
+    const name = [given, surname, real(patch.patient?.second_surname)].filter(Boolean).join(' ');
+    recordMatch(state, null, `phone match dropped: caller says they are ${name}`);
+    state.phone_match_rejected = name;
   }
 
   for (const field of patch.retracted ?? []) {

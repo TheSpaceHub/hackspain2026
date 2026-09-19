@@ -83,6 +83,8 @@ For a call that cannot result in any of the above. Pick the reason that names wh
   - specialty_not_covered / location_not_covered / provider_not_in_network / insurer_referral_required / referral_required / allowance_exhausted — an insurance or referral rule below bit them.
   - patient_not_found / provider_not_found / no_availability / type_not_offered / patient_history — the record or diary ruled it out.
   - medical_emergency is never a no_action reason; it is an escalate reason.
+If the notes carry "Rule that stopped the diary", the reason is the code for that rule (age→not_eligible_age, referral→referral_required/insurer_referral_required, plan refuses specialty/site/provider→specialty_not_covered/location_not_covered/provider_not_in_network, visits used up→allowance_exhausted, leave→provider_on_leave, hours→location_hours, type→type_not_offered, history→patient_history).
+If the notes hold an "Accepted slot", no rule stopped this booking — the diary only lists slots the patient can take — so never answer referral_required or any other rule code; emit book.
 
 # Standing facts about this clinic
 These are fixed for the whole event and true of every call. Judge the transcript against them.
