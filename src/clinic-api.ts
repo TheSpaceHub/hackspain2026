@@ -10,7 +10,7 @@
  */
 
 import { z } from 'zod';
-import { closest, fold, only } from './fuzzy.js';
+import { closest, distance, fold, only, tolerance } from './fuzzy.js';
 import { patientSchema, type Patient } from './schema.js';
 
 export const appointmentSchema = z.object({
@@ -306,10 +306,42 @@ export function planByName(catalogue: Catalogue, spoken: string): { id: string; 
   );
 }
 
+/**
+ * The word that tells one site from another. Every site here is "Arenal <something>",
+ * and it is the something the caller means — so a mishearing of the shared half
+ * ("Reinaldo Centro", "RNL Centro") still resolves, while "Arenal" on its own does not
+ * resolve to anything, because it does not pick a site.
+ */
+function distinctiveWords(catalogue: Catalogue, site: Location): string[] {
+  const words = (l: Location) => new Set(fold(`${l.name} ${l.id}`).split(' ').filter((w) => w.length > 2));
+  const mine = words(site);
+  for (const other of catalogue.locations) {
+    if (other.id === site.id) continue;
+    for (const word of words(other)) mine.delete(word);
+  }
+  return [...mine];
+}
+
 export function locationById(catalogue: Catalogue, id: string): Location | undefined {
   const needle = fold(id);
-  const direct = catalogue.locations.find((l) => fold(l.id) === needle || fold(l.name).includes(needle));
-  return direct ?? only(catalogue.locations.map((l) => ({ item: l, aliases: [l.id, l.name] })), needle);
+  const byId = catalogue.locations.find((l) => fold(l.id) === needle || fold(l.name) === needle);
+  if (byId) return byId;
+
+  // "Arenal" is in all three names, so a substring only counts when it picks one.
+  const contained = catalogue.locations.filter((l) => fold(l.name).includes(needle));
+  if (contained.length === 1) return contained[0];
+
+  const whole = only(catalogue.locations.map((l) => ({ item: l, aliases: [l.id, l.name] })), needle);
+  if (whole) return whole;
+
+  // Word by word: the site half of what was said survives a mangled clinic half.
+  const said = needle.split(' ').filter((w) => w.length > 2);
+  const hit = catalogue.locations.filter((l) =>
+    distinctiveWords(catalogue, l).some((word) =>
+      said.some((spoken) => distance(spoken, word) <= tolerance(word)),
+    ),
+  );
+  return hit.length === 1 ? hit[0] : undefined;
 }
 
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];

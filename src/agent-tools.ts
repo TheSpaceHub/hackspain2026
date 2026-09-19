@@ -183,6 +183,13 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           }
         }
 
+        // A site we cannot place is not a wider search: the caller asked to be seen
+        // somewhere, and quoting another site without saying so reads as a lie.
+        if (saidLocation && !location) {
+          const sites = catalogue?.locations.map((l) => l.name).join(', ');
+          return `No site here goes by "${saidLocation}". Ask which one they mean${sites ? `: ${sites}` : ''}.`;
+        }
+
         // The diary refuses a query with neither: "availability needs provider_id or
         // specialty_id", a 422 the caller hears as "the system is playing up". Dropping
         // an unresolvable specialty is right, but going on to ask anyway is not.

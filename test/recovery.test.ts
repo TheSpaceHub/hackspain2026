@@ -77,6 +77,11 @@ check('an insurer that is nobody is dropped', planByName(catalogue, 'blueshield'
 
 check('the site they named', locationById(catalogue, 'Centro')?.id, 'loc_centro');
 check('misheard site', locationById(catalogue, 'Arenal Nortte')?.id, 'loc_norte');
+// Speech recognition mangles the half the sites share, not the half that tells them apart.
+check('the clinic half heard as a name', locationById(catalogue, 'Reinaldo Centro')?.id, 'loc_centro');
+check('and heard as initials', locationById(catalogue, 'RNL Centro')?.id, 'loc_centro');
+check('the shared half alone picks no site', locationById(catalogue, 'Arenal'), undefined);
+check('a site that is not ours is dropped', locationById(catalogue, 'Chamartín'), undefined);
 
 check('a doctor said exactly', providersByName(catalogue, 'Sáez').map((p) => p.id), ['prov_saez']);
 check(

@@ -199,10 +199,19 @@ export class ReceptionistAgent extends voice.Agent {
   /** Turns the model wrote a call out on rather than issuing it. Ends up in the call log. */
   printedCalls = 0;
   readonly #state: CallState;
+  /**
+   * The names we answer to, taken from the tools we built. The `ToolContext` handed to
+   * `llmNode` has been seen live as the agent's own internals (`_functionToolsMap` and
+   * friends), and a printed call whose name is not in this set is thrown away — which is
+   * how a perfectly good `find_slots` ended up as "could you say that again?".
+   */
+  readonly #toolNames: Set<string>;
 
   constructor(deps: ToolDeps) {
-    super({ instructions: INSTRUCTIONS, tools: buildTools(deps) });
+    const tools = buildTools(deps);
+    super({ instructions: INSTRUCTIONS, tools });
     this.#state = deps.state;
+    this.#toolNames = new Set(Object.keys(tools));
   }
 
   /**
@@ -224,9 +233,7 @@ export class ReceptionistAgent extends voice.Agent {
     const stream = await voice.Agent.default.llmNode(this, chatCtx, toolCtx, settings);
     if (!stream) return stream;
 
-    // Both: the context handed to this node has been seen empty on live turns, and a
-    // printed call whose name we cannot confirm is thrown away.
-    const known = new Set([...Object.keys(toolCtx), ...Object.keys(this.toolCtx)]);
+    const known = new Set([...this.#toolNames, ...Object.keys(toolCtx)]);
     let held = '';
     let holding = false;
 
