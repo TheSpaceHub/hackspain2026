@@ -375,6 +375,40 @@ function harness(
 }
 
 {
+  const h = harness({
+    slotTimes: [
+      { hour: 9, minute: 30 },
+      { hour: 14, minute: 30 },
+      { hour: 17, minute: 0 },
+    ],
+  });
+  await h.call('find_slots', {
+    when_phrase: 'Monday, the 21st at 2 30',
+    specialty_id: 'spec_gp',
+  });
+  check('ambiguous at clock accepts the afternoon reading', h.state.quoted[0]?.start_time.includes('14:30'), true);
+
+  const later = harness({
+    slotTimes: [
+      { hour: 9, minute: 30 },
+      { hour: 14, minute: 30 },
+    ],
+  });
+  await later.call('find_slots', { when_phrase: 'after 2 on Monday', specialty_id: 'spec_gp' });
+  check('ambiguous after clock treats two as afternoon', later.state.quoted.every((slot) => slot.start_time.includes('14:30')), true);
+
+  const exact = harness({
+    slotTimes: [
+      { hour: 9, minute: 0 },
+      { hour: 9, minute: 15 },
+      { hour: 14, minute: 0 },
+    ],
+  });
+  await exact.call('find_slots', { when_phrase: 'at 9', specialty_id: 'spec_gp' });
+  check('bare at clock remains exact', exact.state.quoted.length === 1 && exact.state.quoted[0]?.start_time.includes('09:00'), true);
+}
+
+{
   const h = harness();
   const closed = await h.call('find_slots', { when_phrase: 'Monday the twelfth of October', specialty_id: 'spec_gp' });
   check('the published closure moves them on, and they are told', /closed, so this is from 2026-10-12/.test(closed), true);

@@ -90,6 +90,13 @@ function clockMinutes(clock: { hour: number; minute: number }): number {
   return clock.hour * 60 + clock.minute;
 }
 
+function clockReadings(clock: { hour: number; minute: number; ambiguous?: boolean }): number[] {
+  const minutes = clockMinutes(clock);
+  if (!clock.ambiguous) return [minutes];
+  if (clock.hour < 8) return [minutes + 12 * 60];
+  return [minutes, minutes + 12 * 60];
+}
+
 function slotClock(startTime: string): { hour: number; minute: number } {
   return clockForLog(startTime);
 }
@@ -451,9 +458,9 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           if (!inRequestedPart) return false;
           if (!hardClock) return true;
           const actual = clockMinutes(slotClock(slot.start_time));
-          if (window.after_clock && actual < clockMinutes(window.after_clock)) return false;
-          if (window.before_clock && actual > clockMinutes(window.before_clock)) return false;
-          if (window.at_clock && actual !== clockMinutes(window.at_clock)) return false;
+          if (window.after_clock && !clockReadings(window.after_clock).some((reading) => actual >= reading)) return false;
+          if (window.before_clock && !clockReadings(window.before_clock).some((reading) => actual <= reading)) return false;
+          if (window.at_clock && !clockReadings(window.at_clock).some((reading) => actual === reading)) return false;
           return true;
         });
         if ((hardClock || hardDate) && matching.length === 0) {

@@ -171,6 +171,8 @@ const APPOINTMENTS = [
 export interface FakeClinicOptions {
   /** Days with no diary at all, on top of the published closure. */
   fullDays?: string[];
+  /** Override the default diary times for clock-constraint tests. */
+  slotTimes?: { hour: number; minute?: number }[];
   /** Restriction returned instead of slots, e.g. for an insurer a provider refuses. */
   restriction?: { provider_id?: string; restriction: string };
 }
@@ -288,14 +290,18 @@ export class FakeClinic {
       if (this.#options.fullDays?.includes(date)) continue;
       for (const provider of providers) {
         const site = CATALOGUE.locations.find((l) => l.provider_names.includes(provider.name));
-        for (const hour of SLOT_HOURS) {
+        const times = this.#options.slotTimes ??
+          SLOT_HOURS.map((hour): { hour: number; minute?: number } => ({ hour }));
+        for (const time of times) {
+          const hour = time.hour;
+          const minute = time.minute ?? 0;
           slots.push({
             provider_id: provider.id,
             provider_name: provider.name,
             specialty_id: provider.specialty_id,
             location_id: site?.id ?? 'loc_centro',
             appointment_type_id: type.id,
-            start_time: `${date}T${String(hour).padStart(2, '0')}:00:00+02:00`,
+            start_time: `${date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+02:00`,
             duration_minutes: 30,
             payable_with: insurers.length > 0 ? insurers : [patient?.insurer ?? 'privado'],
           });

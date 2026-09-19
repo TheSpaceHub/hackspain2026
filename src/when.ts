@@ -18,9 +18,9 @@ export interface WhenWindow {
   date_from: string;
   date_to: string;
   part_of_day?: PartOfDay;
-  after_clock?: { hour: number; minute: number };
-  before_clock?: { hour: number; minute: number };
-  at_clock?: { hour: number; minute: number };
+  after_clock?: { hour: number; minute: number; ambiguous: boolean };
+  before_clock?: { hour: number; minute: number; ambiguous: boolean };
+  at_clock?: { hour: number; minute: number; ambiguous: boolean };
   /** Set when the day the caller named was closed and we moved them on. */
   adjusted_from?: string;
   /** True when the caller named no day at all: search from tomorrow and take the first. */
@@ -134,13 +134,17 @@ export function resolveWhen(phrase: string, now: Date, options: ResolveOptions =
 /** "morning" is before 14:00 and "afternoon" from 14:00; "first thing" is the morning. */
 function partOfDay(
   text: string,
-  afterClock?: { hour: number; minute: number },
-  beforeClock?: { hour: number; minute: number },
-  atClock?: { hour: number; minute: number },
+  afterClock?: { hour: number; minute: number; ambiguous: boolean },
+  beforeClock?: { hour: number; minute: number; ambiguous: boolean },
+  atClock?: { hour: number; minute: number; ambiguous: boolean },
 ): PartOfDay | undefined {
-  if (afterClock && afterClock.hour * 60 + afterClock.minute >= 14 * 60) return 'afternoon';
-  if (beforeClock && beforeClock.hour * 60 + beforeClock.minute <= 14 * 60) return 'morning';
-  if (atClock && atClock.hour * 60 + atClock.minute >= 14 * 60) return 'afternoon';
+  const effective = (clock: { hour: number; minute: number; ambiguous: boolean }): number => {
+    const minutes = clock.hour * 60 + clock.minute;
+    return clock.ambiguous && clock.hour < 8 ? minutes + 12 * 60 : minutes;
+  };
+  if (afterClock && effective(afterClock) >= 14 * 60) return 'afternoon';
+  if (beforeClock && effective(beforeClock) <= 14 * 60) return 'morning';
+  if (atClock && effective(atClock) >= 14 * 60) return 'afternoon';
   if (/\b(morning|first thing|ma(ñ|n)ana temprano|por la ma(ñ|n)ana)\b/.test(text)) return 'morning';
   if (/\b(afternoon|evening|por la tarde|la tarde|por la noche)\b/.test(text)) return 'afternoon';
   return undefined;
@@ -153,18 +157,23 @@ const CLOCK_WORDS: Record<string, number> = {
   siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12,
 };
 
-function clocksIn(text: string): { hour: number; minute: number }[] {
-  const clocks: { hour: number; minute: number }[] = [];
+function clocksIn(text: string): { hour: number; minute: number; ambiguous: boolean }[] {
+  const clocks: { hour: number; minute: number; ambiguous: boolean }[] = [];
   const add = (hour: number, minute: number, meridiem?: string, context = text): void => {
+    const hasPartOfDay = /\b(?:morning|afternoon|evening|night|de la ma[ñn]ana|de la tarde|por la tarde|por la noche|tarde|noche)\b/i.test(context);
+    const ambiguous = !meridiem && !hasPartOfDay && hour <= 12;
     if (meridiem?.toLowerCase() === 'pm' && hour < 12) hour += 12;
     if (meridiem?.toLowerCase() === 'am' && hour === 12) hour = 0;
     if (!meridiem && hour <= 12 && /\b(?:afternoon|evening|de la tarde|por la tarde|noche)\b/.test(context) && hour < 12) hour += 12;
-    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) clocks.push({ hour, minute });
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) clocks.push({ hour, minute, ambiguous });
   };
   for (const match of text.matchAll(/\b(\d{1,2})(?:\s*[:.]\s*|\s+)(\d{2})\s*(am|pm)?\b/gi)) {
     add(Number(match[1]), Number(match[2]), match[3], text.slice(Math.max(0, match.index ?? 0) - 20, (match.index ?? 0) + match[0].length + 20));
   }
   for (const match of text.matchAll(/\b(\d{1,2})\s*(am|pm)\b/gi)) add(Number(match[1]), 0, match[2]);
+  for (const match of text.matchAll(/\b(?:after|from|before|by|at|no earlier than|not before|no later than)\s+(\d{1,2})\b(?!\s*(?:am|pm|st|nd|rd|th|of|september|october|november|december|january|february|march|april|may|june|july|august))\b/gi)) {
+    add(Number(match[1]), 0, undefined, text.slice(Math.max(0, match.index ?? 0) - 20, (match.index ?? 0) + match[0].length + 20));
+  }
   const words = Object.keys(CLOCK_WORDS).join('|');
   const wordClock = new RegExp(`\\b(?:half past\\s+|a las\\s+|a la\\s+)?(${words})(?:\\s+(?:in the|de la)\\s+(?:afternoon|evening|tarde|noche))?\\b`, 'gi');
   for (const match of text.matchAll(wordClock)) {
