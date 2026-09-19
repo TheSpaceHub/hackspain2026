@@ -8,8 +8,7 @@ export type { AgentMode };
  */
 
 export interface Distribution {
-  p50: number | null;
-  p95: number | null;
+  avg: number | null;
   max: number | null;
   n: number;
 }
@@ -42,7 +41,7 @@ export interface Stats {
     close_to_submitted_ms: Distribution;
   };
   bucket_ms: number;
-  series: { at: string; calls: number; with_record: number; call_ms_p50: number | null }[];
+  series: { at: string; calls: number; with_record: number; call_ms_avg: number | null }[];
 }
 
 export type RangeId = 'hour' | 'today' | 'all';

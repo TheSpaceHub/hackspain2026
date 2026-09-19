@@ -5,6 +5,7 @@ import { ConnectAgent } from '@/components/layout/agent-origin';
 import { AppShell, type NavItem } from '@/components/layout/app-shell';
 import { LiveView } from '@/components/live/live-view';
 import { OverviewView } from '@/components/overview/overview-view';
+import { TestingView } from '@/components/testing/testing-view';
 import { useAgentHealth } from '@/hooks/use-agent-health';
 import { useCallFeed } from '@/hooks/use-call-feed';
 import { useNow } from '@/hooks/use-now';
@@ -41,6 +42,7 @@ export function App() {
       const holds = liveHolds(sim.holds, now).length;
       items.push({ id: 'clinic', label: 'Clinic', count: holds, pulse: holds > 0 });
     }
+    items.push({ id: 'testing', label: 'Testing' });
     return items;
   }, [feed.calls, now, actualMode, sim.holds, route.view]);
 
@@ -94,6 +96,8 @@ export function App() {
             onSelect={(callId) => navigate({ view: 'live', callId })}
             onOpenFinished={openFinished}
           />
+        ) : route.view === 'testing' ? (
+          <TestingView />
         ) : (
           <FinishedCallsView mode={agentMode} feed={feed} selectedId={route.callId} onSelect={openFinished} />
         )}
