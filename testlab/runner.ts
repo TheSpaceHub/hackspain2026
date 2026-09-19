@@ -68,6 +68,38 @@ function historyDir(outDir: string): string {
 const SETTLE_MS = 3_000;
 const WINDOW_GRACE_MS = 40_000;
 
+/**
+ * Round-robin over the problems. A whole-suite round is the better part of an hour,
+ * and dialled in suite order the first quarter of it is all problem 1 — so the round
+ * takes one case from each problem in turn and has something to say about the whole
+ * board early, whenever it is stopped or read.
+ */
+export function interleave<T extends { kase: { id: string; problem_id: string } }>(jobs: T[]): T[] {
+  // A case is one unit, copies and all: the Switchboard means nothing if its twenty
+  // copies are spread across the round instead of ringing at once.
+  const groups: T[][] = [];
+  for (const job of jobs) {
+    const last = groups.at(-1);
+    if (last && last[0]!.kase.id === job.kase.id) last.push(job);
+    else groups.push([job]);
+  }
+
+  const queues = new Map<string, T[][]>();
+  for (const group of groups) {
+    const problem = group[0]!.kase.problem_id;
+    queues.set(problem, [...(queues.get(problem) ?? []), group]);
+  }
+
+  const out: T[] = [];
+  while (out.length < jobs.length) {
+    for (const queue of queues.values()) {
+      const next = queue.shift();
+      if (next) out.push(...next);
+    }
+  }
+  return out;
+}
+
 interface MockCall {
   actions: Record<string, unknown>[];
   last_received_at: string | null;
@@ -212,8 +244,10 @@ export class Runner extends EventEmitter {
     }
 
     // A burst case is its own little Run All: every copy goes out together.
-    const jobs = chosen.flatMap(({ kase, behaviour, vocabulary }) =>
-      Array.from({ length: Math.max(1, kase.burst) }, (_, copy) => ({ kase, behaviour, vocabulary, copy })),
+    const jobs = interleave(
+      chosen.flatMap(({ kase, behaviour, vocabulary }) =>
+        Array.from({ length: Math.max(1, kase.burst) }, (_, copy) => ({ kase, behaviour, vocabulary, copy })),
+      ),
     );
 
     try {

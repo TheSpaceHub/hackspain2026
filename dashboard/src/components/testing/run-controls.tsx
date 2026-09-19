@@ -37,11 +37,11 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
     return next;
   };
 
-  const chosenCases = suite.problems
-    .filter((p) => problems.size === 0 || problems.has(p.id))
-    .reduce((n, p) => n + p.cases, 0);
-  // The traits blend into one person, so the count is the cases themselves.
-  const calls = chosenCases;
+  const picked = suite.cases.filter((c) => problems.size === 0 || problems.has(c.problem_id));
+  const chosenCases = picked.length;
+  // The traits blend into one person, so a case is one call — except the Switchboard's,
+  // which is the same case dialled several times at once.
+  const calls = picked.reduce((n, c) => n + Math.max(1, c.burst), 0);
   const traits = suite.behaviours.filter((b) => behaviours.has(b.id));
   const voices = suite.vocabularies.filter((v) => vocabularies.has(v.id));
 
@@ -70,6 +70,7 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
           {problems.size === 0 ? 'Every problem' : `${problems.size} problem${problems.size === 1 ? '' : 's'}`} ·{' '}
           {chosenCases} cases · one caller of {behaviours.size} trait{behaviours.size === 1 ? '' : 's'} ·{' '}
           <span className="text-foreground">{calls} calls</span>
+          {calls !== chosenCases && ' (the Switchboard dials its case many times over)'}
         </CardDescription>
       </CardHeader>
 
