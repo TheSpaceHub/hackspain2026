@@ -16,10 +16,18 @@ export interface SubmitResult {
   durationMs: number;
 }
 
-/** A call that does two things posts twice. v0 emits one; the array is here from day one. */
+/**
+ * A call that does two things posts twice. Identical ones are collapsed first: models
+ * repeat themselves when they are unsure, and the second POST comes back 409 "already
+ * has that action" — a wasted round trip inside the 30 s close window.
+ */
 export async function submitActions(callId: string, actions: Action[]): Promise<SubmitResult[]> {
   const results: SubmitResult[] = [];
+  const seen = new Set<string>();
   for (const action of actions) {
+    const key = JSON.stringify(action);
+    if (seen.has(key)) continue;
+    seen.add(key);
     results.push(await submitOne(callId, action));
   }
   return results;

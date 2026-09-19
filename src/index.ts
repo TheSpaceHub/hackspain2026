@@ -3,6 +3,7 @@ import { initializeLogger } from '@livekit/agents';
 import { WebSocketServer } from 'ws';
 import { CallSession, type Shared } from './call-session.js';
 import { loadClinic } from './clinic.js';
+import { DEFAULT_TOOL_TIMEOUT_MS } from './agent-tools.js';
 import { ClinicApi } from './clinic-api.js';
 import { config } from './config.js';
 import { loadVad } from './models.js';
@@ -19,9 +20,16 @@ async function main(): Promise<void> {
   const [vad, clinic] = await Promise.all([loadVad(), loadClinic()]);
   const store = openStore();
 
+  // Abort under the per-tool cap, so a slow API surfaces as a failure the agent can
+  // explain rather than as the tool giving up on a request still in flight.
+  const api = new ClinicApi({
+    baseUrl: config.prosper.baseUrl,
+    apiKey: config.prosper.apiKey,
+    timeoutMs: DEFAULT_TOOL_TIMEOUT_MS - 500,
+  });
+
   // Doctors, sites, plans and closures are identical all event: parsed once here off the
   // document `loadClinic` already fetched, so no call ever pays for them.
-  const api = new ClinicApi({ baseUrl: config.prosper.baseUrl, apiKey: config.prosper.apiKey });
   const catalogue = clinic.raw === null ? null : api.primeCatalogue(clinic.raw);
 
   const shared: Shared = {

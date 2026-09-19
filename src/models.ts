@@ -16,10 +16,14 @@ export async function loadVad(): Promise<SharedVad> {
 }
 
 /**
- * Workers AI 400s on `tools: []`, which the plugin sends on every turn when the agent has
- * no tools — v0's every turn. No-ops once v1 has real tools.
+ * Two Workers AI departures from the OpenAI shape, both fatal on a call:
+ *
+ * - it 400s on `tools: []`, which the plugin sends on every turn of a toolless agent;
+ * - it 400s (empty body, no message) on an assistant turn whose `content` is `null` —
+ *   which is exactly what it returns for a tool call, so replaying that turn with the
+ *   tool result kills the second pass and the caller hears nothing after the lookup.
  */
-const stripEmptyTools: typeof fetch = async (input, init) => {
+const workersAiQuirks: typeof fetch = async (input, init) => {
   if (init?.method === 'POST' && typeof init.body === 'string') {
     try {
       const body = JSON.parse(init.body) as Record<string, unknown>;
@@ -27,8 +31,13 @@ const stripEmptyTools: typeof fetch = async (input, init) => {
         delete body.tools;
         delete body.tool_choice;
         delete body.parallel_tool_calls;
-        init = { ...init, body: JSON.stringify(body) };
       }
+      if (Array.isArray(body.messages)) {
+        for (const message of body.messages as Record<string, unknown>[]) {
+          if (message.content === null || message.content === undefined) message.content = '';
+        }
+      }
+      init = { ...init, body: JSON.stringify(body) };
     } catch {
       // not ours to touch
     }
@@ -75,7 +84,7 @@ export function createLLM(): llm.LLM {
     client: new OpenAI({
       apiKey: config.cloudflare.apiToken,
       baseURL: config.cloudflare.baseURL,
-      fetch: stripEmptyTools,
+      fetch: workersAiQuirks,
     }),
   });
 }

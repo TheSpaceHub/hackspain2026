@@ -41,6 +41,35 @@ export interface ToolDeps {
   /** Kept so the decider can name the standing rule that refused a booking. */
   onAvailability?: (availability: Availability) => void;
   now?: () => Date;
+  /** Per-tool wall clock. Past it the agent is told to move on, mid-flight or not. */
+  timeoutMs?: number;
+}
+
+/**
+ * A tool that has not answered by now is a tool the caller is listening to silence for:
+ * every millisecond past this is dead air on the line, and a lookup that eventually
+ * arrives is worth less than a sentence that arrives on time. The agent gets a line it
+ * can say out loud, and the request is left to settle or fail on its own.
+ */
+export const DEFAULT_TOOL_TIMEOUT_MS = 4_000;
+
+const SLOW = 'That is taking too long to come back. Tell them the system is slow, and either try again or take their number.';
+
+async function capped<T>(name: string, ms: number, work: Promise<T> | T): Promise<T | string> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve(work).catch((err: unknown) => {
+        console.error(`[tool ${name}] ${String(err)}`);
+        return 'That lookup failed. Say the system is playing up, and offer to take their number.';
+      }),
+      new Promise<string>((resolve) => {
+        timer = setTimeout(() => resolve(SLOW), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const PATIENT_FIELDS = [
@@ -51,8 +80,9 @@ const PATIENT_FIELDS = [
 export function buildTools(deps: ToolDeps): llm.ToolContextLike {
   const { state, api, catalogue } = deps;
   const now = deps.now ?? ((): Date => new Date());
+  const timeoutMs = deps.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
 
-  return {
+  const tools = {
     identify_patient: llm.tool({
       description:
         'Look the patient up in the clinic directory. Call it as soon as you have a name plus one of: DNI/NIE, date of birth, or phone number. Two people share a name more often than you would think, so give everything you have.',
@@ -310,6 +340,14 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
       },
     }),
   };
+
+  // One cap, applied once, so no tool can be written without one.
+  type Executable = { execute: (args: never, ctx: never) => unknown };
+  for (const [name, tool] of Object.entries(tools as Record<string, Executable>)) {
+    const execute = tool.execute.bind(tool);
+    tool.execute = (args, ctx) => capped(name, timeoutMs, execute(args, ctx)) as never;
+  }
+  return tools;
 }
 
 function siteName(catalogue: Catalogue | null, locationId: string): string {

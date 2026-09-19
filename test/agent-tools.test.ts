@@ -189,5 +189,34 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
 
 check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:00'), 'Thursday 8 October, 4:30 pm');
 
+// --- the caller is listening to this ----------------------------------------
+
+{
+  // A diary that never answers must not become silence on the line.
+  const hang: typeof globalThis.fetch = () => new Promise(() => {});
+  const api = new ClinicApi({ baseUrl: 'https://fake.local', apiKey: 'k', fetch: hang });
+  const state = createCallState('call-slow');
+  const tools = buildTools({ state, api, catalogue, now: () => NOW, timeoutMs: 50 }) as unknown as Record<
+    string,
+    llm.FunctionTool
+  >;
+  const t0 = Date.now();
+  const said = String(await tools.find_slots!.execute({ when_phrase: 'tomorrow' } as never, {} as never));
+  check('a hanging lookup gives the agent a line to say', /taking too long/.test(said), true);
+  check('and gives it quickly', Date.now() - t0 < 1000, true);
+
+  const broken = new ClinicApi({
+    baseUrl: 'https://fake.local',
+    apiKey: 'k',
+    fetch: async () => new Response('nope', { status: 500 }),
+  });
+  const failing = buildTools({ state: createCallState('call-500'), api: broken, catalogue, now: () => NOW }) as unknown as Record<
+    string,
+    llm.FunctionTool
+  >;
+  const onFail = String(await failing.identify_patient!.execute({ name: 'Marta Ruiz' } as never, {} as never));
+  check('a failing lookup is admitted to, not invented around', /failed/.test(onFail), true);
+}
+
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);
 process.exitCode = failed === 0 ? 0 : 1;
