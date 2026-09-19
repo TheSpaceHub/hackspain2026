@@ -17,7 +17,7 @@ import { VolumeCard } from './volume-card';
 
 interface OverviewViewProps {
   feed: CallFeed;
-  mode?: AgentMode;
+  mode: AgentMode;
 }
 
 /**

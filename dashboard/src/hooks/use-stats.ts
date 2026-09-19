@@ -15,7 +15,7 @@ const DEBOUNCE_MS = 800;
 export function useStats(
   range: Range,
   calls: Call[],
-  mode?: AgentMode,
+  mode: AgentMode,
 ): { stats: Stats | null; updatedAt: number | null; refreshing: boolean; error: boolean; stale: boolean } {
   const [stats, setStats] = useState<Stats | null>(null);
   /** Which range the numbers on screen belong to — a new range dims them until it lands. */
@@ -37,7 +37,7 @@ export function useStats(
       const controller = new AbortController();
       inflight.current = controller;
       setRefreshing(true);
-      fetchStats(range, Date.now(), controller.signal, mode)
+      fetchStats(mode, range, Date.now(), controller.signal)
         .then((s) => {
           setStats(s);
           setLoadedFor(range.id);

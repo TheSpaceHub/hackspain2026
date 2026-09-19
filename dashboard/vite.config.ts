@@ -6,6 +6,7 @@ import { defineConfig } from 'vite';
 
 /** The agent process from the repo root: its HTTP/SSE console lives on :7860. */
 const AGENT_ORIGIN = process.env.VITE_AGENT_ORIGIN ?? 'http://localhost:7860';
+const SIM_AGENT_ORIGIN = process.env.VITE_SIM_AGENT_ORIGIN ?? 'http://localhost:7861';
 /** The shared clinic (`pnpm sim`), when the agent is pointed at it: its /__sim routes on :8788. */
 const SIM_ORIGIN = process.env.VITE_SIM_ORIGIN ?? 'http://localhost:8788';
 
@@ -29,14 +30,19 @@ export default defineConfig({
     port: HTTPS ? 5174 : 5173,
     // Same-origin in dev, so EventSource needs no CORS dance and cookies would carry.
     proxy: {
-      '/health': AGENT_ORIGIN,
-      '/mode': AGENT_ORIGIN,
-      '/calls': AGENT_ORIGIN,
-      '/stats': AGENT_ORIGIN,
-      '/events': { target: AGENT_ORIGIN, changeOrigin: true, ws: false },
+      '/agents/live': {
+        target: AGENT_ORIGIN,
+        changeOrigin: true,
+        ws: true,
+        rewrite: (path) => path.replace(/^\/agents\/live/, ''),
+      },
+      '/agents/simulation': {
+        target: SIM_AGENT_ORIGIN,
+        changeOrigin: true,
+        ws: true,
+        rewrite: (path) => path.replace(/^\/agents\/simulation/, ''),
+      },
       '/__sim': { target: SIM_ORIGIN, changeOrigin: true, ws: false },
-      // The agent's call socket, for the Test tab's "Local agent" endpoint.
-      '/ws': { target: AGENT_ORIGIN, ws: true },
     },
   },
 });

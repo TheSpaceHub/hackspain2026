@@ -5,10 +5,12 @@ import { Card } from '@/components/ui/card';
 import type { CallFeed } from '@/hooks/use-call-feed';
 import { useNow } from '@/hooks/use-now';
 import { wallState } from '@/lib/live';
+import type { AgentMode } from '@/lib/agent/origin';
 import { LiveCallCard } from './live-call-card';
 import { LiveCallPanel } from './live-call-panel';
 
 interface LiveViewProps {
+  mode: AgentMode;
   feed: CallFeed;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
@@ -19,7 +21,7 @@ interface LiveViewProps {
  * Every call in flight, as it happens — the wall a Run All's ten sockets land on.
  * Cards keep their place (oldest first) so nothing jumps while you read it.
  */
-export function LiveView({ feed, selectedId, onSelect, onOpenFinished }: LiveViewProps) {
+export function LiveView({ mode, feed, selectedId, onSelect, onOpenFinished }: LiveViewProps) {
   // A second is the grain of the timers on screen.
   const now = useNow(1_000);
 
@@ -88,6 +90,7 @@ export function LiveView({ feed, selectedId, onSelect, onOpenFinished }: LiveVie
       {selected && (
         <Card size="sm" className="w-[460px] shrink-0 gap-0 py-0 xl:w-[520px]">
           <LiveCallPanel
+            mode={mode}
             call={selected}
             now={now}
             onClose={() => onSelect(null)}

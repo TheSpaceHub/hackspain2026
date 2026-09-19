@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { FinishedCallsView } from '@/components/calls/finished-calls-view';
 import { ClinicView } from '@/components/clinic/clinic-view';
 import { AppShell, type NavItem } from '@/components/layout/app-shell';
@@ -12,25 +12,24 @@ import { useRoute, type View } from '@/hooks/use-route';
 import { SimContext, type SimContextValue } from '@/hooks/sim-context';
 import { useSimFeed } from '@/hooks/use-sim-feed';
 import { useTestCall } from '@/hooks/use-test-call';
+import { storedMode, storeMode, type AgentMode } from '@/lib/agent/origin';
 import { callStatus } from '@/lib/agent/model';
 import { consoleMode } from '@/lib/mode';
 import { liveHolds } from '@/lib/sim/model';
-import type { AgentMode } from '@/lib/agent/stats';
 
 /**
  * One feed for the whole console: a single SSE connection to the agent, whatever
  * view is open — plus one to the shared clinic when a sim is running.
  */
 export function App() {
-  const [agentMode, setAgentMode] = useState<AgentMode | undefined>();
+  const [agentMode, setAgentModeState] = useState<AgentMode>(storedMode);
   const feed = useCallFeed(agentMode);
   const sim = useSimFeed();
-  const { health, setMode, switching, switchError } = useAgentHealth(feed.connected);
-  useEffect(() => setAgentMode(health?.mode), [health?.mode]);
+  const { health } = useAgentHealth(feed.connected, agentMode);
   const [route, navigate] = useRoute();
   const now = useNow(5_000);
   const clinicApi = health?.clinic_api ?? null;
-  const mode = consoleMode(clinicApi);
+  const actualMode = consoleMode(clinicApi);
   // Held above the tabs, so following a test call in Live does not hang it up.
   const testCall = useTestCall();
   const onTestCall = testCall.snapshot.phase === 'live';
@@ -43,13 +42,13 @@ export function App() {
       { id: 'finished', label: 'Finished', count: feed.calls.length - live },
     ];
     // The clinic tab belongs to simulation mode only: in live mode the clinic is Prosper's, not ours.
-    if (mode === 'simulation' || route.view === 'clinic') {
+    if (actualMode === 'simulation' || route.view === 'clinic') {
       const holds = liveHolds(sim.holds, now).length;
       items.push({ id: 'clinic', label: 'Clinic', count: holds, pulse: holds > 0 });
     }
     items.push({ id: 'test', label: 'Test call', count: onTestCall ? 1 : undefined, pulse: onTestCall });
     return items;
-  }, [feed.calls, now, mode, sim.holds, route.view, onTestCall]);
+  }, [feed.calls, now, actualMode, sim.holds, route.view, onTestCall]);
 
   const openFinished = (callId: string | null): void => navigate({ view: 'finished', callId });
   /** From the clinic to the call that did it: live if it still is, finished otherwise. */
@@ -71,22 +70,19 @@ export function App() {
         active={route.view}
         onNavigate={(id) => navigate({ view: id as View, callId: null })}
         clinicApi={clinicApi}
-        mode={mode}
-        onMode={
-          health?.mode
-            ? (m) => {
-                if (m === 'live' && route.view === 'clinic') navigate({ view: 'overview', callId: null });
-                void setMode(m);
-              }
-            : undefined
-        }
-        switching={switching}
-        switchError={switchError}
+        mode={agentMode}
+        consoleMode={actualMode}
+        onMode={(m) => {
+          if (m === 'live' && route.view === 'clinic') navigate({ view: 'overview', callId: null });
+          storeMode(m);
+          setAgentModeState(m);
+        }}
       >
         {route.view === 'overview' ? (
           <OverviewView feed={feed} mode={agentMode} />
         ) : route.view === 'clinic' ? (
           <ClinicView
+            mode={agentMode}
             sim={sim}
             liveCalls={feed.calls.filter((c) => callStatus(c, now) === 'live')}
             date={route.callId}
@@ -96,15 +92,16 @@ export function App() {
           />
         ) : route.view === 'live' ? (
           <LiveView
+            mode={agentMode}
             feed={feed}
             selectedId={route.callId}
             onSelect={(callId) => navigate({ view: 'live', callId })}
             onOpenFinished={openFinished}
           />
         ) : route.view === 'test' ? (
-          <TestCallView call={testCall} feed={feed} onOpenCall={(view, callId) => navigate({ view, callId })} />
+          <TestCallView mode={agentMode} call={testCall} feed={feed} onOpenCall={(view, callId) => navigate({ view, callId })} />
         ) : (
-          <FinishedCallsView feed={feed} selectedId={route.callId} onSelect={openFinished} />
+          <FinishedCallsView mode={agentMode} feed={feed} selectedId={route.callId} onSelect={openFinished} />
         )}
       </AppShell>
     </SimContext>

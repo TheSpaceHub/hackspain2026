@@ -2,13 +2,15 @@ import { Volume2, VolumeX } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { listenUrl } from '@/lib/agent/client';
 import { Button } from '@/components/ui/button';
+import type { AgentMode } from '@/lib/agent/origin';
 
 interface ListenButtonProps {
+  mode: AgentMode;
   id: string;
   live?: boolean;
 }
 
-export function ListenButton({ id, live = true }: ListenButtonProps) {
+export function ListenButton({ mode, id, live = true }: ListenButtonProps) {
   const [listening, setListening] = useState(false);
 
   useEffect(() => {
@@ -26,7 +28,7 @@ export function ListenButton({ id, live = true }: ListenButtonProps) {
         {listening ? <VolumeX /> : <Volume2 />}
         {listening ? 'Stop' : 'Listen'}
       </Button>
-      {listening && <audio autoPlay src={listenUrl(id)} className="hidden" />}
+      {listening && <audio autoPlay src={listenUrl(mode, id)} className="hidden" />}
     </div>
   );
 }

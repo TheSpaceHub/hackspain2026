@@ -2,7 +2,7 @@ import { Check, ChevronDown, FlaskConical, Globe, Hospital, Phone, Unplug } from
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNow } from '@/hooks/use-now';
 import { formatClock, formatDay } from '@/lib/format';
-import type { AgentMode } from '@/lib/agent/stats';
+import type { AgentMode } from '@/lib/agent/origin';
 import { MODE_LABEL, type ConsoleMode } from '@/lib/mode';
 import { cn } from '@/lib/utils';
 
@@ -18,14 +18,12 @@ interface AppShellProps {
   nav: NavItem[];
   active: string;
   onNavigate: (id: string) => void;
-  /** The clinic API the agent is wired to, from its /health. */
+  /** The clinic API the selected agent is wired to, from its /health. */
   clinicApi: string | null;
-  mode: ConsoleMode;
-  /** Flip the agent between the real clinic and the sim. Absent on agents that cannot. */
-  onMode?: (mode: AgentMode) => void;
-  switching: boolean;
-  /** Why the last switch failed; shown in red next to the pill. */
-  switchError?: string | null;
+  mode: AgentMode;
+  /** The clinic mode reported by the selected agent, or unknown when unavailable. */
+  consoleMode: ConsoleMode;
+  onMode: (mode: AgentMode) => void;
   children: ReactNode;
 }
 
@@ -103,24 +101,22 @@ const MODE_HINT: Record<AgentMode, string> = {
 };
 
 /**
- * Which world the agent submits to. Worth having in sight at all times: a test run
- * against the real board leaves real records. The pill opens a menu of the two
- * clinics; picking one moves new calls there, calls already open finish where they started.
+ * Which agent the console reads. The actual clinic reported by that agent stays visible
+ * in the pill when it differs from the selected mode.
  */
 function ModePill({
   mode,
+  consoleMode,
   url,
   onMode,
-  switching,
-  switchError,
 }: {
-  mode: ConsoleMode;
+  mode: AgentMode;
+  consoleMode: ConsoleMode;
   url: string | null;
-  onMode?: (mode: AgentMode) => void;
-  switching: boolean;
-  switchError?: string | null;
+  onMode: (mode: AgentMode) => void;
 }) {
-  const Icon = MODE_ICON[mode];
+  const shownMode = consoleMode === mode ? mode : consoleMode;
+  const Icon = MODE_ICON[shownMode];
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -140,35 +136,21 @@ function ModePill({
   }, [open]);
   const classes = cn(
     'flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide',
-    MODE_PILL[mode],
+    MODE_PILL[shownMode],
   );
-  if (!onMode || (mode !== 'live' && mode !== 'simulation')) {
-    return (
-      <span className={classes} title={url ? `Clinic API · ${url}` : 'The agent did not answer /health'}>
-        <Icon className="size-3.5" />
-        {MODE_LABEL[mode]}
-      </span>
-    );
-  }
   const options: AgentMode[] = ['live', 'simulation'];
   return (
     <span ref={root} className="relative flex items-center gap-2">
-      {switchError && (
-        <span className="text-xs text-destructive" title={switchError}>
-          Switch failed
-        </span>
-      )}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        disabled={switching}
         aria-haspopup="menu"
         aria-expanded={open}
-        className={cn(classes, 'cursor-pointer transition-opacity hover:opacity-80 disabled:cursor-wait disabled:opacity-60')}
+        className={cn(classes, 'cursor-pointer transition-opacity hover:opacity-80')}
         title={url ? `Clinic API · ${url}` : undefined}
       >
         <Icon className="size-3.5" />
-        {switching ? 'Switching…' : MODE_LABEL[mode]}
+        {MODE_LABEL[shownMode]}
         <ChevronDown className={cn('size-3 opacity-60 transition-transform', open && 'rotate-180')} />
       </button>
       {open && (
@@ -223,9 +205,9 @@ function Clock() {
   );
 }
 
-export function AppShell({ nav, active, onNavigate, clinicApi, mode, onMode, switching, switchError, children }: AppShellProps) {
+export function AppShell({ nav, active, onNavigate, clinicApi, mode, consoleMode, onMode, children }: AppShellProps) {
   useEffect(() => {
-    document.title = mode === 'simulation' ? '[SIM] Agent la L' : mode === 'live' ? '[LIVE] Agent la L' : 'Agent la L';
+    document.title = mode === 'simulation' ? '[SIM] Agent la L' : '[LIVE] Agent la L';
   }, [mode]);
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background">
@@ -233,7 +215,7 @@ export function AppShell({ nav, active, onNavigate, clinicApi, mode, onMode, swi
         <Brand />
         <Tabs nav={nav} active={active} onNavigate={onNavigate} />
         <div className="ml-auto flex shrink-0 items-center gap-4 text-sm text-muted-foreground">
-          <ModePill mode={mode} url={clinicApi} onMode={onMode} switching={switching} switchError={switchError} />
+          <ModePill mode={mode} consoleMode={consoleMode} url={clinicApi} onMode={onMode} />
           {/* The console is a desktop tool; on a phone, the clock gives way to the tabs. */}
           <span className="hidden h-4 w-px bg-border md:block" />
           <span className="hidden md:contents">

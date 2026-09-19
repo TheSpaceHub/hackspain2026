@@ -1,33 +1,30 @@
-import { useCallback, useEffect, useState } from 'react';
-import { type AgentHealth, type AgentMode, fetchHealth, setAgentMode } from '@/lib/agent/stats';
+import { useEffect, useState } from 'react';
+import { type AgentHealth, type AgentMode, fetchHealth } from '@/lib/agent/stats';
 
 const POLL_MS = 3_000;
 
 export interface AgentHealthState {
   health: AgentHealth | null;
-  /** Switch the agent's clinic. Resolves to the health it reports afterwards. */
-  setMode: (mode: AgentMode) => Promise<void>;
-  switching: boolean;
-  /** Why the last switch failed, until the next one. */
-  switchError: string | null;
 }
 
 /**
- * The agent's /health, re-read on (re)connect and every few seconds after — the mode
- * can be switched from any console tab, or the agent restarted on another clinic.
+ * The selected agent's /health, re-read on (re)connect and every few seconds after.
  */
-export function useAgentHealth(connected: boolean): AgentHealthState {
+export function useAgentHealth(connected: boolean, mode: AgentMode): AgentHealthState {
   const [health, setHealth] = useState<AgentHealth | null>(null);
-  const [switching, setSwitching] = useState(false);
-  const [switchError, setSwitchError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!connected) return;
+    if (!connected) {
+      setHealth(null);
+      return;
+    }
     const controller = new AbortController();
     const read = (): void => {
-      fetchHealth(controller.signal)
+      fetchHealth(mode, controller.signal)
         .then(setHealth)
-        .catch(() => {});
+        .catch(() => {
+          if (!controller.signal.aborted) setHealth(null);
+        });
     };
     read();
     const timer = setInterval(read, POLL_MS);
@@ -35,19 +32,7 @@ export function useAgentHealth(connected: boolean): AgentHealthState {
       clearInterval(timer);
       controller.abort();
     };
-  }, [connected]);
+  }, [connected, mode]);
 
-  const setMode = useCallback(async (mode: AgentMode) => {
-    setSwitching(true);
-    setSwitchError(null);
-    try {
-      setHealth(await setAgentMode(mode));
-    } catch (err: unknown) {
-      setSwitchError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSwitching(false);
-    }
-  }, []);
-
-  return { health, setMode, switching, switchError };
+  return { health };
 }

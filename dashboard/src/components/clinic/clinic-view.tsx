@@ -9,6 +9,7 @@ import { useDiary } from '@/hooks/use-diary';
 import { useNow } from '@/hooks/use-now';
 import type { SimFeed } from '@/hooks/use-sim-feed';
 import type { Call } from '@/lib/agent/model';
+import type { AgentMode } from '@/lib/agent/origin';
 import { dayKey, formatClock, formatDay } from '@/lib/format';
 import { isSimUrl, releaseHold } from '@/lib/sim/client';
 import { liveHolds } from '@/lib/sim/model';
@@ -19,6 +20,7 @@ import { HoldsPanel } from './holds-panel';
 import { OnTheLine } from './on-the-line';
 
 interface ClinicViewProps {
+  mode: AgentMode;
   sim: SimFeed;
   /** The agent's calls in progress, to listen in from here. */
   liveCalls: Call[];
@@ -40,7 +42,7 @@ function shiftDay(date: string, days: number): string {
  * The shared clinic itself, not the calls: whose diary has what, which slots are on
  * hold by which call, what just happened, and a way back to the snapshot.
  */
-export function ClinicView({ sim, liveCalls, date: routeDate, onDate, onOpenCall, agentClinicApi }: ClinicViewProps) {
+export function ClinicView({ mode, sim, liveCalls, date: routeDate, onDate, onOpenCall, agentClinicApi }: ClinicViewProps) {
   const now = useNow(1_000);
   const today = dayKey(new Date(now).toISOString());
   const date = routeDate ?? today;
@@ -204,7 +206,7 @@ export function ClinicView({ sim, liveCalls, date: routeDate, onDate, onOpenCall
               <CardDescription>Calls the agent is taking right now. Listen plays both sides live.</CardDescription>
             </CardHeader>
             <CardContent>
-              <OnTheLine calls={liveCalls} holds={holds} now={now} onOpenCall={onOpenCall} />
+              <OnTheLine mode={mode} calls={liveCalls} holds={holds} now={now} onOpenCall={onOpenCall} />
             </CardContent>
           </Card>
           <Card size="sm" className="gap-2">

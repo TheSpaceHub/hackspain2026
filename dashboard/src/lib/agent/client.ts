@@ -1,42 +1,38 @@
 /**
- * Talking to the agent's console API. In dev every path is same-origin and Vite
- * proxies it to the agent (vite.config.ts); set VITE_AGENT_ORIGIN to point a built
- * dashboard straight at one — the agent sends `Access-Control-Allow-Origin: *`.
+ * Talking to one selected agent's console API. In dev Vite proxies each prefixed
+ * path to its fixed-mode agent; production builds use the configured origins.
  */
 import { type Call, fromDetail, fromRecentRecord } from './model';
-import type { AgentMode } from './stats';
+import { agentOrigin, type AgentMode } from './origin';
 import type { CallDetailResponse, FeedEvent, RecentCallsResponse } from './wire';
 
-const ORIGIN = import.meta.env.PROD ? (import.meta.env.VITE_AGENT_ORIGIN ?? '') : '';
-
-export function listenUrl(id: string): string {
-  return `${ORIGIN}/calls/${encodeURIComponent(id)}/listen`;
+export function listenUrl(mode: AgentMode, id: string): string {
+  return `${agentOrigin(mode)}/calls/${encodeURIComponent(id)}/listen`;
 }
 
-export function recordingUrl(id: string): string {
-  return `${ORIGIN}/calls/${encodeURIComponent(id)}/recording.wav`;
+export function recordingUrl(mode: AgentMode, id: string): string {
+  return `${agentOrigin(mode)}/calls/${encodeURIComponent(id)}/recording.wav`;
 }
 
-async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(`${ORIGIN}${path}`, { signal });
+async function getJson<T>(mode: AgentMode, path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${agentOrigin(mode)}${path}`, { signal });
   if (!res.ok) throw new Error(`GET ${path} → ${res.status}`);
   return (await res.json()) as T;
 }
 
 export async function fetchRecentCalls(
+  mode: AgentMode,
   limit = 50,
   signal?: AbortSignal,
-  mode?: AgentMode,
 ): Promise<{ live: number; calls: Call[] }> {
   const q = new URLSearchParams({ limit: String(limit) });
-  if (mode) q.set('mode', mode);
-  const r = await getJson<RecentCallsResponse>(`/calls?${q}`, signal);
+  const r = await getJson<RecentCallsResponse>(mode, `/calls?${q}`, signal);
   return { live: r.live, calls: r.calls.map(fromRecentRecord) };
 }
 
 /** Null when the agent does not know the id. */
-export async function fetchCall(id: string, signal?: AbortSignal): Promise<Call | null> {
-  return fromDetail(await getJson<CallDetailResponse>(`/calls/${encodeURIComponent(id)}`, signal));
+export async function fetchCall(mode: AgentMode, id: string, signal?: AbortSignal): Promise<Call | null> {
+  return fromDetail(await getJson<CallDetailResponse>(mode, `/calls/${encodeURIComponent(id)}`, signal));
 }
 
 // --- the live stream --------------------------------------------------------
@@ -55,8 +51,8 @@ export interface FeedHandlers {
  * while it was down is lost, which is why `onOpen` fires again on each reconnect.
  * Returns the unsubscribe.
  */
-export function subscribeToFeed(handlers: FeedHandlers): () => void {
-  const source = new EventSource(`${ORIGIN}/events`);
+export function subscribeToFeed(mode: AgentMode, handlers: FeedHandlers): () => void {
+  const source = new EventSource(`${agentOrigin(mode)}/events`);
 
   const parse = (type: string, data: string): FeedEvent | null => {
     try {

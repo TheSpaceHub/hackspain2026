@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import type { CallFeed } from '@/hooks/use-call-feed';
 import { useNow } from '@/hooks/use-now';
 import { callStatus } from '@/lib/agent/model';
+import { agentWsUrl, type AgentMode } from '@/lib/agent/origin';
 import { formatDuration } from '@/lib/format';
 import type { TestCall } from '@/lib/phone/test-call';
 import { cn } from '@/lib/utils';
@@ -12,7 +13,6 @@ import { cn } from '@/lib/utils';
 /** The URL Prosper dials, and the agent behind this console (through Vite's proxy). */
 const PRESETS = [
   { label: 'Prosper endpoint', url: 'wss://pmc-blowing-rap-detroit.trycloudflare.com/ws' },
-  { label: 'Local agent', url: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws` },
 ];
 
 /** Per-browser settings: which agent to ring, and as whom. */
@@ -35,19 +35,25 @@ function useStored(key: string, fallback: string): [string, (v: string) => void]
 }
 
 interface TestCallViewProps {
+  mode: AgentMode;
   call: TestCall;
   feed: CallFeed;
   onOpenCall: (view: 'live' | 'finished', callId: string) => void;
 }
 
 /** Ring the agent from the browser and talk to it, like a caller would. */
-export function TestCallView({ call, feed, onOpenCall }: TestCallViewProps) {
+export function TestCallView({ mode, call, feed, onOpenCall }: TestCallViewProps) {
   const s = call.snapshot;
   const now = useNow(1_000);
   const [endpoint, setEndpoint] = useStored('test-call.endpoint', PRESETS[0]!.url);
   const [fromNumber, setFromNumber] = useStored('test-call.from', '');
 
   const busy = s.phase === 'connecting' || s.phase === 'live';
+  const presets = [
+    ...PRESETS,
+    { label: 'Local agent', url: agentWsUrl(mode) },
+    { label: 'Simulation endpoint', url: 'wss://term-hub-exchange-desirable.trycloudflare.com/ws' },
+  ];
   // The call shows up in this console only when it went to the agent this console reads.
   const tracked = s.callId ? feed.calls.find((c) => c.id === s.callId) : undefined;
 
@@ -128,7 +134,7 @@ export function TestCallView({ call, feed, onOpenCall }: TestCallViewProps) {
           <span className="flex items-center justify-between text-xs text-muted-foreground">
             Endpoint
             <span className="flex gap-1">
-              {PRESETS.map((p) => (
+              {presets.map((p) => (
                 <Button
                   key={p.url}
                   variant={endpoint === p.url ? 'secondary' : 'ghost'}
