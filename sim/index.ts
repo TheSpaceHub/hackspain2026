@@ -39,6 +39,11 @@ const live = new ProsperClient({
   baseUrl: process.env.PROSPER_API_BASE_URL ?? 'https://hackspain.getprosperapp.com',
   apiKey: process.env.PROSPER_API_KEY ?? '',
 });
+const directoryLive = new ProsperClient({
+  baseUrl: live.baseUrl,
+  apiKey: process.env.PROSPER_API_KEY ?? '',
+  timeoutMs: 3_500,
+});
 if (live.baseUrl.includes(`:${port}`)) {
   console.error(`[sim] PROSPER_API_BASE_URL points at the sim itself (${live.baseUrl}); set it to the live API for the copy`);
   process.exit(1);
@@ -57,7 +62,7 @@ if (resnapshot || !Clinic.hasSnapshot(db)) {
   log(`reusing ${dbPath}`);
 }
 
-const clinic = new Clinic({ db, live, holdTtlMs, acceptAnyCall: !strict, log });
+const clinic = new Clinic({ db, live: directoryLive, holdTtlMs, acceptAnyCall: !strict, log });
 const sweep = setInterval(() => clinic.expireHolds(), 1_000);
 sweep.unref();
 

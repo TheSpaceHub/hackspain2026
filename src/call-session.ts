@@ -406,16 +406,23 @@ export class CallSession {
 
   /** Best-effort: a caller the directory knows by their own number needs no questions. */
   #identifyByPhone(state: CallState, phone: string): void {
-    void this.#shared.api[this.#clinic.mode]
-      .findPatient({ phone })
-      .then((matches) => {
-        // Two people on one landline is a household, not an identification.
-        if (matches.length === 1 && !state.matched) {
-          recordMatch(state, matches[0]!, undefined, 'phone');
-          attachBrief(state, this.#shared.catalogue, new Date());
+    void (async () => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const matches = await this.#shared.api[this.#clinic.mode].findPatient({ phone });
+          // Two people on one landline is a household, not an identification.
+          if (matches.length === 1 && !state.matched) {
+            recordMatch(state, matches[0]!, undefined, 'phone');
+            attachBrief(state, this.#shared.catalogue, new Date());
+          }
+          return;
+        } catch (err) {
+          clog.warn(`[ring] phone lookup failed${attempt === 0 ? ', retrying in 1s' : ''}: ${String(err)}`);
+          if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 1_000));
+          else this.#errors.push(`phone lookup: ${String(err)}`);
         }
-      })
-      .catch((err: unknown) => this.#errors.push(`phone lookup: ${String(err)}`));
+      }
+    })();
   }
 
   /** Hand the store every turn it has not seen yet. Cheap, and never throws into the call. */

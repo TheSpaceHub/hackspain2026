@@ -299,14 +299,14 @@ export class Clinic extends EventEmitter<{ event: [SimEvent] }> {
    */
   async directory(q: DirectoryQuery): Promise<PatientMatch[] | null> {
     const key = JSON.stringify([q.name ?? '', q.national_id ?? '', q.phone ?? '', q.date_of_birth ?? '']);
-    if (this.live && !this.#asked.has(key)) {
-      try {
-        const { matches } = await this.live.directory(q);
-        for (const m of matches) await this.#adopt(m);
-        this.#asked.add(key);
-      } catch (err) {
-        this.#log(`directory: live lookup failed: ${String(err)}`);
-      }
+    const local = searchDirectory(this.patients(), q);
+    if (!local || local.length > 0 || !this.live || this.#asked.has(key)) return local;
+    try {
+      const { matches } = await this.live.directory(q);
+      for (const m of matches) await this.#adopt(m);
+      this.#asked.add(key);
+    } catch (err) {
+      this.#log(`directory: live lookup failed: ${String(err)}`);
     }
     return searchDirectory(this.patients(), q);
   }

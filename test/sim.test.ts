@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { toAction } from '../mock/submit/schemas.js';
 import { Clinic, type SimEventType } from '../sim/clinic.js';
 import { openDb } from '../sim/db.js';
-import type { ClinicBody } from '../sim/prosper.js';
+import type { ClinicBody, ProsperClient } from '../sim/prosper.js';
 import { createSimServer } from '../sim/server.js';
 import { writeSnapshot } from '../sim/snapshot.js';
 import catalogue from '../mock/world/catalogue.json' with { type: 'json' };
@@ -156,6 +156,21 @@ async function main(): Promise<void> {
     assert.equal(found?.[0]?.given_name, 'Ana');
     const dup = clinic.submit('register', { ...data, call_id: 'I' }, toAction('register', data), NOW);
     assert.ok(!dup.ok && dup.status === 409);
+  });
+
+  await check('directory prefers a local phone match over the live API', async () => {
+    let liveCalls = 0;
+    const live = {
+      configured: true,
+      directory: async () => {
+        liveCalls++;
+        throw new Error('live directory should not be called');
+      },
+    } as unknown as ProsperClient;
+    const local = new Clinic({ db: clinic.db, live });
+    const found = await local.directory({ phone: '600000000' });
+    assert.equal(found?.[0]?.given_name, 'Ana');
+    assert.equal(liveCalls, 0);
   });
 
   await check('the submission window closes 30 s after the call', () => {

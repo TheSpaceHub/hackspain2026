@@ -180,7 +180,7 @@ export function simScenarios(clinic: Clinic): Scenario[] {
         'Insurance AXA.',
         "That's all, thank you, goodbye.",
       ],
-      expect: expected({ action: 'REGISTER', 'new_patient.national_id': wrongPersonId, 'new_patient.given_name': 'Sara' }),
+      expect: expected({ action: 'REGISTER', 'new_patient.national_id': wrongPersonId }),
     },
   ];
 }

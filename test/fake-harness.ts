@@ -5,6 +5,7 @@
  *   pnpm harness                              scripted booking call, one socket
  *   pnpm harness -- --n 10                    ten concurrent calls, the Run All shape
  *   pnpm harness -- --n 20                    the Switchboard burst
+ *   pnpm harness -- --scenario all --parallel 4  graded cases with four callers at once
  *   pnpm harness -- --barge-in                talk over the agent's greeting
  *   pnpm harness -- --wav caller.wav          play a real recording instead
  *   pnpm harness -- --say "hello" --say "..."  synthesise lines (`say` on macOS, `espeak-ng` on Linux)
@@ -57,6 +58,8 @@ interface Options {
   prosper?: string;
   /** Local cases to play, by name; `all` for every one. Needs `prosper`. */
   scenarios: string[];
+  /** Maximum number of calls running at once. */
+  parallel: number;
 }
 
 /** One call's worth: what the caller says and who they appear to be. */
@@ -77,6 +80,7 @@ function parseArgs(argv: string[]): Options {
     outDir: './calls',
     prosper: process.env.MOCK_PROSPER_URL,
     scenarios: [],
+    parallel: 4,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -89,6 +93,7 @@ function parseArgs(argv: string[]): Options {
     else if (arg === '--out' && next) opts.outDir = argv[++i]!;
     else if (arg === '--prosper' && next) opts.prosper = argv[++i]!;
     else if (arg === '--scenario' && next) opts.scenarios.push(argv[++i]!);
+    else if (arg === '--parallel' && next) opts.parallel = Math.max(1, Number(argv[++i]) || 1);
     else if (arg === '--barge-in') opts.bargeIn = true;
   }
   if (opts.script.length === 0) opts.script = DEFAULT_SCRIPT;
@@ -467,7 +472,16 @@ async function main(): Promise<void> {
     const totalMs = plans[0]!.turns.reduce((n, t) => n + (t.length / SAMPLE_RATE) * 1000, 0);
     console.log(`[harness] caller script: ${plans[0]!.turns.length} turn(s), ${(totalMs / 1000).toFixed(1)}s of audio`);
 
-    const reports = await Promise.all(plans.map((plan, i) => runCall(opts, plan, i)));
+    const reports: CallReport[] = Array.from({ length: plans.length });
+    let nextPlan = 0;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const i = nextPlan++;
+        if (i >= plans.length) return;
+        reports[i] = await runCall(opts, plans[i]!, i);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(opts.parallel, plans.length) }, () => worker()));
 
     console.log('\n--- results ---');
     for (const [i, r] of reports.entries()) {
