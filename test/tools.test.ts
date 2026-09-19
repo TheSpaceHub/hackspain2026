@@ -20,6 +20,7 @@ import {
   recordQuote,
   recordRequest,
   retract,
+  setPlanVocabulary,
   readCallState,
   type QuotedSlot,
 } from '../src/call-state.js';
@@ -179,6 +180,10 @@ check('a type that already agrees is left alone', enforceAppointmentType({ ...bo
 // --- call state ------------------------------------------------------------
 
 const state = createCallState('call-1', '+34612345678');
+setPlanVocabulary([
+  { id: 'cigna', name: 'Cigna' },
+  { id: 'nueva_mutua_sanitaria', name: 'Nueva Mutua Sanitaria' },
+]);
 check('the inbound number is kept, normalized', state.from_number, '612345678');
 check('but it is not assumed to be the patient\'s', state.patient.phone, undefined);
 check('a recorded field reads back normalized', recordPatientField(state, 'national_id', 'X 1 2 3 4 5 6 7 L').value, 'X1234567L');
