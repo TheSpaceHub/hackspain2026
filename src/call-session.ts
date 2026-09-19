@@ -94,6 +94,7 @@ export class CallSession {
   #turnsWritten = 0;
   #silenceTimer: NodeJS.Timeout | null = null;
   #nudges = 0;
+  #lastAgentQuestion?: string;
   #greetingFinished = false;
   #deadAir: { turn: number; ms: number }[] = [];
   #pendingDeadAir: { turn: number; at: number }[] = [];
@@ -297,8 +298,10 @@ export class CallSession {
     }
   }
 
-  /** What to say into silence: the open offer if there is one, otherwise a plain check-in. */
+  /** What to say into silence: the last thing we asked, or the open offer, or a plain check-in. */
   #nudgeText(): string {
+    const question = this.#lastAgentQuestion;
+    if (question) return `Are you still there? ${question}`;
     const state = this.#state;
     const open = state && !state.accepted ? state.quoted : [];
     if (state && open.length > 0) {
@@ -309,6 +312,14 @@ export class CallSession {
       return `Are you still there? I can offer ${offer}. Would that suit you?`;
     }
     return 'Are you still there? How can I help you today?';
+  }
+
+  /** The agent's own last question, so a nudge repeats what was actually asked. */
+  #rememberAgentQuestion(text: string): void {
+    if (text.startsWith('Are you still there?')) return;
+    const sentences = text.match(/[^.!?]+[.!?]/g) ?? [text];
+    const asked = sentences.map((x) => x.trim()).filter((x) => x.endsWith('?'));
+    this.#lastAgentQuestion = asked.length > 0 ? asked[asked.length - 1] : undefined;
   }
 
   #clearSilenceTimer(): void {
@@ -343,27 +354,15 @@ export class CallSession {
 
       this.#nudges++;
       clog.info(`[silence] no caller speech for ${SILENCE_NUDGE_MS / 1000}s · nudge ${this.#nudges}`);
-      if (this.#nudges <= 2) {
-        // Fixed text, not a model turn: asked to "repeat the offer so they can say yes",
-        // the model called accept_slot on the caller's behalf and booked ten silent calls.
-        try {
-          session.say(this.#nudgeText(), { allowInterruptions: true });
-        } catch (err) {
-          this.#errors.push(`silence nudge: ${String(err)}`);
-        }
-        return;
-      }
-
+      // Fixed text, not a model turn: asked to "repeat the offer so they can say yes",
+      // the model called accept_slot on the caller's behalf and booked ten silent calls.
+      // We never hang up on silence: some callers take twenty seconds to answer; the
+      // call-length limit is the only end.
       try {
-        const goodbye = session.say(
-          "I'm sorry, I can't hear you. Please call us back at Clínica Arenal whenever suits you. Goodbye.",
-          { allowInterruptions: true },
-        );
-        await goodbye.waitForPlayout();
+        session.say(this.#nudgeText(), { allowInterruptions: true });
       } catch (err) {
-        this.#errors.push(`silence goodbye: ${String(err)}`);
+        this.#errors.push(`silence nudge: ${String(err)}`);
       }
-      if (!this.#closing) void this.finish('caller_silent');
     } catch (err) {
       this.#errors.push(`silence timer: ${String(err)}`);
     }
@@ -396,6 +395,7 @@ export class CallSession {
     const at = new Date().toISOString();
     for (let i = this.#turnsWritten; i < turns.length; i++) {
       const turn = turns[i]!;
+      if (turn.role === 'assistant') this.#rememberAgentQuestion(turn.text);
       if (
         this.#state &&
         turn.role === 'assistant' &&
