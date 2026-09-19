@@ -16,6 +16,7 @@
     "harness": "tsx test/fake-harness.ts",
     "harness:local": "MOCK_PROSPER_URL=http://127.0.0.1:8787 tsx test/fake-harness.ts",
     "test:audio": "tsx test/audio-output.test.ts",
+    "test:recorder": "tsx test/recorder.test.ts",
     "bench": "tsx test/decider-bench.ts",
     "test:schema": "tsx test/schema.test.ts",
     "test:tools": "tsx test/tools.test.ts",
@@ -23,7 +24,7 @@
     "test:extract": "tsx test/extract.test.ts",
     "test:recovery": "tsx test/recovery.test.ts",
     "test:alerts": "tsx test/alerts.test.ts",
-    "test": "tsx test/schema.test.ts && tsx test/tools.test.ts && tsx test/agent-tools.test.ts && tsx test/extract.test.ts && tsx test/patient-brief.test.ts && tsx test/log.test.ts && tsx test/alerts.test.ts && tsx test/recovery.test.ts && tsx test/stream.test.ts && tsx test/audio-output.test.ts && tsx test/sim.test.ts",
+    "test": "tsx test/schema.test.ts && tsx test/tools.test.ts && tsx test/agent-tools.test.ts && tsx test/extract.test.ts && tsx test/patient-brief.test.ts && tsx test/log.test.ts && tsx test/alerts.test.ts && tsx test/recovery.test.ts && tsx test/stream.test.ts && tsx test/audio-output.test.ts && tsx test/recorder.test.ts && tsx test/sim.test.ts",
     "restart": "bash scripts/restart.sh"
   },
   "dependencies": {

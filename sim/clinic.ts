@@ -91,6 +91,41 @@ export interface StoredAppointment extends Appointment {
   call_id: string | null;
 }
 
+export interface DiaryProvider {
+  provider_id: string;
+  name: string;
+  specialty_id: string;
+  specialty_name: string;
+  on_leave: boolean;
+  /** Cells the provider sits, by minute of the day, with the site. */
+  working: { location: string; minute: number }[];
+  /** Cells taken: `ref` is an appointment_id, or 'snapshot' for one the live clinic showed as busy. */
+  taken: { minute: number; ref: string }[];
+}
+
+export interface DiaryDay {
+  date: string;
+  closed: boolean;
+  providers: DiaryProvider[];
+  appointments: (StoredAppointment & { patient_name: string | null })[];
+  holds: Hold[];
+}
+
+/** GET /__sim — where the clinic stands. */
+export interface SimState {
+  clinic_name: string;
+  snapshot: { source: string; taken_at: string };
+  live: string | null;
+  hold_ttl_ms: number;
+  calendar: Catalogue['calendar'];
+  patients: { prosper: number; local: number };
+  appointments: { prosper: number; local: number; cancelled: number };
+  busy_cells: number;
+  holds: number;
+  calls: { total: number; open: number };
+  events: number;
+}
+
 /** An answer that is also an HTTP status: the routes send it as-is. */
 export type Outcome<T> = { ok: true; value: T } | { ok: false; status: number; detail: string };
 
@@ -171,6 +206,14 @@ export class Clinic extends EventEmitter<{ event: [SimEvent] }> {
       .prepare('SELECT id, at, type, call_id, data_json FROM events WHERE id > ? ORDER BY id LIMIT ?')
       .all(id, limit) as { id: number; at: number; type: SimEventType; call_id: string | null; data_json: string }[];
     return rows.map((r) => ({ id: r.id, at: r.at, type: r.type, call_id: r.call_id, data: JSON.parse(r.data_json) as Record<string, unknown> }));
+  }
+
+  /** The newest `limit` events, oldest first — what a console shows before it starts streaming. */
+  recentEvents(limit = 100): SimEvent[] {
+    const rows = this.db
+      .prepare('SELECT id, at, type, call_id, data_json FROM events ORDER BY id DESC LIMIT ?')
+      .all(limit) as { id: number; at: number; type: SimEventType; call_id: string | null; data_json: string }[];
+    return rows.reverse().map((r) => ({ id: r.id, at: r.at, type: r.type, call_id: r.call_id, data: JSON.parse(r.data_json) as Record<string, unknown> }));
   }
 
   // --- catalogue ------------------------------------------------------------
@@ -298,6 +341,45 @@ export class Clinic extends EventEmitter<{ event: [SimEvent] }> {
       )
       .all(...(providerId ? [date, providerId] : [date])) as unknown as StoredAppointment[];
     return rows;
+  }
+
+  /**
+   * One day of the diary, provider by provider: the cells each one works (with the
+   * site), the ones taken (by which appointment, or 'snapshot' for a nameless one),
+   * and the live holds on them. What a wall calendar of the clinic would show.
+   */
+  diary(date: string, now = Date.now()): DiaryDay {
+    const closed = this.catalogue.calendar.closure_days.includes(date);
+    const taken = this.db.prepare('SELECT provider_id, minute, ref FROM cells WHERE date = ?').all(date) as { provider_id: string; minute: number; ref: string }[];
+    const byProvider = new Map<string, { minute: number; ref: string }[]>();
+    for (const t of taken) {
+      const list = byProvider.get(t.provider_id) ?? [];
+      list.push({ minute: t.minute, ref: t.ref });
+      byProvider.set(t.provider_id, list);
+    }
+    const providers: DiaryProvider[] = [];
+    for (const p of this.catalogue.providers.values()) {
+      const working = closed ? [] : workingCells(this.catalogue, p, date);
+      providers.push({
+        provider_id: p.id,
+        name: p.name,
+        specialty_id: p.specialty_id,
+        specialty_name: p.specialty_name,
+        on_leave: onLeave(p, date),
+        working,
+        taken: byProvider.get(p.id) ?? [],
+      });
+    }
+    return {
+      date,
+      closed,
+      providers,
+      appointments: this.appointmentsOn(date).map((a) => {
+        const p = this.patient(a.patient_id);
+        return { ...a, patient_name: p ? `${p.given_name} ${p.first_surname}` : null };
+      }),
+      holds: this.holds(now).filter((h) => h.date === date),
+    };
   }
 
   // --- the calendar ---------------------------------------------------------
@@ -685,7 +767,11 @@ export class Clinic extends EventEmitter<{ event: [SimEvent] }> {
 
   // --- reset ----------------------------------------------------------------
 
-  /** Back to the snapshot: every call, hold, booking, cancellation and registration undone. */
+  /**
+   * Back to the snapshot: every call, hold, booking, cancellation and registration undone,
+   * and the log cleared with them — only the `reset` line remains. Event ids keep counting
+   * up (AUTOINCREMENT), so a console streaming `?since=` is not confused.
+   */
   reset(now = Date.now()): void {
     transaction(this.db, () => {
       this.db.exec(`
@@ -698,6 +784,7 @@ export class Clinic extends EventEmitter<{ event: [SimEvent] }> {
         DELETE FROM cells;
         INSERT INTO cells(provider_id, date, minute, ref) SELECT provider_id, date, minute, 'snapshot' FROM snapshot_cells;
         DELETE FROM counters WHERE name IN ('hold', 'appointment', 'patient');
+        DELETE FROM events;
       `);
       // Prosper appointments we copied keep their own cells, so a later CANCEL still frees them.
       const kept = this.db
@@ -716,7 +803,7 @@ export class Clinic extends EventEmitter<{ event: [SimEvent] }> {
 
   // --- a look inside ----------------------------------------------------------
 
-  state(now = Date.now()): Record<string, unknown> {
+  state(now = Date.now()): SimState {
     const one = (sql: string): number => (this.db.prepare(sql).get() as { n: number }).n;
     const snap = this.db.prepare('SELECT source, taken_at FROM snapshot WHERE id = 1').get() as { source: string; taken_at: number };
     return {

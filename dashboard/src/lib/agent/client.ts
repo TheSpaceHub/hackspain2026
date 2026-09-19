@@ -8,6 +8,14 @@ import type { CallDetailResponse, FeedEvent, RecentCallsResponse } from './wire'
 
 const ORIGIN = import.meta.env.PROD ? (import.meta.env.VITE_AGENT_ORIGIN ?? '') : '';
 
+export function listenUrl(id: string): string {
+  return `${ORIGIN}/calls/${encodeURIComponent(id)}/listen`;
+}
+
+export function recordingUrl(id: string): string {
+  return `${ORIGIN}/calls/${encodeURIComponent(id)}/recording.wav`;
+}
+
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${ORIGIN}${path}`, { signal });
   if (!res.ok) throw new Error(`GET ${path} → ${res.status}`);

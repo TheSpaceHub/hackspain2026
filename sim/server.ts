@@ -13,6 +13,8 @@
  *   POST /__sim/calls               {call_id, from_number?, scenario?} — a call opens
  *   POST /__sim/calls/:call_id/close                                   — its socket closed
  *   GET  /__sim/calls[/:call_id]
+ *   GET  /__sim/log[?limit=100]      the newest events, oldest first (the SSE stream's `since` picks up after them)
+ *   GET  /__sim/diary?date=YYYY-MM-DD    every provider's day: working, taken and held cells
  *   GET  /__sim/appointments?date=YYYY-MM-DD[&provider_id=]
  *   GET  /__sim/appointments/:appointment_id
  *   POST /__sim/reset               back to the snapshot (?resnapshot=1 to re-copy the live clinic)
@@ -210,6 +212,23 @@ export function buildRouter({ clinic, live, log = () => {} }: SimServerOptions):
         const date = query.get('date');
         if (!date || !ISO_DATE.test(date)) return fail(422, 'date=YYYY-MM-DD is required');
         return ok({ appointments: clinic.appointmentsOn(date, query.get('provider_id') ?? undefined) });
+      },
+      { public: true },
+    )
+    .get(
+      '/__sim/log',
+      ({ query }) => {
+        const limit = Math.min(Math.max(Number(query.get('limit') ?? 100) || 100, 1), 1000);
+        return ok({ events: clinic.recentEvents(limit) });
+      },
+      { public: true },
+    )
+    .get(
+      '/__sim/diary',
+      ({ query }) => {
+        const date = query.get('date');
+        if (!date || !ISO_DATE.test(date)) return fail(422, 'date=YYYY-MM-DD is required');
+        return ok(clinic.diary(date));
       },
       { public: true },
     )

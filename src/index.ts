@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
 import { initializeLogger } from '@livekit/agents';
 import { WebSocketServer } from 'ws';
@@ -10,7 +11,12 @@ import { config } from './config.js';
 import { loadVad } from './models.js';
 import { openStore } from './store/index.js';
 import { tagLiveKitLogger } from './log.js';
-import { simFetch, simHoldsEnabled } from './sim-holds.js';
+import { simFetch } from './sim-holds.js';
+import { CLINIC_URLS, clinicTarget, isClinicMode, setClinicMode } from './clinic-target.js';
+import { wavHeader } from './recorder.js';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
+import { resolve, join } from 'node:path';
 
 /** One process, one WebSocket server, one headless AgentSession per socket. */
 async function main(): Promise<void> {
@@ -26,17 +32,23 @@ async function main(): Promise<void> {
 
   // Abort under the per-tool cap, so a slow API surfaces as a failure the agent can
   // explain rather than as the tool giving up on a request still in flight.
-  const api = new ClinicApi({
-    baseUrl: config.prosper.baseUrl,
-    apiKey: config.prosper.apiKey,
-    timeoutMs: DEFAULT_TOOL_TIMEOUT_MS - 500,
-    ...(simHoldsEnabled ? { fetch: simFetch() } : {}),
-  });
-  if (simHoldsEnabled) console.log(`[boot] SIM_HOLDS=1: holding slots on the sim at ${config.prosper.baseUrl}`);
+  // One client per clinic; a call picks the one for the mode it opened in.
+  const api = {
+    live: new ClinicApi({ baseUrl: CLINIC_URLS.live, apiKey: config.prosper.apiKey, timeoutMs: DEFAULT_TOOL_TIMEOUT_MS - 500 }),
+    simulation: new ClinicApi({
+      baseUrl: CLINIC_URLS.simulation,
+      apiKey: config.prosper.apiKey,
+      timeoutMs: DEFAULT_TOOL_TIMEOUT_MS - 500,
+      fetch: simFetch(),
+    }),
+  };
+  console.log(`[boot] clinic mode ${clinicTarget().mode} · live ${CLINIC_URLS.live} · simulation ${CLINIC_URLS.simulation}`);
 
   // Doctors, sites, plans and closures are identical all event: parsed once here off the
-  // document `loadClinic` already fetched, so no call ever pays for them.
-  const catalogue = clinic.raw === null ? null : api.primeCatalogue(clinic.raw);
+  // document `loadClinic` already fetched, so no call ever pays for them. The sim is a
+  // copy of the same clinic, so it shares the catalogue.
+  const catalogue = clinic.raw === null ? null : api.live.primeCatalogue(clinic.raw);
+  if (clinic.raw !== null) api.simulation.primeCatalogue(clinic.raw);
   // So a plan written down mid-call is the clinic's id, not the caller's pronunciation.
   if (catalogue) setPlanVocabulary(catalogue.plans);
 
@@ -47,6 +59,7 @@ async function main(): Promise<void> {
     store,
     api,
     catalogue,
+    recorders: new Map(),
   };
 
   console.log(`[boot] clinic catalogue from ${clinic.source}, ${clinic.keyterms.length} keyterms`);
@@ -61,19 +74,47 @@ async function main(): Promise<void> {
       : `[boot] llm ${config.cloudflare.model} · decider ${config.cloudflare.deciderModel}`,
   );
 
+  // Consoles on /events hear a mode switch as an event, so every open tab follows.
+  const modeListeners = new EventEmitter();
+
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const json = (body: unknown, code = 200): void => {
       res.writeHead(code, {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
       });
       res.end(JSON.stringify(body, null, 2));
     };
+    if (req.method === 'OPTIONS') return json(null, 204);
 
-    // Which clinic API the agent submits to, so the console can say "local mock" vs the real board.
-    if (url.pathname === '/health') {
-      return json({ ok: true, live: wss.clients.size, clinic_api: config.prosper.baseUrl });
+    // Which clinic new calls book into, so the console can say "simulation" vs the real board.
+    const health = (): unknown => {
+      const target = clinicTarget();
+      return { ok: true, live: wss.clients.size, clinic_api: target.baseUrl, mode: target.mode, clinics: CLINIC_URLS };
+    };
+    if (url.pathname === '/health') return json(health());
+
+    // The console's mode switch. Calls already open keep the clinic they started on.
+    if (url.pathname === '/mode' && req.method === 'POST') {
+      let raw = '';
+      req.on('data', (chunk: Buffer) => (raw += chunk.toString()));
+      req.on('end', () => {
+        let mode: unknown;
+        try {
+          mode = (JSON.parse(raw) as { mode?: unknown }).mode;
+        } catch {
+          return json({ detail: 'body must be JSON' }, 400);
+        }
+        if (!isClinicMode(mode)) return json({ detail: 'mode must be "live" or "simulation"' }, 422);
+        const target = setClinicMode(mode);
+        console.log(`[mode] ${target.mode} · new calls book into ${target.baseUrl}`);
+        modeListeners.emit('mode', health());
+        return json(health());
+      });
+      return;
     }
 
     // Realtime feed for a dashboard: one SSE event per row the store writes, as it is
@@ -93,6 +134,10 @@ async function main(): Promise<void> {
         res.write(`event: ${(row as { type: string }).type}\ndata: ${JSON.stringify(row)}\n\n`);
       };
       store.on('row', onRow);
+      const onMode = (body: unknown): void => {
+        res.write(`event: mode\ndata: ${JSON.stringify(body)}\n\n`);
+      };
+      modeListeners.on('mode', onMode);
       // Proxies and tunnels drop an idle stream; this also surfaces the live call count.
       const beat = setInterval(() => {
         res.write(`event: heartbeat\ndata: ${JSON.stringify({ live: wss.clients.size, at: Date.now() })}\n\n`);
@@ -100,6 +145,7 @@ async function main(): Promise<void> {
       const stop = (): void => {
         clearInterval(beat);
         store.off('row', onRow);
+        modeListeners.off('mode', onMode);
       };
       req.on('close', stop);
       res.on('error', stop);
@@ -111,6 +157,72 @@ async function main(): Promise<void> {
       void store
         .query('recent', { limit: Number(url.searchParams.get('limit') ?? 50) })
         .then((rows) => json({ live: wss.clients.size, calls: rows }));
+      return;
+    }
+    if (url.pathname.endsWith('/listen') && url.pathname.startsWith('/calls/')) {
+      const callId = decodeURIComponent(url.pathname.slice('/calls/'.length, -'/listen'.length));
+      const recorder = shared.recorders.get(callId);
+      if (!recorder) return json({ error: 'recording not live' }, 404);
+
+      res.writeHead(200, {
+        'Content-Type': 'audio/wav',
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.write(wavHeader({ channels: 2, sampleRate: 8000, dataBytes: 0xffffffff - 36 }));
+      let writable = true;
+      const onChunk = (chunk: Buffer): void => {
+        if (writable && !res.write(chunk)) writable = false;
+      };
+      const onDrain = (): void => {
+        writable = true;
+      };
+      const stop = (): void => {
+        recorder.off('chunk', onChunk);
+        recorder.off('close', stop);
+        res.off('drain', onDrain);
+        if (!res.writableEnded) res.end();
+      };
+      recorder.on('chunk', onChunk);
+      recorder.once('close', stop);
+      res.on('drain', onDrain);
+      req.on('close', stop);
+      return;
+    }
+    if (url.pathname.endsWith('/recording.wav') && url.pathname.startsWith('/calls/')) {
+      const callId = decodeURIComponent(url.pathname.slice('/calls/'.length, -'/recording.wav'.length));
+      void store.query('call', { call_id: callId }).then(async (rows) => {
+        const recordingPath = (rows as { call?: { recording_path?: string | null } } | null)?.call?.recording_path;
+        if (!recordingPath) return json({ error: 'recording not found' }, 404);
+        const root = resolve(join(config.logDir, 'recordings'));
+        const path = resolve(recordingPath);
+        if (path !== root && !path.startsWith(root + '/')) return json({ error: 'recording not found' }, 404);
+        try {
+          const info = await stat(path);
+          const range = urlPathRange(req.headers.range, info.size);
+          if (range?.invalid) {
+            res.writeHead(416, { 'Content-Range': `bytes */${info.size}` });
+            return res.end();
+          }
+          const start = range?.start ?? 0;
+          const end = range?.end ?? info.size - 1;
+          const headers: Record<string, string | number> = {
+            'Content-Type': 'audio/wav',
+            'Accept-Ranges': 'bytes',
+            'Content-Length': end - start + 1,
+            'Access-Control-Allow-Origin': '*',
+          };
+          if (range) {
+            headers['Content-Range'] = `bytes ${start}-${end}/${info.size}`;
+            res.writeHead(206, headers);
+          } else {
+            res.writeHead(200, headers);
+          }
+          createReadStream(path, { start, end }).pipe(res);
+        } catch {
+          json({ error: 'recording not found' }, 404);
+        }
+      });
       return;
     }
     // The overview's numbers, over a range: `since` an ISO instant, `bucket_ms` the series grain.
@@ -154,6 +266,22 @@ async function main(): Promise<void> {
   };
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+function urlPathRange(
+  value: string | undefined,
+  size: number,
+): { start: number; end: number; invalid?: false } | { invalid: true } | null {
+  if (!value) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value);
+  if (!match || (!match[1] && !match[2])) return { invalid: true };
+  let start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+  let end = match[2] ? Number(match[2]) : size - 1;
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start >= size || end < start) {
+    return { invalid: true };
+  }
+  end = Math.min(end, size - 1);
+  return { start, end };
 }
 
 // A crash in one call must not take the other nine down.

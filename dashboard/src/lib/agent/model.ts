@@ -80,6 +80,7 @@ export interface Call {
   outcomes: Outcome[];
   /** What went wrong, as the agent's store derived it; null until it has said. */
   alerts: Alert[] | null;
+  recording: { available: boolean; durationMs: number | null };
 }
 
 export type CallStatus = 'live' | 'ended' | 'stale';
@@ -137,6 +138,7 @@ export function emptyCall(id: string, startedAt: string): Call {
     submissions: [],
     outcomes: [],
     alerts: null,
+    recording: { available: false, durationMs: null },
   };
 }
 
@@ -164,6 +166,10 @@ export function fromCallRecord(r: CallRecord): Call {
     },
     errors: parseJson<string[]>(r.errors, []),
     alerts: r.alerts ? parseJson<Alert[]>(r.alerts, []) : null,
+    recording: {
+      available: r.recording_path != null,
+      durationMs: r.recording_ms,
+    },
   };
 }
 
@@ -196,7 +202,7 @@ export function fromCallStarted(m: CallStarted): Call {
 /** The fields `call_ended` carries; everything else about the call is left alone. */
 export function fromCallEnded(m: CallEnded): Pick<
   Call,
-  'endedAt' | 'endedBy' | 'durationMs' | 'framesIn' | 'framesOut' | 'timings' | 'decider' | 'errors'
+  'endedAt' | 'endedBy' | 'durationMs' | 'framesIn' | 'framesOut' | 'timings' | 'decider' | 'errors' | 'recording'
 > {
   return {
     endedAt: m.ended_at,
@@ -217,6 +223,10 @@ export function fromCallEnded(m: CallEnded): Pick<
       usedFloor: m.used_floor,
     },
     errors: m.errors,
+    recording: {
+      available: m.recording_path !== undefined,
+      durationMs: m.recording_ms ?? null,
+    },
   };
 }
 

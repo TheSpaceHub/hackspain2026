@@ -234,6 +234,23 @@ async function main(): Promise<void> {
       assert.match(text, /^event: hold$/m);
       assert.match(text, new RegExp(hold.hold_id));
 
+      const badDay = await fetch(`${base}/__sim/diary`);
+      assert.equal(badDay.status, 422);
+      const diary = (await (await fetch(`${base}/__sim/diary?date=2026-09-14`)).json()) as {
+        closed: boolean;
+        providers: { provider_id: string; working: unknown[]; taken: { minute: number; ref: string }[] }[];
+        holds: { hold_id: string }[];
+      };
+      assert.equal(diary.closed, false);
+      const row = diary.providers.find((p) => p.provider_id === PR);
+      assert.ok(row && row.working.length > 0, 'the provider sits that day');
+      assert.deepEqual(row.taken, [{ minute: 600, ref: 'snapshot' }], 'the snapshot-busy 10:00 cell');
+      assert.deepEqual(diary.holds.map((h) => h.hold_id), [hold.hold_id]);
+
+      const log = (await (await fetch(`${base}/__sim/log?limit=2`)).json()) as { events: { type: string }[] };
+      assert.equal(log.events.length, 2);
+      assert.equal(log.events.at(-1)?.type, 'hold');
+
       const del = await fetch(`${base}/__sim/holds/${hold.hold_id}?call_id=K`, { method: 'DELETE' });
       assert.equal(del.status, 200);
       assert.equal(clinic.holds().length, 0);

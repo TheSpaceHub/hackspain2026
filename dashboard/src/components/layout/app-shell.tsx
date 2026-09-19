@@ -1,7 +1,9 @@
-import { FlaskConical, Globe, Phone } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ArrowLeftRight, FlaskConical, Globe, Hospital, Phone, Unplug } from 'lucide-react';
+import { useEffect, type ReactNode } from 'react';
 import { useNow } from '@/hooks/use-now';
 import { formatClock, formatDay } from '@/lib/format';
+import type { AgentMode } from '@/lib/agent/stats';
+import { MODE_LABEL, type ConsoleMode } from '@/lib/mode';
 import { cn } from '@/lib/utils';
 
 export interface NavItem {
@@ -18,6 +20,12 @@ interface AppShellProps {
   onNavigate: (id: string) => void;
   /** The clinic API the agent is wired to, from its /health. */
   clinicApi: string | null;
+  mode: ConsoleMode;
+  /** Flip the agent between the real clinic and the sim. Absent on agents that cannot. */
+  onMode?: (mode: AgentMode) => void;
+  switching: boolean;
+  /** Why the last switch failed; shown in red next to the pill. */
+  switchError?: string | null;
   children: ReactNode;
 }
 
@@ -80,17 +88,65 @@ function Tabs({ nav, active, onNavigate }: Pick<AppShellProps, 'nav' | 'active' 
   );
 }
 
+const MODE_ICON = { live: Globe, simulation: Hospital, mock: FlaskConical, unknown: Unplug } as const;
+
+const MODE_PILL: Record<ConsoleMode, string> = {
+  live: 'border-emerald-600/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300',
+  simulation: 'border-violet-600/40 bg-violet-500/10 text-violet-800 dark:text-violet-300',
+  mock: 'border-amber-600/40 bg-amber-500/10 text-amber-800 dark:text-amber-300',
+  unknown: 'border-border bg-muted text-muted-foreground',
+};
+
 /**
- * Which clinic the agent submits to. Worth having in sight at all times: a test run
- * against the real board leaves real records.
+ * Which world the agent submits to. Worth having in sight at all times: a test run
+ * against the real board leaves real records. Click to switch: new calls go to the
+ * other clinic, calls already open finish where they started.
  */
-function ClinicApi({ url }: { url: string | null }) {
-  const local = !!url && /\/\/(127\.0\.0\.1|localhost|\[::1\])/.test(url);
-  const Icon = local ? FlaskConical : Globe;
+function ModePill({
+  mode,
+  url,
+  onMode,
+  switching,
+  switchError,
+}: {
+  mode: ConsoleMode;
+  url: string | null;
+  onMode?: (mode: AgentMode) => void;
+  switching: boolean;
+  switchError?: string | null;
+}) {
+  const Icon = MODE_ICON[mode];
+  const next: AgentMode | null = mode === 'simulation' ? 'live' : mode === 'live' ? 'simulation' : null;
+  const classes = cn(
+    'flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide',
+    MODE_PILL[mode],
+  );
+  if (!onMode || !next) {
+    return (
+      <span className={classes} title={url ? `Clinic API · ${url}` : 'The agent did not answer /health'}>
+        <Icon className="size-3.5" />
+        {MODE_LABEL[mode]}
+      </span>
+    );
+  }
   return (
-    <span className="flex items-center gap-1.5" title={url ? `Clinic API · ${url}` : 'Clinic API unknown'}>
-      <Icon className="size-4" />
-      {url ? (local ? 'Local mock' : 'Prosper') : '—'}
+    <span className="flex items-center gap-2">
+      {switchError && (
+        <span className="text-xs text-destructive" title={switchError}>
+          Switch failed
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={() => onMode(next)}
+        disabled={switching}
+        className={cn(classes, 'group cursor-pointer transition-opacity hover:opacity-80 disabled:cursor-wait disabled:opacity-60')}
+        title={`New calls book into ${url}${mode === 'simulation' ? ' — nothing reaches Prosper' : ' — the real clinic'}.\nClick to switch to ${MODE_LABEL[next]}; calls already open finish where they started.`}
+      >
+        <Icon className="size-3.5" />
+        {switching ? 'Switching…' : MODE_LABEL[mode]}
+        <ArrowLeftRight className="size-3 opacity-50 group-hover:opacity-100" />
+      </button>
     </span>
   );
 }
@@ -106,14 +162,17 @@ function Clock() {
   );
 }
 
-export function AppShell({ nav, active, onNavigate, clinicApi, children }: AppShellProps) {
+export function AppShell({ nav, active, onNavigate, clinicApi, mode, onMode, switching, switchError, children }: AppShellProps) {
+  useEffect(() => {
+    document.title = mode === 'simulation' ? '[SIM] Agent la L' : mode === 'live' ? '[LIVE] Agent la L' : 'Agent la L';
+  }, [mode]);
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background">
       <header className="flex h-12 shrink-0 items-center gap-6 border-b px-4">
         <Brand />
         <Tabs nav={nav} active={active} onNavigate={onNavigate} />
         <div className="ml-auto flex items-center gap-4 text-sm text-muted-foreground">
-          <ClinicApi url={clinicApi} />
+          <ModePill mode={mode} url={clinicApi} onMode={onMode} switching={switching} switchError={switchError} />
           <span className="h-4 w-px bg-border" />
           <Clock />
         </div>
