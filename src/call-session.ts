@@ -38,6 +38,8 @@ import { attachBrief } from './patient-brief.js';
 import { holdSlot, releaseHolds } from './sim-holds.js';
 import { clinicTarget, type ClinicMode, type ClinicTarget } from './clinic-target.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
+import { JsonPlanner } from './json-planner.js';
+import { PlannerLLM } from './planner-llm.js';
 import type { Action } from './schema.js';
 import { submitActions, type SubmitResult } from './submit.js';
 import type { Store } from './store/index.js';
@@ -126,6 +128,7 @@ export class CallSession {
   #endedBy = 'unknown';
   #transcript: TranscriptTurn[] = [];
   #state: CallState | null = null;
+  #planner: JsonPlanner | null = null;
   /** Fills the scratchpad off the turn, so note-taking costs the caller nothing. */
   #extractor: Extractor | null = null;
   /** The last availability answer, so the submitted type is the one the diary offered. */
@@ -197,15 +200,17 @@ export class CallSession {
       this.#streamSid = msg.start?.streamSid ?? msg.streamSid ?? '';
       this.#fromNumber = msg.start?.customParameters?.from_number;
       this.#startedAt = Date.now();
-      this.#state = createCallState(this.#callId, this.#fromNumber);
-      this.#extractor = createExtractor({
-        state: this.#state,
-        onError: (message) => this.#errors.push(`extract: ${message}`),
-      });
+      if (config.agentMode === 'tools') {
+        this.#state = createCallState(this.#callId, this.#fromNumber);
+        this.#extractor = createExtractor({
+          state: this.#state,
+          onError: (message) => this.#errors.push(`extract: ${message}`),
+        });
+      }
 
       // The line they rang from is a free directory query, and it resolves while the
       // greeting is still playing — often before they finish their first sentence.
-      if (this.#state.from_number) this.#identifyByPhone(this.#state, this.#state.from_number);
+      if (this.#state?.from_number) this.#identifyByPhone(this.#state, this.#state.from_number);
 
       console.log(
         `[call ${this.#callId}] start ${new Date().toISOString()} · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
@@ -265,10 +270,20 @@ export class CallSession {
         (mulaw) => this.#recorder?.agent(mulaw),
       );
 
+      const planner = config.agentMode === 'planner'
+        ? new JsonPlanner({
+            api: this.#shared.api[this.#clinic.mode],
+            catalogue: this.#shared.catalogue!,
+            phone: this.#fromNumber,
+            now: () => new Date(),
+          })
+        : null;
+      this.#planner = planner;
+      if (planner) clog.info(`[planner] mode=planner model=${config.cloudflare.deciderModel}`);
       const session = new voice.AgentSession({
         vad: this.#shared.vad,
         stt: createSTT(this.#shared.keyterms),
-        llm: createLLM(),
+        llm: planner ? new PlannerLLM(planner, config.cloudflare.deciderModel) : createLLM(),
         tts: createTTS(),
         turnHandling: {
           // Unset, the session auto-provisions LiveKit's hosted turn detector.
@@ -287,33 +302,34 @@ export class CallSession {
       session.output.audio = this.#output;
 
       // No room: the voice loop runs against our own transport.
-      const state = this.#state ?? createCallState(this.#callId, this.#fromNumber);
-      const agent = new ReceptionistAgent({
-        state,
-        api: this.#shared.api[this.#clinic.mode],
-        catalogue: this.#shared.catalogue,
-        ...(this.#clinic.mode === 'simulation'
-          ? {
-              hold: async (slot: QuotedSlot) => {
-                const refused = await holdSlot(this.#clinic.baseUrl, this.#callId, slot, state.matched?.patient_id);
-                return refused?.detail ?? null;
-              },
-            }
-          : {}),
-        lastCallerText: () => {
-          const turns = this.#session ? buildCallTranscript(this.#session.history) : [];
-          return [...turns].reverse().find((turn) => turn.role === 'user')?.text;
-        },
-        lastAgentOffer: () => {
-          const turns = this.#session ? buildCallTranscript(this.#session.history) : [];
-          return [...turns]
-            .reverse()
-            .find((turn) => turn.role === 'assistant' && saidTimes(turn.text).length > 0)?.text;
-        },
-        onAvailability: (availability) => {
-          this.#availability = availability;
-        },
-      });
+      const agent = planner
+        ? new voice.Agent({ instructions: 'The planner supplies each spoken response.', tools: {} })
+        : new ReceptionistAgent({
+            state: this.#state!,
+            api: this.#shared.api[this.#clinic.mode],
+            catalogue: this.#shared.catalogue,
+            ...(this.#clinic.mode === 'simulation'
+              ? {
+                  hold: async (slot: QuotedSlot) => {
+                    const refused = await holdSlot(this.#clinic.baseUrl, this.#callId, slot, this.#state!.matched?.patient_id);
+                    return refused?.detail ?? null;
+                  },
+                }
+              : {}),
+            lastCallerText: () => {
+              const turns = this.#session ? buildCallTranscript(this.#session.history) : [];
+              return [...turns].reverse().find((turn) => turn.role === 'user')?.text;
+            },
+            lastAgentOffer: () => {
+              const turns = this.#session ? buildCallTranscript(this.#session.history) : [];
+              return [...turns]
+                .reverse()
+                .find((turn) => turn.role === 'assistant' && saidTimes(turn.text).length > 0)?.text;
+            },
+            onAvailability: (availability) => {
+              this.#availability = availability;
+            },
+          });
       await session.start({ agent });
       this.#sessionStartMs = Date.now() - t0;
 
@@ -634,17 +650,34 @@ export class CallSession {
       if (inferred) this.#errors.push(`accepted slot inferred from the caller: ${inferred.start_time}`);
     }
 
-    const decided = await decide(
-      {
-        callId: this.#callId,
-        transcript: this.#transcript,
-        fromNumber: this.#fromNumber,
-        now: new Date(),
-        clinicBriefing: this.#shared.clinicBriefing,
-        callState: this.#state ? readCallState(this.#state) : undefined,
-      },
-      budget,
-    );
+    const decisionStartedAt = Date.now();
+    let decided: DeciderResult;
+    if (this.#planner) {
+      const plannerResult = await this.#planner.close(
+        this.#transcript
+          .filter((turn): turn is { role: 'user' | 'assistant'; text: string } => turn.role === 'user' || turn.role === 'assistant')
+          .map((turn) => ({ role: turn.role === 'user' ? 'caller' as const : 'receptionist' as const, text: turn.text })),
+        budget,
+      );
+      decided = {
+        output: { actions: plannerResult.actions, notes: `planner llm_calls=${plannerResult.llmCalls}` },
+        raw: plannerResult.raw,
+        durationMs: Date.now() - decisionStartedAt,
+        usedFloor: plannerResult.actions.length === 1 && plannerResult.actions[0] === FLOOR_ACTION,
+      };
+    } else {
+      decided = await decide(
+        {
+          callId: this.#callId,
+          transcript: this.#transcript,
+          fromNumber: this.#fromNumber,
+          now: new Date(),
+          clinicBriefing: this.#shared.clinicBriefing,
+          callState: this.#state ? readCallState(this.#state) : undefined,
+        },
+        budget,
+      );
+    }
 
     const guarded = this.#guard(this.#actionsFor(decided));
     const actions = guarded.map((action) => {

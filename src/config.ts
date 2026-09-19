@@ -16,6 +16,7 @@ function opt(name: string, fallback: string): string {
 }
 
 export const config = {
+  agentMode: opt('AGENT_MODE', 'planner') as 'planner' | 'tools',
   prosper: {
     baseUrl: opt('PROSPER_API_BASE_URL', 'https://hackspain.getprosperapp.com').replace(/\/+$/, ''),
     apiKey: req('PROSPER_API_KEY'),

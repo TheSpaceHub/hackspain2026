@@ -24,7 +24,7 @@
     "test:extract": "tsx test/extract.test.ts",
     "test:recovery": "tsx test/recovery.test.ts",
     "test:alerts": "tsx test/alerts.test.ts",
-    "test": "tsx test/schema.test.ts && tsx test/tools.test.ts && tsx test/agent-tools.test.ts && tsx test/extract.test.ts && tsx test/patient-brief.test.ts && tsx test/log.test.ts && tsx test/alerts.test.ts && tsx test/recovery.test.ts && tsx test/stream.test.ts && tsx test/audio-output.test.ts && tsx test/recorder.test.ts && tsx test/sim.test.ts && tsx test/blend.test.ts && tsx test/insights.test.ts && tsx test/ship.test.ts",
+    "test": "tsx test/schema.test.ts && tsx test/tools.test.ts && tsx test/agent-tools.test.ts && tsx test/extract.test.ts && tsx test/patient-brief.test.ts && tsx test/log.test.ts && tsx test/alerts.test.ts && tsx test/recovery.test.ts && tsx test/stream.test.ts && tsx test/audio-output.test.ts && tsx test/recorder.test.ts && tsx test/sim.test.ts && tsx test/blend.test.ts && tsx test/insights.test.ts && tsx test/ship.test.ts && tsx test/json-planner.test.ts",
     "restart": "bash scripts/restart.sh"
   },
   "dependencies": {
