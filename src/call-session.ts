@@ -5,15 +5,39 @@ import { GREETING, ReceptionistAgent } from './agent.js';
 import { MediaStreamAudioInput } from './audio-input.js';
 import { MediaStreamAudioOutput } from './audio-output.js';
 import { writeCallLog, type CallLog } from './call-log.js';
-import { config } from './config.js';
+import {
+  acceptFromTranscript,
+  createCallState,
+  missingForRegistration,
+  readCallState,
+  recordMatch,
+  type CallState,
+} from './call-state.js';
+import { createExtractor, DEFAULT_EXTRACT_TIMEOUT_MS, type Extractor } from './extract.js';
+import type { Availability, Catalogue, ClinicApi } from './clinic-api.js';
+import { config, SILENCE_NUDGE_MS } from './config.js';
 import { FLOOR_ACTION, decide, type DeciderResult } from './decider.js';
+import {
+  applyEmergencyGuard,
+  enforceAppointmentType,
+  enforcePolicy,
+  overrideFlooredBooking,
+} from './guards.js';
 import { mulawToPcm16 } from './mulaw.js';
+import { callContext, clog } from './log.js';
+import { attachBrief } from './patient-brief.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
 import { submitActions, type SubmitResult } from './submit.js';
 import type { Store } from './store/index.js';
-import { buildCallTranscript, type TranscriptTurn } from './transcript.js';
+import { buildCallTranscript, formatTranscript, type TranscriptTurn } from './transcript.js';
 import { SAMPLE_RATE, type InboundMessage, type StartMessage } from './twilio.js';
+
+/**
+ * How long the close waits for the last exchange to be written down. Past it the
+ * decider reads the transcript for that detail instead, which is slower but not wrong.
+ */
+const EXTRACT_SETTLE_MS = 4_000;
 
 /** Everything deliberately shared across sockets, and nothing else. */
 export interface Shared {
@@ -21,6 +45,10 @@ export interface Shared {
   keyterms: string[];
   clinicBriefing: string;
   store: Store;
+  /** Read-only lookups. One client, so the catalogue is fetched once for the process. */
+  api: ClinicApi;
+  /** Doctors, sites, plans and closures, parsed at boot. Null only if /clinic was down. */
+  catalogue: Catalogue | null;
 }
 
 /**
@@ -50,10 +78,22 @@ export class CallSession {
   #framesOut = 0;
   #errors: string[] = [];
   #finishing: Promise<void> | null = null;
+  #closing = false;
   #endedBy = 'unknown';
   #transcript: TranscriptTurn[] = [];
+  #state: CallState | null = null;
+  /** Fills the scratchpad off the turn, so note-taking costs the caller nothing. */
+  #extractor: Extractor | null = null;
+  /** The last availability answer, so the submitted type is the one the diary offered. */
+  #availability: Availability | null = null;
   /** Turns already handed to the store, so a live flush never re-sends one. */
   #turnsWritten = 0;
+  #silenceTimer: NodeJS.Timeout | null = null;
+  #nudges = 0;
+  #greetingFinished = false;
+  #deadAir: { turn: number; ms: number }[] = [];
+  #pendingDeadAir: { turn: number; at: number }[] = [];
+  #deadAirTurn = 0;
 
   constructor(ws: WebSocket, shared: Shared) {
     this.#ws = ws;
@@ -73,6 +113,7 @@ export class CallSession {
   // --- wire ---------------------------------------------------------------
 
   #onMessage(data: unknown): void {
+    if (this.#callId) callContext.enterWith(this.#callId);
     let msg: InboundMessage;
     try {
       msg = JSON.parse(String(data)) as InboundMessage;
@@ -106,29 +147,40 @@ export class CallSession {
 
     // start.callSid is the call_id; never mint one.
     this.#callId = msg.start?.callSid ?? msg.start?.streamSid ?? '';
-    this.#streamSid = msg.start?.streamSid ?? msg.streamSid ?? '';
-    this.#fromNumber = msg.start?.customParameters?.from_number;
-    this.#startedAt = Date.now();
+    callContext.run(this.#callId, () => {
+      this.#streamSid = msg.start?.streamSid ?? msg.streamSid ?? '';
+      this.#fromNumber = msg.start?.customParameters?.from_number;
+      this.#startedAt = Date.now();
+      this.#state = createCallState(this.#callId, this.#fromNumber);
+      this.#extractor = createExtractor({
+        state: this.#state,
+        onError: (message) => this.#errors.push(`extract: ${message}`),
+      });
 
-    console.log(
-      `[call ${this.#callId}] start · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
-    );
+      // The line they rang from is a free directory query, and it resolves while the
+      // greeting is still playing — often before they finish their first sentence.
+      if (this.#state.from_number) this.#identifyByPhone(this.#state, this.#state.from_number);
 
-    this.#shared.store.write({
-      type: 'call_started',
-      call_id: this.#callId,
-      stream_sid: this.#streamSid,
-      from_number: this.#fromNumber,
-      started_at: new Date(this.#startedAt).toISOString(),
+      console.log(
+        `[call ${this.#callId}] start ${new Date().toISOString()} · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
+      );
+
+      this.#shared.store.write({
+        type: 'call_started',
+        call_id: this.#callId,
+        stream_sid: this.#streamSid,
+        from_number: this.#fromNumber,
+        started_at: new Date(this.#startedAt).toISOString(),
+      });
+
+      // Never run past three minutes.
+      this.#wallClock = setTimeout(() => {
+        this.#endedBy = 'wall_clock';
+        void this.finish('wall_clock');
+      }, config.maxCallMs);
+
+      void this.#startSession();
     });
-
-    // Never run past three minutes.
-    this.#wallClock = setTimeout(() => {
-      this.#endedBy = 'wall_clock';
-      void this.finish('wall_clock');
-    }, config.maxCallMs);
-
-    void this.#startSession();
   }
 
   #onMedia(msg: { media?: { payload?: string } }): void {
@@ -177,21 +229,141 @@ export class CallSession {
       session.output.audio = this.#output;
 
       // No room: the voice loop runs against our own transport.
-      await session.start({ agent: new ReceptionistAgent() });
+      const agent = new ReceptionistAgent({
+        state: this.#state ?? createCallState(this.#callId, this.#fromNumber),
+        api: this.#shared.api,
+        catalogue: this.#shared.catalogue,
+        lastCallerText: () => {
+          const turns = this.#session ? buildCallTranscript(this.#session.history) : [];
+          return [...turns].reverse().find((turn) => turn.role === 'user')?.text;
+        },
+        onAvailability: (availability) => {
+          this.#availability = availability;
+        },
+      });
+      await session.start({ agent });
       this.#sessionStartMs = Date.now() - t0;
-
-      // Speak first: the harness cuts a call with no audible audio from us.
-      session.say(GREETING, { allowInterruptions: true });
 
       // A turn lands in the store as soon as it is final, so a crash mid-call still
       // leaves the conversation on disk. The write crosses to the worker thread.
       session.on(voice.AgentSessionEventTypes.ConversationItemAdded, () => this.#flushTurns());
+      session.on(voice.AgentSessionEventTypes.UserInputTranscribed, (event) => {
+        if (event.isFinal) {
+          this.#nudges = 0;
+          this.#pendingDeadAir.push({ turn: ++this.#deadAirTurn, at: Date.now() });
+        }
+        this.#clearSilenceTimer();
+      });
+      session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
+        if (event.newState === 'listening') {
+          this.#armSilenceTimer();
+        } else {
+          this.#clearSilenceTimer();
+        }
+        if (event.newState === 'speaking' && this.#pendingDeadAir.length > 0) {
+          const pending = this.#pendingDeadAir.shift()!;
+          const ms = Date.now() - pending.at;
+          this.#deadAir.push({ turn: pending.turn, ms });
+          clog.info(`[latency] caller→agent audio ${ms} ms`);
+        }
+      });
+      session.on(voice.AgentSessionEventTypes.UserStateChanged, (event) => {
+        if (event.newState === 'speaking') {
+          this.#clearSilenceTimer();
+        } else if (event.newState === 'listening') {
+          this.#armSilenceTimer();
+        }
+      });
+
+      // Speak first: the harness cuts a call with no audible audio from us.
+      const greeting = session.say(GREETING, { allowInterruptions: true });
+      void greeting.waitForPlayout().then(
+        () => {
+          this.#greetingFinished = true;
+          this.#armSilenceTimer();
+        },
+        (err: unknown) => this.#errors.push(`greeting playout: ${String(err)}`),
+      );
     } catch (err) {
       this.#errors.push(`session start: ${String(err)}`);
       console.error(`[call ${this.#callId}] session start failed: ${String(err)}`);
       // The call is lost; the submission is not.
       void this.finish('session_start_failed');
     }
+  }
+
+  #clearSilenceTimer(): void {
+    if (this.#silenceTimer) clearTimeout(this.#silenceTimer);
+    this.#silenceTimer = null;
+  }
+
+  #armSilenceTimer(): void {
+    this.#clearSilenceTimer();
+    const session = this.#session;
+    if (
+      !session ||
+      this.#closing ||
+      !this.#greetingFinished ||
+      session.agentState !== 'listening'
+    ) return;
+    this.#silenceTimer = setTimeout(() => {
+      this.#silenceTimer = null;
+      void this.#handleSilence();
+    }, SILENCE_NUDGE_MS);
+  }
+
+  async #handleSilence(): Promise<void> {
+    try {
+      const session = this.#session;
+      if (
+        !session ||
+        this.#closing ||
+        session.agentState !== 'listening' ||
+        session.userState === 'speaking'
+      ) return;
+
+      this.#nudges++;
+      clog.info(`[silence] no caller speech for ${SILENCE_NUDGE_MS / 1000}s · nudge ${this.#nudges}`);
+      if (this.#nudges <= 2) {
+        try {
+          session.generateReply({
+            instructions:
+              'The caller has said nothing for several seconds since your last sentence. In one short sentence check they are still there and repeat your last question or the appointment you offered (with day and time), so they can answer with a yes.',
+            allowInterruptions: true,
+          });
+        } catch (err) {
+          this.#errors.push(`silence nudge: ${String(err)}`);
+        }
+        return;
+      }
+
+      try {
+        const goodbye = session.say(
+          "I'm sorry, I can't hear you. Please call us back at Clínica Arenal whenever suits you. Goodbye.",
+          { allowInterruptions: true },
+        );
+        await goodbye.waitForPlayout();
+      } catch (err) {
+        this.#errors.push(`silence goodbye: ${String(err)}`);
+      }
+      if (!this.#closing) void this.finish('caller_silent');
+    } catch (err) {
+      this.#errors.push(`silence timer: ${String(err)}`);
+    }
+  }
+
+  /** Best-effort: a caller the directory knows by their own number needs no questions. */
+  #identifyByPhone(state: CallState, phone: string): void {
+    void this.#shared.api
+      .findPatient({ phone })
+      .then((matches) => {
+        // Two people on one landline is a household, not an identification.
+        if (matches.length === 1 && !state.matched) {
+          recordMatch(state, matches[0]!, undefined, 'phone');
+          attachBrief(state, this.#shared.catalogue, new Date());
+        }
+      })
+      .catch((err: unknown) => this.#errors.push(`phone lookup: ${String(err)}`));
   }
 
   /** Hand the store every turn it has not seen yet. Cheap, and never throws into the call. */
@@ -203,9 +375,18 @@ export class CallSession {
     } catch {
       return;
     }
+    if (this.#state) this.#state.turns_seen = turns.length;
     const at = new Date().toISOString();
     for (let i = this.#turnsWritten; i < turns.length; i++) {
       const turn = turns[i]!;
+      // Queued, not awaited: the agent is already answering this turn.
+      if (turn.role !== 'assistant') {
+        const before = turns[i - 1];
+        this.#extractor?.observe(
+          turn.text,
+          before?.role === 'assistant' ? before.text : undefined,
+        );
+      }
       this.#shared.store.write({
         type: 'turn',
         call_id: this.#callId,
@@ -227,6 +408,8 @@ export class CallSession {
   }
 
   async #finish(trigger: string): Promise<void> {
+    this.#closing = true;
+    this.#clearSilenceTimer();
     if (this.#endedBy === 'unknown') this.#endedBy = trigger;
     if (this.#wallClock) clearTimeout(this.#wallClock);
 
@@ -235,6 +418,7 @@ export class CallSession {
 
     try {
       this.#transcript = this.#session ? buildCallTranscript(this.#session.history) : [];
+      if (this.#state) this.#state.turns_seen = this.#transcript.length;
     } catch (err) {
       this.#errors.push(`transcript: ${String(err)}`);
     }
@@ -258,6 +442,40 @@ export class CallSession {
       .catch((err: unknown) => this.#errors.push(`session close: ${String(err)}`));
 
     const budget = this.#deadlineAt - Date.now() - config.submitReserveMs;
+
+    // The last exchange is usually still being written down when the caller hangs up,
+    // and the decider reads the notes. Give it a slice of the window, not the window.
+    this.#flushTurns();
+    await this.#extractor?.settle(Math.max(0, Math.min(EXTRACT_SETTLE_MS, budget - 2_000)));
+    if (this.#state?.request.intent === 'register' && this.#extractor) {
+      const missingBefore = missingForRegistration(this.#state);
+      if (missingBefore.length > 0 && budget > 2_000) {
+        const filled = new Promise<void>((resolve) => {
+          void this.#extractor!.finalPass(
+            this.#transcript.filter(
+              (turn): turn is { role: 'user' | 'assistant'; text: string } =>
+                turn.role === 'user' || turn.role === 'assistant',
+            ),
+          ).then(() => resolve(), () => resolve());
+        });
+        await Promise.race([
+          filled,
+          new Promise<void>((resolve) => setTimeout(resolve, Math.min(DEFAULT_EXTRACT_TIMEOUT_MS, budget - 2_000))),
+        ]);
+        const missingAfter = missingForRegistration(this.#state);
+        const added = missingBefore.filter((field) => !missingAfter.includes(field));
+        clog.info(added.length > 0
+          ? `[extract] final pass: filled ${added.join(', ')}`
+          : '[extract] final pass: filled nothing');
+      }
+    }
+
+    // A slot the caller chose but the model never held: the ids are all in the quote.
+    if (this.#state) {
+      const inferred = acceptFromTranscript(this.#state, this.#transcript);
+      if (inferred) this.#errors.push(`accepted slot inferred from the caller: ${inferred.start_time}`);
+    }
+
     const decided = await decide(
       {
         callId: this.#callId,
@@ -265,15 +483,29 @@ export class CallSession {
         fromNumber: this.#fromNumber,
         now: new Date(),
         clinicBriefing: this.#shared.clinicBriefing,
+        callState: this.#state ? readCallState(this.#state) : undefined,
       },
       budget,
     );
 
-    const actions = this.#actionsFor(decided);
+    const actions = this.#guard(this.#actionsFor(decided));
     const submitStartedAt = Date.now();
     let submissions: SubmitResult[] = [];
     if (this.#callId) {
       submissions = await submitActions(this.#callId, actions);
+
+      // A 422 records nothing at all, so a rejected body leaves the call with no record —
+      // which scores exactly like never answering. Only 422 is worth retrying: 404 is the
+      // wrong call_id and 410 is the closed window, and neither is fixed by a new body.
+      const accepted = submissions.some((s) => s.ok);
+      const malformed = submissions.some((s) => s.status === 422);
+      const alreadyNoAction = actions.some((a) => a.action === 'no_action');
+      if (!accepted && malformed && !alreadyNoAction && Date.now() < this.#deadlineAt - 1_000) {
+        this.#errors.push(
+          `submission rejected (${submissions.map((s) => `${s.action}=${s.status}`).join(' ')}); falling back to no_action`,
+        );
+        submissions = submissions.concat(await submitActions(this.#callId, [FLOOR_ACTION]));
+      }
     } else {
       this.#errors.push('no call_id: never received a start message, nothing to submit against');
     }
@@ -285,15 +517,63 @@ export class CallSession {
 
     const verdict = submissions.map((s) => `${s.action}=${s.status}`).join(' ') || 'none';
     console.log(
-      `[call ${this.#callId}] end (${this.#endedBy}) · turns=${this.#transcript.length} · ${verdict}`,
+      `[call ${this.#callId}] end ${new Date().toISOString()} (${this.#endedBy}) · turns=${this.#transcript.length} · ${verdict}`,
     );
   }
 
   /** Always yields at least one action. */
   #actionsFor(decided: DeciderResult): Action[] {
-    if (decided.output.actions.length > 0) return decided.output.actions;
-    this.#errors.push('decider returned no actions');
-    return [FLOOR_ACTION];
+    if (decided.usedFloor) {
+      this.#errors.push(`floor: ${decided.error ?? decided.output.notes ?? 'unknown'}`);
+    }
+    let actions = decided.output.actions;
+    if (actions.length === 0) {
+      this.#errors.push('decider returned no actions');
+      actions = [FLOOR_ACTION];
+    }
+    if (this.#state) {
+      const overridden = overrideFlooredBooking(actions, this.#state);
+      if (overridden !== actions) {
+        const reason = actions.find((action) => action.action === 'no_action')?.reason ?? 'unknown';
+        this.#errors.push(
+          `decider said no_action/${reason} with an accepted slot on file; booked from state`,
+        );
+        actions = overridden;
+      }
+    }
+    return actions;
+  }
+
+  /**
+   * Two things the model does not get a vote on: a red flag in the transcript outranks
+   * whatever the call was about, and the appointment type is the one /availability chose
+   * for this patient rather than the one that sounded right.
+   */
+  #guard(actions: Action[]): Action[] {
+    const { actions: guarded, finding } = applyEmergencyGuard(
+      actions,
+      formatTranscript(this.#transcript),
+    );
+    if (finding) this.#errors.push(`emergency guard: ${finding.flag}`);
+
+    const availability = this.#availability;
+    const state = this.#state;
+    return guarded.map((action) => {
+      let fixed = action;
+      if (fixed.action === 'book' && availability) {
+        const typed = enforceAppointmentType(fixed, availability);
+        if (typed.corrected) {
+          this.#errors.push(`appointment type corrected to ${typed.action.appointment_type_id}`);
+        }
+        fixed = typed.action;
+      }
+      if ((fixed.action === 'book' || fixed.action === 'reschedule') && state) {
+        const billed = enforcePolicy(fixed, state);
+        if (billed.corrected) this.#errors.push(`policy corrected to ${billed.action.policy_id}`);
+        fixed = billed.action;
+      }
+      return fixed;
+    });
   }
 
   #writeStore(
@@ -358,12 +638,14 @@ export class CallSession {
         decider_ms: decided.durationMs,
         submit_ms: endedAt - submitStartedAt,
         close_to_submitted_ms: this.#closedAt ? endedAt - this.#closedAt : undefined,
+        dead_air: this.#deadAir,
       },
       audio: {
         frames_in: this.#framesIn,
         frames_out: this.#framesOut,
       },
       transcript: this.#transcript,
+      notes: this.#state ? readCallState(this.#state) : undefined,
       decider: {
         input: {
           from_number: this.#fromNumber,
@@ -382,4 +664,3 @@ export class CallSession {
     await writeCallLog(entry);
   }
 }
-

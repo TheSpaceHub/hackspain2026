@@ -35,6 +35,12 @@ importers:
       openai:
         specifier: ^6.49.0
         version: 6.49.0(ws@8.21.3)(zod@4.6.5)
+      pino:
+        specifier: 8.21.0
+        version: 8.21.0
+      pino-pretty:
+        specifier: 11.3.0
+        version: 11.3.0
       ws:
         specifier: ^8.21.3
         version: 8.21.3
