@@ -44,6 +44,7 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
   // The traits blend into one person, so a case is one call — except the Switchboard's,
   // which is the same case dialled several times at once.
   const calls = picked.reduce((n, c) => n + Math.max(1, c.burst), 0);
+  const generated = suite.cases.filter((c) => c.id.startsWith('random-'));
   const levels = suite.difficulties ?? [];
   const level = levels.find((d) => d.id === difficulty);
 
@@ -57,6 +58,18 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
     setConfirmed(false);
     onRun({
       problem_ids: problems.size > 0 ? [...problems] : undefined,
+      behaviours: [...behaviours],
+      vocabularies: [...vocabularies],
+      difficulty,
+      mode,
+      concurrency,
+    });
+  };
+
+  /** Only the seeded asks, with the caller set up above. */
+  const runGenerated = (): void => {
+    onRun({
+      case_ids: generated.map((c) => c.id),
       behaviours: [...behaviours],
       vocabularies: [...vocabularies],
       difficulty,
@@ -230,13 +243,24 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
                   <Dices /> Generate
                 </Button>
               </div>
-              <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                <input type="checkbox" checked={viable} onChange={(e) => setViable(e.target.checked)} />
-                Viable only
-                <span title="On: only asks the clinic can book. Off: impossible asks stay in and are graded on the refusal.">
-                  {viable ? '(bookable asks)' : '(impossible asks too)'}
-                </span>
-              </label>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={viable} onChange={(e) => setViable(e.target.checked)} />
+                  Viable only
+                  <span title="On: only asks the clinic can book. Off: impossible asks stay in and are graded on the refusal.">
+                    {viable ? '(bookable asks)' : '(impossible asks too)'}
+                  </span>
+                </label>
+                <Button
+                  size="sm"
+                  onClick={runGenerated}
+                  disabled={busy || generated.length === 0 || behaviours.size === 0 || vocabularies.size === 0}
+                  title="Run only the generated asks, with the caller set above"
+                >
+                  <Play /> Run {generated.length} generated
+                </Button>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">Generated asks are listed under “The real call” below.</p>
             </>
           ) : (
             <p className="text-xs text-muted-foreground">Start the mock with MOCK_MIRROR=1 for real-clinic cases.</p>
@@ -267,7 +291,12 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
                     )}
                   >
                     <span className="w-5 text-right text-xs tabular-nums text-muted-foreground">{p.number}</span>
-                    <span className="min-w-0 flex-1 truncate">{p.title}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {p.title}
+                      {p.id === 'the_real_call' && generated.length > 0 && (
+                        <span className="text-xs text-muted-foreground"> · {generated.length} generated</span>
+                      )}
+                    </span>
                     <Badge variant={on ? 'secondary' : 'outline'}>{p.cases}</Badge>
                   </button>
                 </li>
