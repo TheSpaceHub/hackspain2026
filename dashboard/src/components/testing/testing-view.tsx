@@ -58,7 +58,7 @@ export function TestingView() {
                   <span className="font-mono text-xs">{r.id}</span>
                   <span className="text-xs text-muted-foreground">{r.mode}</span>
                   <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                    {r.passed}/{r.total}
+                    {r.passed} passed of {r.done}
                   </span>
                   {r.status === 'running' && <Badge variant="brand">live</Badge>}
                   {r.status === 'stopped' && <Badge variant="outline">stopped</Badge>}
