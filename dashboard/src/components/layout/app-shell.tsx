@@ -36,7 +36,7 @@ function Brand() {
       <div className="flex size-7 items-center justify-center rounded-md bg-brand-500 text-white">
         <Phone className="size-3.5" />
       </div>
-      <span className="text-sm font-semibold tracking-tight">Agent la L</span>
+      <span className="hidden text-sm font-semibold tracking-tight sm:inline">Agent la L</span>
     </div>
   );
 }
@@ -44,7 +44,7 @@ function Brand() {
 /** Underlined tabs: the active one in ink with a 2px rule on the header's bottom edge. */
 function Tabs({ nav, active, onNavigate }: Pick<AppShellProps, 'nav' | 'active' | 'onNavigate'>) {
   return (
-    <nav className="flex h-full items-stretch gap-1">
+    <nav className="no-scrollbar flex h-full min-w-0 items-stretch gap-1 overflow-x-auto">
       {nav.map((item) => {
         const isActive = item.id === active;
         return (
@@ -54,7 +54,7 @@ function Tabs({ nav, active, onNavigate }: Pick<AppShellProps, 'nav' | 'active' 
             onClick={() => onNavigate(item.id)}
             aria-current={isActive ? 'page' : undefined}
             className={cn(
-              'relative flex items-center gap-2 px-3 text-sm transition-colors',
+              'relative flex shrink-0 items-center gap-2 px-3 text-sm whitespace-nowrap transition-colors',
               'after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:rounded-full after:transition-colors',
               isActive
                 ? 'font-medium text-foreground after:bg-foreground'
@@ -109,10 +109,11 @@ function Clock() {
 export function AppShell({ nav, active, onNavigate, clinicApi, children }: AppShellProps) {
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background">
-      <header className="flex h-12 shrink-0 items-center gap-6 border-b px-4">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4 sm:gap-6">
         <Brand />
         <Tabs nav={nav} active={active} onNavigate={onNavigate} />
-        <div className="ml-auto flex items-center gap-4 text-sm text-muted-foreground">
+        {/* The console is a desktop tool; on a phone, only the Test call tab needs to fit. */}
+        <div className="ml-auto hidden items-center gap-4 text-sm text-muted-foreground md:flex">
           <ClinicApi url={clinicApi} />
           <span className="h-4 w-px bg-border" />
           <Clock />

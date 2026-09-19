@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "start:local": "PROSPER_API_BASE_URL=http://127.0.0.1:8787 tsx src/index.ts",
-    "mock": "tsx mock/index.ts",
+    "mock": "MOCK_ACCEPT_ANY_CALL=1 tsx mock/index.ts",
     "typecheck": "tsc --noEmit",
     "harness": "tsx test/fake-harness.ts",
     "harness:local": "MOCK_PROSPER_URL=http://127.0.0.1:8787 tsx test/fake-harness.ts",
