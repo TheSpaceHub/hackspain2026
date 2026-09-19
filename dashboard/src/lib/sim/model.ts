@@ -130,7 +130,7 @@ export function describe(event: SimEvent): EventLine {
     case 'snapshot':
       return { ...base, label: 'Snapshot', text: 'clinic copied from the live API', tone: 'info' };
     case 'reset':
-      return { ...base, label: 'Reset', text: 'back to the snapshot — bookings, holds and calls cleared', tone: 'warning' };
+      return { ...base, label: 'Reset', text: 'back to the snapshot — bookings, holds, calls and the log cleared', tone: 'warning' };
     case 'call_opened':
       return { ...base, label: 'Call opened', text: str(d.scenario) ?? str(d.from_number) ?? '', tone: 'neutral' };
     case 'call_closed':

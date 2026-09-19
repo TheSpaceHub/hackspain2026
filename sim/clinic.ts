@@ -767,7 +767,11 @@ export class Clinic extends EventEmitter<{ event: [SimEvent] }> {
 
   // --- reset ----------------------------------------------------------------
 
-  /** Back to the snapshot: every call, hold, booking, cancellation and registration undone. */
+  /**
+   * Back to the snapshot: every call, hold, booking, cancellation and registration undone,
+   * and the log cleared with them — only the `reset` line remains. Event ids keep counting
+   * up (AUTOINCREMENT), so a console streaming `?since=` is not confused.
+   */
   reset(now = Date.now()): void {
     transaction(this.db, () => {
       this.db.exec(`
@@ -780,6 +784,7 @@ export class Clinic extends EventEmitter<{ event: [SimEvent] }> {
         DELETE FROM cells;
         INSERT INTO cells(provider_id, date, minute, ref) SELECT provider_id, date, minute, 'snapshot' FROM snapshot_cells;
         DELETE FROM counters WHERE name IN ('hold', 'appointment', 'patient');
+        DELETE FROM events;
       `);
       // Prosper appointments we copied keep their own cells, so a later CANCEL still frees them.
       const kept = this.db

@@ -59,7 +59,7 @@ export function simFeedReducer(s: SimFeedState, a: SimFeedAction): SimFeedState 
       return s.connected === a.connected ? s : { ...s, connected: a.connected };
     case 'event': {
       if (a.event.id <= s.lastId && s.events.some((e) => e.id === a.event.id)) return s;
-      const events = mergeEvents(s.events, [a.event]);
+      const events = a.event.type === 'reset' ? [a.event] : mergeEvents(s.events, [a.event]);
       return {
         ...s,
         events,
