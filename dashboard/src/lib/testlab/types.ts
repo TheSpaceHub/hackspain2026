@@ -88,6 +88,8 @@ export interface SuiteResponse {
   generation: Generation;
   /** The model behind the persona callers, or null when there is none and scripts are used. */
   persona_caller: string | null;
+  /** Whether Devin can be handed a fix from here, and the repository the PR lands in. */
+  shipping?: { available: boolean; repo: string | null };
 }
 
 export interface Insight {
@@ -170,10 +172,20 @@ export interface FixPlan {
   plan: string;
 }
 
+export interface Shipment {
+  problem_id: string;
+  session_id: string;
+  url: string;
+  branch: string;
+  repo: string;
+  started_at: string;
+}
+
 export interface Run extends RunSummary {
   cases: { case_id: string; problem_id: string; title: string; copies: number; behaviour: string; vocabulary: string }[];
   results: CaseResult[];
   issues: IssueDraft[];
+  shipments?: Shipment[];
 }
 
 export interface RunRequest {

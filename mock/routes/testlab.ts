@@ -11,6 +11,7 @@
  *   GET  /__testlab/runs/:id        one run, with every result and the issue drafts
  *   POST /__testlab/runs/:id/stop   dial no more calls; the ones in flight still finish
  *   POST /__testlab/runs/:id/fix    {problem_id} a model's plan for the code that would fix it
+ *   POST /__testlab/runs/:id/ship   {problem_id} hand that fix to Devin, which writes it and opens the PR
  *   GET  /__testlab/runs/:id/events one line per call as it settles (SSE)
  */
 import { fail, ok, type Router, STREAMING } from '../http.js';
@@ -21,6 +22,7 @@ import { DIFFICULTIES } from '../../testlab/difficulty.js';
 import { fixPlan } from '../../testlab/fix.js';
 import { llmAvailable, llmName } from '../../testlab/llm.js';
 import type { RunRequest, Runner } from '../../testlab/runner.js';
+import { shipFix, shippingAvailable, targetRepo } from '../../testlab/ship.js';
 import { VOCABULARIES } from '../../testlab/vocabulary.js';
 
 /** The suite is replaceable at runtime, so the routes hold the box rather than the suite. */
@@ -40,6 +42,8 @@ export function testlabRoutes(router: Router, lab: Lab, runner: Runner): void {
     difficulties: DIFFICULTIES,
     generation: lab.generation,
     persona_caller: llmAvailable() ? llmName() : null,
+    // Whether the tab may offer to have Devin write the fix, and where the PR would go.
+    shipping: { available: shippingAvailable(), repo: targetRepo(process.cwd()) },
   });
 
   router
@@ -79,6 +83,25 @@ export function testlabRoutes(router: Router, lab: Lab, runner: Runner): void {
       if (!issue) return fail(404, `run ${run.id} has no issue for '${req.problem_id}'`);
       try {
         return ok(await fixPlan(issue, process.cwd()));
+      } catch (err) {
+        return fail(502, String(err instanceof Error ? err.message : err));
+      }
+    }, { public: true })
+    .post('/__testlab/runs/:id/ship', async ({ params, body }) => {
+      const run = runner.get(params.id!);
+      if (!run) return fail(404, `no run ${params.id}`);
+      const parsed = await body();
+      const req = (parsed.ok ? (parsed.value ?? {}) : {}) as { problem_id?: string; plan?: string };
+      const issue = run.issues.find((i) => i.problem_id === req.problem_id);
+      if (!issue) return fail(404, `run ${run.id} has no issue for '${req.problem_id}'`);
+      const repo = targetRepo(process.cwd());
+      if (repo === null) return fail(409, 'no repository to open the pull request in — set TESTLAB_FIX_REPO');
+      // The plan the tab already drafted rides along; without one Devin reads the report itself.
+      const plan = req.plan ? { problem_id: issue.problem_id, branch: '', plan: req.plan } : null;
+      try {
+        const shipment = await shipFix(issue, plan, repo);
+        runner.record(run.id, shipment);
+        return ok(shipment);
       } catch (err) {
         return fail(502, String(err instanceof Error ? err.message : err));
       }

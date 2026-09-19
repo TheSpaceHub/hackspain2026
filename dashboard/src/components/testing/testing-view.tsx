@@ -73,7 +73,12 @@ export function TestingView() {
       </div>
 
       {lab.run ? (
-        <RunPanel run={lab.run} cases={cases} onStop={(id) => void lab.stop(id)} />
+        <RunPanel
+          run={lab.run}
+          cases={cases}
+          shipping={lab.suite?.shipping}
+          onStop={(id) => void lab.stop(id)}
+        />
       ) : (
         <Card size="sm" className="min-h-0">
           <EmptyState icon={FlaskConical} title={lab.error ? 'The test lab is not answering' : 'No run open'}>

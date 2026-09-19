@@ -18,6 +18,7 @@ import { atDifficulty, difficultyOf } from './difficulty.js';
 import { dial } from './dial.js';
 import { AgentFeed } from './feed.js';
 import { type CaseResult, insightsFor, issueDrafts, type IssueDraft, summarise } from './insights.js';
+import type { Shipment } from './ship.js';
 import { blendVocabularies, type Vocabulary } from './vocabulary.js';
 
 export interface RunRequest {
@@ -55,6 +56,8 @@ export interface Run {
   cases: { case_id: string; problem_id: string; title: string; copies: number; behaviour: string; vocabulary: string }[];
   results: CaseResult[];
   issues: IssueDraft[];
+  /** The Devin sessions started off this run's issues, one per problem fixed. */
+  shipments: Shipment[];
 }
 
 export interface RunnerOptions {
@@ -141,6 +144,7 @@ export class Runner extends EventEmitter {
         if (run.status === 'running') run.status = 'stopped';
         run.vocabularies ??= ['plain'];
         run.difficulty ??= 'normal';
+        run.shipments ??= [];
         run.stopping = false;
         this.#runs.set(run.id, run);
         const n = Number(run.id.replace(/\D/g, ''));
@@ -162,6 +166,17 @@ export class Runner extends EventEmitter {
 
   list(): Omit<Run, 'results' | 'issues' | 'cases'>[] {
     return [...this.#runs.values()].map(({ results: _r, issues: _i, cases: _c, ...rest }) => rest).reverse();
+  }
+
+  /**
+   * Remember that a problem has been handed to Devin, so a reload still links to
+   * the session and the button does not start a second one for the same fault.
+   */
+  record(id: string, shipment: Shipment): void {
+    const run = this.#runs.get(id);
+    if (!run) return;
+    run.shipments = [...run.shipments.filter((s) => s.problem_id !== shipment.problem_id), shipment];
+    this.#save(run);
   }
 
   get(id: string): Run | undefined {
@@ -223,6 +238,7 @@ export class Runner extends EventEmitter {
       })),
       results: [],
       issues: [],
+      shipments: [],
     };
     this.#runs.set(run.id, run);
     this.#emit(run, 'run_started', { run_id: run.id, total: run.total });

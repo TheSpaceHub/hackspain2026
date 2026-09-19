@@ -1,11 +1,21 @@
-import { Check, ChevronDown, ChevronRight, CircleAlert, Copy, Wand2, X } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  CircleAlert,
+  Copy,
+  ExternalLink,
+  GitPullRequest,
+  Wand2,
+  X,
+} from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { draftFix } from '@/lib/testlab/client';
-import type { Case, FixPlan, Run } from '@/lib/testlab/types';
+import { draftFix, shipFix } from '@/lib/testlab/client';
+import type { Case, FixPlan, Run, Shipment } from '@/lib/testlab/types';
 import { DetailBoundary } from './detail-boundary';
 import { Markdown } from './markdown';
 import { ResultDetail } from './result-detail';
@@ -14,17 +24,40 @@ import { ResultDetail } from './result-detail';
 export function RunPanel({
   run,
   cases,
+  shipping,
   onStop,
 }: {
   run: Run;
   /** The suite as it stands; a regenerated suite no longer holds an old run's cases. */
   cases: Map<string, Case>;
+  /** Whether Devin can be handed a fix from here, and the repository the PR lands in. */
+  shipping?: { available: boolean; repo: string | null };
   onStop: (runId: string) => void;
 }) {
   const [tab, setTab] = useState<'calls' | 'issues'>('calls');
   const [open, setOpen] = useState<string | null>(null);
   const [fixes, setFixes] = useState<Record<string, FixPlan | string>>({});
   const [drafting, setDrafting] = useState<string | null>(null);
+  // Sessions started in this sitting, over the ones the run was saved with.
+  const [sent, setSent] = useState<Record<string, Shipment | string>>({});
+  const [sending, setSending] = useState<string | null>(null);
+
+  const shipmentFor = (problemId: string): Shipment | string | undefined =>
+    sent[problemId] ?? run.shipments?.find((s) => s.problem_id === problemId);
+
+  /** The plan, if one was drafted, goes with it; without one Devin reads the report itself. */
+  const handToDevin = async (problemId: string): Promise<void> => {
+    setSending(problemId);
+    try {
+      const draft = fixes[problemId];
+      const shipment = await shipFix(run.id, problemId, typeof draft === 'object' ? draft.plan : undefined);
+      setSent((prev) => ({ ...prev, [problemId]: shipment }));
+    } catch (err) {
+      setSent((prev) => ({ ...prev, [problemId]: String(err instanceof Error ? err.message : err) }));
+    } finally {
+      setSending(null);
+    }
+  };
 
   const askForFix = async (problemId: string): Promise<void> => {
     setDrafting(problemId);
@@ -163,8 +196,43 @@ export function RunPanel({
                   >
                     <Wand2 /> {drafting === issue.problem_id ? 'Drafting…' : 'Draft a fix'}
                   </Button>
+                  <Button
+                    size="xs"
+                    title={
+                      shipping?.available === false
+                        ? 'Set DEVIN_API_KEY where the mock runs to hand fixes over'
+                        : `Devin writes the change and opens the pull request${shipping?.repo ? ` in ${shipping.repo}` : ''}`
+                    }
+                    disabled={sending !== null || shipping?.available === false}
+                    onClick={() => void handToDevin(issue.problem_id)}
+                  >
+                    <GitPullRequest /> {sending === issue.problem_id ? 'Handing over…' : 'Fix it with Devin'}
+                  </Button>
                 </div>
                 <Markdown className="px-3 py-2">{issue.body}</Markdown>
+                {(() => {
+                  const shipment = shipmentFor(issue.problem_id);
+                  if (shipment === undefined) return null;
+                  if (typeof shipment === 'string') {
+                    return <p className="border-t border-border/60 px-3 py-2 text-xs text-destructive">{shipment}</p>;
+                  }
+                  return (
+                    <p className="flex items-center gap-2 border-t border-border/60 bg-muted/30 px-3 py-2 text-xs">
+                      <span>
+                        Devin is writing it on <code>{shipment.branch}</code>, for a pull request in{' '}
+                        <code>{shipment.repo}</code>.
+                      </span>
+                      <a
+                        className="ml-auto inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                        href={shipment.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Follow the session <ExternalLink className="size-3" />
+                      </a>
+                    </p>
+                  );
+                })()}
                 {fixes[issue.problem_id] !== undefined &&
                   (typeof fixes[issue.problem_id] === 'string' ? (
                     <p className="border-t border-border/60 px-3 py-2 text-xs text-destructive">
