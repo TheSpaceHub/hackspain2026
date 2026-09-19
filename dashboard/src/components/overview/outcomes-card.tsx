@@ -1,6 +1,7 @@
 import { TriangleAlert } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { Range, Stats } from '@/lib/agent/stats';
+import { reasonLabel } from '@/lib/outcome';
 import { cn } from '@/lib/utils';
 
 /**
@@ -37,6 +38,7 @@ export function OutcomesCard({ stats, range }: { stats: Stats; range: Range }) {
             const n = stats.outcomes[row.key] ?? 0;
             const failure = row.key === 'none';
             const pct = total ? Math.round((n / total) * 100) : 0;
+            const reasons = Object.entries(stats.reasons?.[row.key] ?? {}).sort((a, b) => b[1] - a[1]);
             return (
               <li key={row.key} className="group space-y-1.5" title={`${row.label}: ${n} (${pct}%)`}>
                 <div className="flex items-baseline justify-between gap-3 text-sm">
@@ -59,6 +61,17 @@ export function OutcomesCard({ stats, range }: { stats: Stats; range: Range }) {
                     style={{ width: `${(n / max) * 100}%` }}
                   />
                 </div>
+                {/* What Prosper grades on these: the reason, not just the action. */}
+                {reasons.length > 0 && (
+                  <ul className="space-y-1 border-l pl-3 pt-1">
+                    {reasons.map(([reason, count]) => (
+                      <li key={reason} className="flex justify-between gap-3 text-xs text-muted-foreground">
+                        <span>{reasonLabel(reason)}</span>
+                        <span className="tabular">{count}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </li>
             );
           })}

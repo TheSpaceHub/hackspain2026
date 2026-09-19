@@ -38,7 +38,7 @@ export function LiveView({ feed, selectedId, onSelect, onOpenFinished }: LiveVie
   const selected = selectedId ? feed.calls.find((c) => c.id === selectedId) : undefined;
 
   return (
-    <div className="flex h-full gap-4 px-4 pb-4">
+    <div className="flex h-full gap-4 p-4">
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         <div className="flex items-center justify-between gap-4 px-1">
           <p className="tabular text-sm">

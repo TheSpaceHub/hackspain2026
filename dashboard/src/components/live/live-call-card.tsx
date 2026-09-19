@@ -1,3 +1,4 @@
+import { AlertIndicator } from '@/components/calls/alerts';
 import { OutcomeBadge } from '@/components/calls/outcome-badge';
 import { type Call, callStatus } from '@/lib/agent/model';
 import { formatDuration, formatPhone } from '@/lib/format';
@@ -75,8 +76,11 @@ export function LiveCallCard({ call, state, selected, onSelect, now }: LiveCallC
       </div>
 
       <div className="flex items-center justify-between gap-2 border-t pt-3">
-        <span className="tabular text-xs text-muted-foreground">
-          {call.turnCount} {call.turnCount === 1 ? 'turn' : 'turns'}
+        <span className="flex items-center gap-3">
+          <span className="tabular text-xs text-muted-foreground">
+            {call.turnCount} {call.turnCount === 1 ? 'turn' : 'turns'}
+          </span>
+          <AlertIndicator alerts={call.alerts} />
         </span>
         {live ? (
           <span className="text-xs font-medium text-brand-700">In progress</span>
