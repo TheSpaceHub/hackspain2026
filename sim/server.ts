@@ -27,8 +27,10 @@ import { fail, ok, queryError, Router, type Reply } from '../mock/http.js';
 import { AvailabilityError } from '../mock/rules/availability.js';
 import { isRoute, ROUTES, toAction, toValidationDetail } from '../mock/submit/schemas.js';
 import { INSURERS, type Insurer } from '../mock/world/catalogue.js';
+import { grade, type Scenario } from '../mock/world/scenarios.js';
 import { WINDOW_MS, type Clinic, type Outcome, type SimEvent } from './clinic.js';
 import type { ProsperClient } from './prosper.js';
+import { simScenarios } from './scenarios.js';
 import { snapshotFromLive } from './snapshot.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -47,6 +49,9 @@ export interface SimServerOptions {
 export function buildRouter({ clinic, live, log = () => {} }: SimServerOptions): Router {
   const router = new Router();
   const cat = clinic.catalogue;
+  const scenarios = (): Scenario[] => simScenarios(clinic);
+  const scenarioByName = (name: string): Scenario | undefined => scenarios().find((s) => s.name === name);
+  const callScenarios = new Map<string, Scenario>();
 
   // --- the platform API ------------------------------------------------------
 
@@ -149,14 +154,18 @@ export function buildRouter({ clinic, live, log = () => {} }: SimServerOptions):
   const callView = (callId: string): Reply => {
     const c = clinic.call(callId);
     if (!c) return fail(404, `unknown call ${callId}`);
+    const scenario = callScenarios.get(callId) ?? (c.scenario ? scenarioByName(c.scenario) : undefined);
+    const window_open = c.closed_at === null || Date.now() - c.closed_at <= WINDOW_MS;
+    const actions = clinic.actions(callId);
     return ok({
       ...c,
       opened_at: new Date(c.opened_at).toISOString(),
       closed_at: c.closed_at ? new Date(c.closed_at).toISOString() : null,
       last_received_at: c.last_received_at ? new Date(c.last_received_at).toISOString() : null,
-      window_open: c.closed_at === null || Date.now() - c.closed_at <= WINDOW_MS,
-      actions: clinic.actions(callId),
+      window_open,
+      actions,
       holds: clinic.holds().filter((h) => h.call_id === callId),
+      verdict: scenario ? { ...grade(scenario.expect, actions), final: !window_open, expect: scenario.expect } : null,
     });
   };
 
@@ -164,6 +173,9 @@ export function buildRouter({ clinic, live, log = () => {} }: SimServerOptions):
     const parsed = await body();
     const b = (parsed.ok ? parsed.value : undefined) as { call_id?: string; scenario?: string; from_number?: string } | undefined;
     if (!b?.call_id) return fail(422, 'call_id is required');
+    const scenario = b.scenario ? scenarioByName(b.scenario) : undefined;
+    if (b.scenario && !scenario) return fail(422, `no scenario '${b.scenario}'`);
+    if (scenario) callScenarios.set(b.call_id, scenario);
     clinic.openCall(b.call_id, { scenario: b.scenario ?? null, from_number: b.from_number ?? null });
     return callView(b.call_id);
   };
@@ -174,6 +186,11 @@ export function buildRouter({ clinic, live, log = () => {} }: SimServerOptions):
 
   router
     .get('/__sim', () => ok(clinic.state()), { public: true })
+    .get('/__sim/scenarios', () => ok({ scenarios: scenarios() }), { public: true })
+    .get('/__sim/scenarios/:name', ({ params }) => {
+      const scenario = scenarioByName(params.name!);
+      return scenario ? ok(scenario) : fail(404, `no scenario '${params.name}'`);
+    }, { public: true })
     .get('/__sim/holds', () => ok({ holds: clinic.holds() }), { public: true })
     .post(
       '/__sim/holds',
@@ -203,6 +220,11 @@ export function buildRouter({ clinic, live, log = () => {} }: SimServerOptions):
     .post('/__sim/calls/:call_id/close', closeCall, { public: true })
     .post('/__mock/calls', openCall, { public: true })
     .post('/__mock/calls/:call_id/close', closeCall, { public: true })
+    .get('/__mock/scenarios', () => ok({ scenarios: scenarios() }), { public: true })
+    .get('/__mock/scenarios/:name', ({ params }) => {
+      const scenario = scenarioByName(params.name!);
+      return scenario ? ok(scenario) : fail(404, `no scenario '${params.name}'`);
+    }, { public: true })
     .get('/__mock/calls/:call_id', ({ params }) => callView(params.call_id!), { public: true })
     .get('/__sim/calls', () => ok({ calls: clinic.calls() }), { public: true })
     .get('/__sim/calls/:call_id', ({ params }) => callView(params.call_id!), { public: true })

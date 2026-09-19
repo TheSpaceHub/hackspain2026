@@ -14,18 +14,22 @@
  *
  *   pnpm harness:local -- --scenario simple      one case, PASS/FAIL on the record
  *   pnpm harness:local -- --scenario all         every case at once
+ *   pnpm harness:sim -- --scenario all           graded cases on the snapshot clinic
  *   pnpm harness -- --prosper http://127.0.0.1:8787 --scenario cancel
  */
 
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
 import { mulawToPcm16, pcm16ToMulaw } from '../src/mulaw.js';
 import { readWav, toMono, writeWav } from './wav.js';
+
+if (existsSync('.env')) process.loadEnvFile('.env');
 
 const exec = promisify(execFile);
 
@@ -96,19 +100,56 @@ function parseArgs(argv: string[]): Options {
 }
 
 let warnedSilence = false;
+let warnedDeepgram = false;
+
+async function synthesiseDeepgram(line: string, lang: 'en' | 'es', wav: string): Promise<Int16Array | undefined> {
+  const key = process.env.DEEPGRAM_API_KEY;
+  if (!key) return undefined;
+  const voice = lang === 'es' ? 'aura-2-celeste-es' : 'aura-2-luna-en';
+  const cacheDir = join(homedir(), '.cache', 'harness-tts');
+  const hash = createHash('sha256').update(`${voice}\0${line}`).digest('hex');
+  const cached = join(cacheDir, `${hash}.wav`);
+  try {
+    await mkdir(cacheDir, { recursive: true });
+    const bytes = await readFile(cached).catch(async () => {
+      const url =
+        `https://api.deepgram.com/v1/speak?model=${encodeURIComponent(voice)}` +
+        '&encoding=linear16&sample_rate=8000&container=wav';
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Token ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: line }),
+      });
+      if (!response.ok) throw new Error(`Deepgram TTS ${voice} → ${response.status}: ${await response.text()}`);
+      const body = Buffer.from(await response.arrayBuffer());
+      await writeFile(cached, body);
+      return body;
+    });
+    await writeFile(wav, bytes);
+    return toMono(await readWav(wav), SAMPLE_RATE);
+  } catch (err) {
+    if (!warnedDeepgram) {
+      warnedDeepgram = true;
+      console.warn(`[harness] Deepgram caller TTS failed; falling back to local speech: ${String(err)}`);
+    }
+    return undefined;
+  }
+}
 
 /**
  * macOS `say`; on Linux `espeak-ng`, fully offline. Without either, silence of a
  * plausible length still exercises pacing — but the agent hears no caller, so the
  * store gets no user turns.
  */
-async function synthesise(line: string, dir: string, name: string): Promise<Int16Array> {
+async function synthesise(line: string, dir: string, name: string, lang: 'en' | 'es' = 'en'): Promise<Int16Array> {
   const wav = join(dir, `${name}.wav`);
   if (process.platform === 'darwin') {
     // CoreAudio downsamples properly, giving real phone-line band-limiting.
     await exec('say', ['-o', wav, '--file-format=WAVE', '--data-format=LEI16@8000', line]);
     return toMono(await readWav(wav), SAMPLE_RATE);
   }
+  const deepgram = await synthesiseDeepgram(line, lang, wav);
+  if (deepgram) return deepgram;
   const voice = ['-v', 'en-us', '-s', '150'];
   try {
     // 22.05 kHz out; toMono brings it down to the wire's 8 kHz.
@@ -139,9 +180,14 @@ async function synthesise(line: string, dir: string, name: string): Promise<Int1
   }
 }
 
-async function synthesiseScript(lines: string[], dir: string, prefix: string): Promise<Int16Array[]> {
+async function synthesiseScript(lines: string[], dir: string, prefix: string, lang: 'en' | 'es' = 'en'): Promise<Int16Array[]> {
   const turns: Int16Array[] = [];
-  for (const [i, line] of lines.entries()) turns.push(await synthesise(line, dir, `${prefix}-${i}`));
+  for (const [i, line] of lines.entries()) {
+    const pause = /^\[pause (\d+(?:\.\d+)?)\]$/i.exec(line.trim());
+    turns.push(
+      pause ? new Int16Array(Math.round(SAMPLE_RATE * Number(pause[1]))) : await synthesise(line, dir, `${prefix}-${i}`, lang),
+    );
+  }
   return turns;
 }
 
@@ -151,6 +197,7 @@ interface MockScenario {
   name: string;
   problem: string;
   summary: string;
+  lang?: 'en' | 'es';
   from_number: string | null;
   script: string[];
 }
@@ -209,7 +256,7 @@ async function buildPlans(opts: Options, dir: string): Promise<CallPlan[]> {
       : await Promise.all(opts.scenarios.map((n) => mockGet<MockScenario>(opts, `/__mock/scenarios/${n}`)));
     const plans: CallPlan[] = [];
     for (const s of wanted) {
-      const turns = await synthesiseScript(s.script, dir, s.name);
+      const turns = await synthesiseScript(s.script, dir, s.name, s.lang ?? 'en');
       console.log(`[harness] ${s.name.padEnd(12)} ${s.problem} — ${s.summary}`);
       for (let i = 0; i < opts.count; i++) plans.push({ turns, fromNumber: s.from_number, scenario: s.name });
     }

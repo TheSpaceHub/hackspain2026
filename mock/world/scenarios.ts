@@ -17,6 +17,7 @@ export interface Scenario {
   name: string;
   problem: string;
   summary: string;
+  lang?: 'en' | 'es';
   /** E.164, or null for a withheld number — what the harness sends as `from_number`. */
   from_number: string | null;
   script: string[];

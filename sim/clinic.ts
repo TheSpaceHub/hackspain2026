@@ -580,6 +580,15 @@ export class Clinic extends EventEmitter<{ event: [SimEvent] }> {
     return rows.map((c) => ({ ...c, actions: this.actions(c.call_id) }));
   }
 
+  upcomingAppointment(patientId: string, now = Date.now()): StoredAppointment | undefined {
+    const rows = this.db
+      .prepare("SELECT * FROM appointments WHERE patient_id = ? AND status = 'active'")
+      .all(patientId) as unknown as StoredAppointment[];
+    return rows
+      .filter((appointment) => Date.parse(appointment.start_time) > now)
+      .sort((a, b) => Date.parse(a.start_time) - Date.parse(b.start_time))[0];
+  }
+
   actions(callId: string): RecordedAction[] {
     const rows = this.db.prepare('SELECT action_json FROM actions WHERE call_id = ? ORDER BY id').all(callId) as { action_json: string }[];
     return rows.map((r) => JSON.parse(r.action_json) as RecordedAction);

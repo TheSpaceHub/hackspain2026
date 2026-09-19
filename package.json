@@ -10,7 +10,7 @@
     "mock": "MOCK_ACCEPT_ANY_CALL=1 tsx mock/index.ts",
     "sim": "tsx sim/index.ts",
     "start:sim": "PORT=7861 LOG_DIR=./calls-sim PROSPER_API_BASE_URL=http://127.0.0.1:8788 SIM_HOLDS=1 tsx src/index.ts",
-    "harness:sim": "MOCK_PROSPER_URL=http://127.0.0.1:8788 tsx test/fake-harness.ts",
+    "harness:sim": "MOCK_PROSPER_URL=http://127.0.0.1:8788 HARNESS_URL=ws://127.0.0.1:7861/ws tsx test/fake-harness.ts",
     "test:sim": "tsx test/sim.test.ts",
     "typecheck": "tsc --noEmit",
     "harness": "tsx test/fake-harness.ts",
