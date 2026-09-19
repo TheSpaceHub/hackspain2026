@@ -5,6 +5,7 @@ import { CallSession, type Shared } from './call-session.js';
 import { loadClinic } from './clinic.js';
 import { DEFAULT_TOOL_TIMEOUT_MS } from './agent-tools.js';
 import { ClinicApi } from './clinic-api.js';
+import { setPlanVocabulary } from './call-state.js';
 import { config } from './config.js';
 import { loadVad } from './models.js';
 import { openStore } from './store/index.js';
@@ -31,6 +32,8 @@ async function main(): Promise<void> {
   // Doctors, sites, plans and closures are identical all event: parsed once here off the
   // document `loadClinic` already fetched, so no call ever pays for them.
   const catalogue = clinic.raw === null ? null : api.primeCatalogue(clinic.raw);
+  // So a plan written down mid-call is the clinic's id, not the caller's pronunciation.
+  if (catalogue) setPlanVocabulary(catalogue.plans);
 
   const shared: Shared = {
     vad,

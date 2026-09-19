@@ -110,7 +110,7 @@ const NORMALIZERS: Record<PatientField, (spoken: string) => Normalized> = {
   date_of_birth: normalizeDate,
   phone: normalizePhone,
   email: normalizeEmail,
-  insurer: (spoken) => ({ value: spoken.trim().toLowerCase().replace(/\s+/g, '_') }),
+  insurer: (spoken) => ({ value: planId(spoken) }),
 };
 
 export interface RecordResult {
@@ -146,7 +146,7 @@ export function recordRequest(state: CallState, patch: Partial<CallRequest>): Ca
     record(state, `request.${key}`, String(value));
   }
   for (const insurer of insurers ?? []) {
-    const id = insurer.trim().toLowerCase().replace(/\s+/g, '_');
+    const id = planId(insurer);
     if (id && !state.request.insurers.includes(id)) {
       state.request.insurers.push(id);
       record(state, 'request.insurer', id);
@@ -213,6 +213,17 @@ export function readCallState(state: CallState): string {
     .join(' ');
   lines.push(`Request: ${request || '(nothing yet)'}`);
 
+  // The plan the booking is billed against: the right slot on the wrong plan fails.
+  const policy = choosePolicy(state);
+  const payable = state.accepted?.payable_with ?? [];
+  if (policy || payable.length > 0) {
+    lines.push(
+      `Billing: policy_id=${policy ?? '(none established)'}` +
+        (payable.length > 0 ? ` · this slot bills against ${payable.join(', ')}` : '') +
+        ` · plans heard: ${[...new Set(knownPlans(state))].join(', ') || 'none'}`,
+    );
+  }
+
   if (state.accepted) {
     const a = state.accepted;
     lines.push(
@@ -223,6 +234,55 @@ export function readCallState(state: CallState): string {
   } else if (state.quoted.length > 0) lines.push(`Quoted, none accepted: ${state.quoted.map((s) => s.start_time).join(', ')}`);
 
   return lines.join('\n');
+}
+
+/**
+ * The plans the clinic bills, set once at boot. Callers say "Nueva Mutua Sanitaria"
+ * and the diary bills `nueva_mutua`, and `policy_id` is scored on the id — so the
+ * translation has to happen where the plan is written down, not where it is submitted.
+ */
+let PLANS: { id: string; name: string }[] = [];
+
+export function setPlanVocabulary(plans: { id: string; name: string }[]): void {
+  PLANS = plans;
+}
+
+const fold = (text: string): string =>
+  text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[_\s]+/g, ' ').trim();
+
+/** The clinic's id for a spoken plan, or the spoken plan tidied up when it knows none. */
+export function planId(spoken: string): string {
+  const said = fold(spoken);
+  if (!said) return '';
+  const match =
+    PLANS.find((plan) => fold(plan.id) === said || fold(plan.name) === said) ??
+    // "Sanitas" for "Sanitas Más": a prefix on a word boundary, never a substring, so
+    // "Mutua" cannot silently pick whichever mutua happens to be listed first.
+    PLANS.find((plan) => fold(plan.name).startsWith(`${said} `) || fold(plan.id).startsWith(`${said} `));
+  return match ? match.id : said.replace(/ /g, '_');
+}
+
+/** Every plan this call knows of, the ones the caller named first. */
+export function knownPlans(state: CallState): string[] {
+  return [...state.request.insurers, state.patient.insurer, state.matched?.insurer].filter(
+    (plan): plan is string => typeof plan === 'string' && plan.trim() !== '',
+  );
+}
+
+/**
+ * Which plan a booking is billed against (problem 17).
+ *
+ * Not a judgement: /availability prices the slot against every plan we passed it and
+ * returns `payable_with`, so the answer is the intersection of that with the plans this
+ * call knows of. A plan named on the call outranks the one on the record — which is the
+ * whole of the second policy: the caller volunteers it, the diary re-prices, and the
+ * survivor is what we submit.
+ */
+export function choosePolicy(state: CallState): string | undefined {
+  const named = knownPlans(state);
+  const payable = state.accepted?.payable_with ?? [];
+  if (payable.length > 0) return named.find((plan) => payable.includes(plan)) ?? payable[0];
+  return named[0];
 }
 
 /** The fields a registration needs, so the agent knows what is still missing. */

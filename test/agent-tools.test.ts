@@ -9,7 +9,15 @@
 import { llm } from '@livekit/agents';
 import { buildTools, speakTime } from '../src/agent-tools.js';
 import { printedToolCall } from '../src/agent.js';
-import { createCallState, readCallState, recordRequest } from '../src/call-state.js';
+import {
+  choosePolicy,
+  createCallState,
+  planId,
+  readCallState,
+  recordRequest,
+  setPlanVocabulary,
+} from '../src/call-state.js';
+import { enforcePolicy } from '../src/guards.js';
 import { applyPatch } from '../src/extract.js';
 import { ClinicApi, catalogueSchema } from '../src/clinic-api.js';
 import { FakeClinic, fakeCatalogue } from './fake-clinic.js';
@@ -256,6 +264,54 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   await loose.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'wizardry' });
   const wide = loose.clinic.requests.find((r) => r.path === '/api/v1/availability');
   check('a specialty nobody has is dropped, not sent', wide?.query.specialty_id, undefined);
+}
+
+// --- which plan the visit is billed to ---------------------------------------
+
+{
+  setPlanVocabulary(catalogue.plans);
+
+  check('a plan said out loud is written down as the clinic bills it', planId('Sanitas'), 'sanitas');
+  check('accents and all', planId('ASISA'), 'asisa');
+  check('a plan nobody offers is kept as spoken, not swapped for a real one', planId('Wizard Cover'), 'wizard_cover');
+
+  const h = harness();
+  await h.call('identify_patient', { national_id: '12345678Z' });
+  await h.call('find_slots', { when_phrase: 'tomorrow' });
+  const held = await h.call('accept_slot', { choice: 1 });
+  check('the plan on the record bills the slot it can pay for', choosePolicy(h.state), 'sanitas');
+  check('so the caller is not asked for a second policy', /other insurance/.test(held), false);
+  check('and the decider is handed the id, not the list', /Billing: policy_id=sanitas/.test(readCallState(h.state)), true);
+
+  const guarded = enforcePolicy(
+    { action: 'book', patient_id: 'pat_001', provider_id: 'prov_gp', location_id: 'loc_centro', appointment_type_id: 'apt_review', slot: h.state.accepted!.start_time, policy_id: 'Sanitas Más' },
+    h.state,
+  );
+  check('a plan the model dressed up is corrected to the payable one', guarded.action.policy_id, 'sanitas');
+  check('and the correction is reported', guarded.corrected, true);
+
+  const invented = enforcePolicy(
+    { action: 'reschedule', appointment_id: 'apt_1', provider_id: 'prov_gp', location_id: 'loc_centro', appointment_type_id: 'apt_review', slot: h.state.accepted!.start_time, policy_id: 'unknown' },
+    h.state,
+  );
+  check('a placeholder never reaches the clinic', invented.action.policy_id, 'sanitas');
+}
+
+{
+  // The second policy: the slot bills against a plan the patient's record does not carry.
+  const h = harness();
+  await h.call('identify_patient', { national_id: '12345678Z' });
+  recordRequest(h.state, { insurers: ['Adeslas'] });
+  await h.call('find_slots', { when_phrase: 'tomorrow' });
+  const held = await h.call('accept_slot', { choice: 1 });
+  check('the plan the caller named on the call is the one billed', choosePolicy(h.state), 'adeslas');
+  check('and the slot is still held', /Held/.test(held), true);
+
+  const stranger = harness();
+  await stranger.call('find_slots', { when_phrase: 'tomorrow' });
+  stranger.state.quoted[0]!.payable_with = ['asisa'];
+  const asked = await stranger.call('accept_slot', { choice: 1 });
+  check('a slot no known plan pays for makes the agent ask for another policy', /other insurance/.test(asked), true);
 }
 
 // --- a tool call it printed instead of making --------------------------------

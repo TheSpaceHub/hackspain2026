@@ -9,6 +9,7 @@
 
 import type { Action, Patient } from './schema.js';
 import type { Availability } from './clinic-api.js';
+import { choosePolicy, type CallState } from './call-state.js';
 
 export type RedFlag =
   | 'chest_pain_breathless'
@@ -72,6 +73,27 @@ export function applyEmergencyGuard(actions: Action[], transcript: string): { ac
   if (!finding) return { actions, finding: null };
   return { actions: [{ action: 'escalate', reason: 'medical_emergency' }], finding };
 }
+
+/**
+ * The model may name a plan the slot cannot be billed against. Correct it where the
+ * diary said which plans work, and leave it alone where it did not: an unpayable plan
+ * we replace with nothing is a booking lost outright.
+ */
+export function enforcePolicy<T extends Extract<Action, { action: 'book' | 'reschedule' }>>(
+  action: T,
+  state: CallState,
+): { action: T; corrected: boolean } {
+  const payable = state.accepted?.payable_with ?? [];
+  const stated = action.policy_id?.trim().toLowerCase();
+  const ok = stated !== undefined && stated !== '' && !PLACEHOLDER_POLICY.has(stated) &&
+    (payable.length === 0 || payable.includes(action.policy_id));
+  if (ok) return { action, corrected: false };
+  const chosen = choosePolicy(state);
+  if (!chosen || chosen === action.policy_id) return { action, corrected: false };
+  return { action: { ...action, policy_id: chosen }, corrected: true };
+}
+
+const PLACEHOLDER_POLICY = new Set(['unknown', 'none', 'n/a', 'null', 'undefined']);
 
 export type AppointmentKind = 'first_visit' | 'review';
 

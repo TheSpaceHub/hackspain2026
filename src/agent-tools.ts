@@ -23,6 +23,7 @@ import {
   type ClinicApi,
 } from './clinic-api.js';
 import {
+  knownPlans,
   recordAccepted,
   recordMatch,
   recordQuote,
@@ -218,7 +219,15 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         const slot = state.quoted[args.choice - 1];
         if (!slot) return 'That is not one of the times you offered. Read the list again or call find_slots.';
         recordAccepted(state, slot);
-        return `Held ${speakTime(slot.start_time)}. Confirm it back once, in one sentence, and move on.`;
+        const held = `Held ${speakTime(slot.start_time)}.`;
+        // The diary priced this slot against the plans it knew about. None of them
+        // means the visit cannot be billed yet — and a caller with a second policy is
+        // exactly the case, so ask for it rather than booking it to the wrong insurer.
+        const payable = slot.payable_with ?? [];
+        if (payable.length > 0 && !knownPlans(state).some((plan) => payable.includes(plan))) {
+          return `${held} It cannot be billed to the plan we have for them. Ask whether they hold any other insurance policy, and take the insurer's name.`;
+        }
+        return `${held} Confirm it back once, in one sentence, and move on.`;
       },
     }),
 

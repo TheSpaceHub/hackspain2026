@@ -10,7 +10,7 @@ import { createExtractor, type Extractor } from './extract.js';
 import type { Availability, Catalogue, ClinicApi } from './clinic-api.js';
 import { config } from './config.js';
 import { FLOOR_ACTION, decide, type DeciderResult } from './decider.js';
-import { applyEmergencyGuard, enforceAppointmentType } from './guards.js';
+import { applyEmergencyGuard, enforceAppointmentType, enforcePolicy } from './guards.js';
 import { mulawToPcm16 } from './mulaw.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
@@ -384,11 +384,21 @@ export class CallSession {
     if (finding) this.#errors.push(`emergency guard: ${finding.flag}`);
 
     const availability = this.#availability;
-    if (!availability) return guarded;
+    const state = this.#state;
     return guarded.map((action) => {
-      if (action.action !== 'book') return action;
-      const { action: fixed, corrected } = enforceAppointmentType(action, availability);
-      if (corrected) this.#errors.push(`appointment type corrected to ${fixed.appointment_type_id}`);
+      let fixed = action;
+      if (fixed.action === 'book' && availability) {
+        const typed = enforceAppointmentType(fixed, availability);
+        if (typed.corrected) {
+          this.#errors.push(`appointment type corrected to ${typed.action.appointment_type_id}`);
+        }
+        fixed = typed.action;
+      }
+      if ((fixed.action === 'book' || fixed.action === 'reschedule') && state) {
+        const billed = enforcePolicy(fixed, state);
+        if (billed.corrected) this.#errors.push(`policy corrected to ${billed.action.policy_id}`);
+        fixed = billed.action;
+      }
       return fixed;
     });
   }
