@@ -704,6 +704,7 @@ export class CallSession {
       if (
         this.#state.no_availability &&
         !this.#state.accepted &&
+        !actions.some((action) => action.action === 'escalate') &&
         this.#state.request.intent !== 'register' &&
         this.#state.request.intent !== 'cancel' &&
         this.#state.request.intent !== 'reschedule'
