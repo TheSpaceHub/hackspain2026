@@ -75,6 +75,8 @@ export function insightsFor(kase: Case, result: Omit<CaseResult, 'insights'>): I
   const heard = result.call.transcript.filter((t) => t.role === 'user').map((t) => t.text);
   const wanted = kase.expected.acceptable[0]?.actions.map((a) => a.action) ?? [];
   const got = actionsOf(result);
+  // A call where the agent only ever greeted cannot be explained by what it said later on.
+  const oneSided = said.length <= 1;
 
   if (result.call.frames_received === 0) {
     found.push({
@@ -223,9 +225,11 @@ export function insightsFor(kase: Case, result: Omit<CaseResult, 'insights'>): I
       code: 'never_identified',
       severity: 'major',
       detail: 'The agent never asked for an identifier, so nothing it booked can be tied to the patient on file.',
-      why:
-        'The caller gave a name and the agent took it, so identification never became a step of the call — and by the ' +
-        'time a decision was due there was no way to look the patient up.',
+      why: oneSided
+        ? 'The agent barely spoke after its greeting, so identification never came up at all and the caller was left ' +
+          'talking into a line that asked them for nothing.'
+        : 'The caller gave a name and the agent took it, so identification never became a step of the call — and by the ' +
+          'time a decision was due there was no way to look the patient up.',
       suggestion: 'Ask for a DNI, phone number or date of birth before the call reaches a decision.',
       evidence: result.call.transcript.slice(0, 4).map(line),
     });
@@ -252,10 +256,14 @@ export function insightsFor(kase: Case, result: Omit<CaseResult, 'insights'>): I
       code: 'ran_long',
       severity: 'minor',
       detail: `The caller used all ${kase.persona.turn_cap} of their turns without getting there.`,
-      why:
-        'The turns went on confirming things already said instead of asking for the one fact still missing, so the call ' +
-        'ran out of room before it reached a decision.',
-      suggestion: 'Ask for the missing fact directly instead of confirming things the caller has already said.',
+      why: oneSided
+        ? 'The caller spent every turn on an agent that answered once and then went quiet, so the call ran out of room ' +
+          'without a second reply to work from.'
+        : 'The turns went on confirming things already said instead of asking for the one fact still missing, so the ' +
+          'call ran out of room before it reached a decision.',
+      suggestion: oneSided
+        ? 'Find out why the agent stopped replying — the call ended on the caller, not on a decision.'
+        : 'Ask for the missing fact directly instead of confirming things the caller has already said.',
       evidence: near(result.call.transcript, null),
     });
   }
