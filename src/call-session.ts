@@ -292,7 +292,8 @@ export class CallSession {
         if (event.isFinal) {
           this.#nudges = 0;
           if (this.#state) this.#state.caller_turns++;
-          this.#pendingDeadAir.push({ turn: ++this.#deadAirTurn, at: Date.now() });
+          // One caller turn can arrive as several finals; the gap is measured from the last.
+          this.#pendingDeadAir = [{ turn: ++this.#deadAirTurn, at: Date.now() }];
         }
         this.#clearSilenceTimer();
       });
