@@ -248,4 +248,4 @@ The submission client takes an **array** of actions from day one, so problem 18
 - 409 is a retry landing twice, not a bug. 410 is the closed window and is never retried.
 - The only things shared across sockets are the Silero VAD model, the clinic catalogue
   and the stateless submit client. `grep -n "^let \|^var " src/*.ts` should only ever
-  show write-once memoisation.
+  show write-once memoisation
