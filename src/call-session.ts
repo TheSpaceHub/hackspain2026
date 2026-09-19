@@ -5,14 +5,17 @@ import { GREETING, ReceptionistAgent } from './agent.js';
 import { MediaStreamAudioInput } from './audio-input.js';
 import { MediaStreamAudioOutput } from './audio-output.js';
 import { writeCallLog, type CallLog } from './call-log.js';
+import { createCallState, readCallState, recordMatch, type CallState } from './call-state.js';
+import type { Availability, Catalogue, ClinicApi } from './clinic-api.js';
 import { config } from './config.js';
 import { FLOOR_ACTION, decide, type DeciderResult } from './decider.js';
+import { applyEmergencyGuard, enforceAppointmentType } from './guards.js';
 import { mulawToPcm16 } from './mulaw.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
 import { submitActions, type SubmitResult } from './submit.js';
 import type { Store } from './store/index.js';
-import { buildCallTranscript, type TranscriptTurn } from './transcript.js';
+import { buildCallTranscript, formatTranscript, type TranscriptTurn } from './transcript.js';
 import { SAMPLE_RATE, type InboundMessage, type StartMessage } from './twilio.js';
 
 /** Everything deliberately shared across sockets, and nothing else. */
@@ -21,6 +24,10 @@ export interface Shared {
   keyterms: string[];
   clinicBriefing: string;
   store: Store;
+  /** Read-only lookups. One client, so the catalogue is fetched once for the process. */
+  api: ClinicApi;
+  /** Doctors, sites, plans and closures, parsed at boot. Null only if /clinic was down. */
+  catalogue: Catalogue | null;
 }
 
 /**
@@ -52,6 +59,9 @@ export class CallSession {
   #finishing: Promise<void> | null = null;
   #endedBy = 'unknown';
   #transcript: TranscriptTurn[] = [];
+  #state: CallState | null = null;
+  /** The last availability answer, so the submitted type is the one the diary offered. */
+  #availability: Availability | null = null;
   /** Turns already handed to the store, so a live flush never re-sends one. */
   #turnsWritten = 0;
 
@@ -109,6 +119,11 @@ export class CallSession {
     this.#streamSid = msg.start?.streamSid ?? msg.streamSid ?? '';
     this.#fromNumber = msg.start?.customParameters?.from_number;
     this.#startedAt = Date.now();
+    this.#state = createCallState(this.#callId, this.#fromNumber);
+
+    // The line they rang from is a free directory query, and it resolves while the
+    // greeting is still playing — often before they finish their first sentence.
+    if (this.#state.from_number) this.#identifyByPhone(this.#state, this.#state.from_number);
 
     console.log(
       `[call ${this.#callId}] start · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
@@ -177,7 +192,15 @@ export class CallSession {
       session.output.audio = this.#output;
 
       // No room: the voice loop runs against our own transport.
-      await session.start({ agent: new ReceptionistAgent() });
+      const agent = new ReceptionistAgent({
+        state: this.#state ?? createCallState(this.#callId, this.#fromNumber),
+        api: this.#shared.api,
+        catalogue: this.#shared.catalogue,
+        onAvailability: (availability) => {
+          this.#availability = availability;
+        },
+      });
+      await session.start({ agent });
       this.#sessionStartMs = Date.now() - t0;
 
       // Speak first: the harness cuts a call with no audible audio from us.
@@ -192,6 +215,17 @@ export class CallSession {
       // The call is lost; the submission is not.
       void this.finish('session_start_failed');
     }
+  }
+
+  /** Best-effort: a caller the directory knows by their own number needs no questions. */
+  #identifyByPhone(state: CallState, phone: string): void {
+    void this.#shared.api
+      .findPatient({ phone })
+      .then((matches) => {
+        // Two people on one landline is a household, not an identification.
+        if (matches.length === 1 && !state.matched) recordMatch(state, matches[0]!);
+      })
+      .catch((err: unknown) => this.#errors.push(`phone lookup: ${String(err)}`));
   }
 
   /** Hand the store every turn it has not seen yet. Cheap, and never throws into the call. */
@@ -265,11 +299,12 @@ export class CallSession {
         fromNumber: this.#fromNumber,
         now: new Date(),
         clinicBriefing: this.#shared.clinicBriefing,
+        callState: this.#state ? readCallState(this.#state) : undefined,
       },
       budget,
     );
 
-    const actions = this.#actionsFor(decided);
+    const actions = this.#guard(this.#actionsFor(decided));
     const submitStartedAt = Date.now();
     let submissions: SubmitResult[] = [];
     if (this.#callId) {
@@ -307,6 +342,28 @@ export class CallSession {
     if (decided.output.actions.length > 0) return decided.output.actions;
     this.#errors.push('decider returned no actions');
     return [FLOOR_ACTION];
+  }
+
+  /**
+   * Two things the model does not get a vote on: a red flag in the transcript outranks
+   * whatever the call was about, and the appointment type is the one /availability chose
+   * for this patient rather than the one that sounded right.
+   */
+  #guard(actions: Action[]): Action[] {
+    const { actions: guarded, finding } = applyEmergencyGuard(
+      actions,
+      formatTranscript(this.#transcript),
+    );
+    if (finding) this.#errors.push(`emergency guard: ${finding.flag}`);
+
+    const availability = this.#availability;
+    if (!availability) return guarded;
+    return guarded.map((action) => {
+      if (action.action !== 'book') return action;
+      const { action: fixed, corrected } = enforceAppointmentType(action, availability);
+      if (corrected) this.#errors.push(`appointment type corrected to ${fixed.appointment_type_id}`);
+      return fixed;
+    });
   }
 
   #writeStore(

@@ -162,6 +162,17 @@ export class ClinicApi {
     return parsed.success ? parsed.data : { providers: [], slots: [], blocked: [] };
   }
 
+  /**
+   * The catalogue as already fetched elsewhere. `loadClinic` pulls the same document at
+   * boot for STT keyterms; priming with its `raw` spends no second request.
+   */
+  primeCatalogue(raw: unknown): Catalogue | null {
+    const parsed = catalogueSchema.safeParse(raw);
+    if (!parsed.success) return null;
+    this.#catalogue = Promise.resolve(parsed.data);
+    return parsed.data;
+  }
+
   /** Generated once and identical all event, so fetched once per process. */
   getCatalogue(): Promise<Catalogue> {
     this.#catalogue ??= this.#get('/api/v1/clinic', {}).then((json) => {
