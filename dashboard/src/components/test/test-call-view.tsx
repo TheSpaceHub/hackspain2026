@@ -5,15 +5,16 @@ import { Input } from '@/components/ui/input';
 import type { CallFeed } from '@/hooks/use-call-feed';
 import { useNow } from '@/hooks/use-now';
 import { callStatus } from '@/lib/agent/model';
+import { agentSocketUrl } from '@/lib/agent/origin';
 import { formatDuration } from '@/lib/format';
 import type { TestCall } from '@/lib/phone/test-call';
 import { cn } from '@/lib/utils';
 
-/** The URL Prosper dials, and the agent behind this console (through Vite's proxy). */
-const PRESETS = [
-  { label: 'Prosper endpoint', url: 'wss://pmc-blowing-rap-detroit.trycloudflare.com/ws' },
-  { label: 'Local agent', url: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws` },
-];
+/**
+ * The agent this console reads: through Vite's proxy in dev, its public URL when
+ * deployed. Any other agent can be typed in; a tunnel's URL changes on every restart.
+ */
+const PRESETS = [{ label: "This console's agent", url: agentSocketUrl() }];
 
 /** Per-browser settings: which agent to ring, and as whom. */
 function useStored(key: string, fallback: string): [string, (v: string) => void] {

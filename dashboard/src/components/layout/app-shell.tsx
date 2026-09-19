@@ -4,6 +4,7 @@ import { useNow } from '@/hooks/use-now';
 import { formatClock, formatDay } from '@/lib/format';
 import type { AgentMode } from '@/lib/agent/stats';
 import { MODE_LABEL, type ConsoleMode } from '@/lib/mode';
+import { AgentOriginControl } from './agent-origin';
 import { cn } from '@/lib/utils';
 
 export interface NavItem {
@@ -172,6 +173,12 @@ export function AppShell({ nav, active, onNavigate, clinicApi, mode, onMode, swi
         <Brand />
         <Tabs nav={nav} active={active} onNavigate={onNavigate} />
         <div className="ml-auto flex shrink-0 items-center gap-4 text-sm text-muted-foreground">
+          {/* Deployed, the console has no proxy: it names the agent it reads, and can switch. */}
+          {import.meta.env.PROD && (
+            <span className="hidden md:contents">
+              <AgentOriginControl />
+            </span>
+          )}
           <ModePill mode={mode} url={clinicApi} onMode={onMode} switching={switching} switchError={switchError} />
           {/* The console is a desktop tool; on a phone, the clock gives way to the tabs. */}
           <span className="hidden h-4 w-px bg-border md:block" />

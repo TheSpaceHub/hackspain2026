@@ -3,6 +3,8 @@
  * counted from the feed, which only holds the most recent calls.
  */
 
+import { AGENT_ORIGIN } from './origin';
+
 export interface Distribution {
   p50: number | null;
   p95: number | null;
@@ -69,7 +71,7 @@ export const RANGES: Range[] = [
   { id: 'all', label: 'All time', phrase: 'all time', bucketMs: 60 * 60_000, since: () => null },
 ];
 
-const ORIGIN = import.meta.env.PROD ? (import.meta.env.VITE_AGENT_ORIGIN ?? '') : '';
+const ORIGIN = AGENT_ORIGIN;
 
 export async function fetchStats(range: Range, now: number, signal?: AbortSignal): Promise<Stats> {
   const q = new URLSearchParams({ bucket_ms: String(range.bucketMs) });
