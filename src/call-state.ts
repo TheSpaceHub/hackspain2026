@@ -93,6 +93,7 @@ export interface CallState {
   last_caller_text?: string;
   accepted: QuotedSlot | null;
   phone_match_rejected?: string;
+  rejected: Partial<Record<PatientField, { spoken: string; problem: string }>>;
   /** Every write, in order, including the ones that were later retracted. */
   journal: { at: string; field: string; value: string | null; note?: string }[];
 }
@@ -109,6 +110,7 @@ export function createCallState(callId: string, fromNumber?: string): CallState 
     turns_seen: 0,
     caller_turns: 0,
     accepted: null,
+    rejected: {},
     journal: [],
   };
   if (fromNumber) {
@@ -151,13 +153,16 @@ export function recordPatientField(
 ): RecordResult {
   const { value, problem } = NORMALIZERS[field](spoken);
   if (field === 'insurer' && !value) {
+    state.rejected[field] = { spoken, problem: 'not a plan the clinic bills' };
     clog.warn(`[state] dropped insurer "${spoken}": not a plan the clinic bills`);
     return { value: '', stored: false, problem: 'not a plan the clinic bills' };
   }
   if (field === 'national_id' && problem) {
+    state.rejected[field] = { spoken, problem };
     clog.warn(`[state] dropped national id "${spoken}": ${problem}`);
     return { value: '', stored: false, problem };
   }
+  delete state.rejected[field];
   record(state, field, value, problem);
   state.patient[field] = value;
   return { value, stored: true, problem };
@@ -405,6 +410,7 @@ export function recordAccepted(state: CallState, slot: QuotedSlot, note?: string
 
 /** An id stated and then contradicted. Explicit, so the journal shows both. */
 export function retract(state: CallState, field: PatientField | keyof CallRequest): void {
+  delete state.rejected[field as PatientField];
   if (field in state.patient) delete state.patient[field as PatientField];
   else if (field in state.request) delete (state.request as Record<string, unknown>)[field];
   record(state, String(field), null, 'retracted');
@@ -431,6 +437,10 @@ export function readCallState(state: CallState): string {
     .map(([k, v]) => `${k}=${v}`)
     .join(' ');
   if (draft) lines.push(`Heard: ${draft}`);
+  const rejected = Object.entries(state.rejected)
+    .map(([field, value]) => `${field} "${value.spoken}" — ${value.problem}`)
+    .join(' · ');
+  if (rejected) lines.push(`Rejected (ask again): ${rejected}`);
   if (!state.caller_is_patient) {
     lines.push(`Caller is NOT the patient: ${state.caller?.name ?? 'unnamed'} (${state.caller?.relationship ?? 'relationship unstated'})`);
   }

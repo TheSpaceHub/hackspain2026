@@ -1,7 +1,7 @@
 import { llm, voice } from '@livekit/agents';
 import { randomUUID } from 'node:crypto';
 import { buildTools, type ToolDeps } from './agent-tools.js';
-import type { CallState } from './call-state.js';
+import { missingForRegistration, type CallState, type PatientField } from './call-state.js';
 import { clog } from './log.js';
 import { describeBrief } from './patient-brief.js';
 
@@ -15,7 +15,7 @@ export const GREETING =
  * agent may now quote a real slot, and must quote nothing else: an invented appointment
  * poisons both the call and the submission derived from it.
  */
-const INSTRUCTIONS = `You are Ana, a receptionist at Clínica Arenal, a clinic in Madrid with three sites (Centro, Norte and Sur). You are answering the telephone. You speak English.
+const INSTRUCTIONS = `You are Ana, a receptionist at Clínica Arenal, a clinic in Madrid with three sites (Centro, Norte and Sur). You are answering the telephone. You speak English by default. If the caller speaks to you in Spanish or Catalan, switch to that language for the rest of the call and stay in it (dates, times and readbacks included); switch back only if they do.
 
 # How you sound
 You are on a phone call, so keep every turn to one or two sentences. Speak plainly, warmly and without filler. Never use lists, bullet points, markdown, emoji or headings — everything you say is read aloud by a speech synthesiser. Write numbers, dates and times the way a person says them.
@@ -186,19 +186,42 @@ const CORRECTION =
  */
 export function fileOnCaller(state: CallState): string | undefined {
   const patient = state.matched;
+  const fieldLabels: Record<PatientField, string> = {
+    given_name: 'given name',
+    first_surname: 'first surname',
+    second_surname: 'second surname',
+    national_id: 'DNI or NIE',
+    date_of_birth: 'date of birth',
+    phone: 'phone',
+    email: 'email',
+    insurer: 'insurer',
+  };
+  const rejected = Object.entries(state.rejected).map(([field, value]) => {
+    const label = fieldLabels[field as PatientField];
+    return `The ${label} they gave ("${value.spoken}") does not check out: ${value.problem}. Tell them the number does not add up and ask them to repeat it slowly, digits then letter, before moving on.`;
+  });
+  const missing =
+    state.request.intent === 'register'
+      ? missingForRegistration(state).map((field) => fieldLabels[field])
+      : [];
+  if (missing.length > 0) rejected.push(`Still missing for the file: ${missing.join(', ')}`);
+
+  const extra = rejected.join(' ');
+  let file: string | undefined;
   if (!patient && state.phone_match_rejected) {
-    return `The number they are ringing from is on file for someone else, and the caller has said they are ${state.phone_match_rejected}. Treat them as not identified: take their details as for any caller, and do not use the other person's record or name.`;
+    file = `The number they are ringing from is on file for someone else, and the caller has said they are ${state.phone_match_rejected}. Treat them as not identified: take their details as for any caller, and do not use the other person's record or name.`;
+  } else if (patient) {
+    const name = [patient.given_name, patient.first_surname, patient.second_surname].filter(Boolean).join(' ');
+    const facts = [
+      `patient id ${patient.patient_id}`,
+      name === '' ? undefined : name,
+      patient.has_visited_before ? 'seen here before' : 'never seen here',
+      patient.insurer ? `plan on record ${patient.insurer}` : undefined,
+    ].filter(Boolean);
+    const brief = state.brief ? describeBrief(state.brief) : '';
+    file = `The clinic's file for the number they are ringing from: ${facts.join(', ')}. They are identified: do not ask for their name, their DNI or NIE, or their date of birth. Greet them by their first name and get on with what they want.${brief ? ` Rules for this patient: ${brief} You may state these facts to the caller plainly (which doctors do not take their plan, what their plan does not cover, whether a referral is needed); never quote a price.` : ''}`;
   }
-  if (!patient) return undefined;
-  const name = [patient.given_name, patient.first_surname, patient.second_surname].filter(Boolean).join(' ');
-  const facts = [
-    `patient id ${patient.patient_id}`,
-    name === '' ? undefined : name,
-    patient.has_visited_before ? 'seen here before' : 'never seen here',
-    patient.insurer ? `plan on record ${patient.insurer}` : undefined,
-  ].filter(Boolean);
-  const brief = state.brief ? describeBrief(state.brief) : '';
-  return `The clinic's file for the number they are ringing from: ${facts.join(', ')}. They are identified: do not ask for their name, their DNI or NIE, or their date of birth. Greet them by their first name and get on with what they want.${brief ? ` Rules for this patient: ${brief} You may state these facts to the caller plainly (which doctors do not take their plan, what their plan does not cover, whether a referral is needed); never quote a price.` : ''}`;
+  return file && extra ? `${file} ${extra}` : file ?? (extra || undefined);
 }
 
 export class ReceptionistAgent extends voice.Agent {

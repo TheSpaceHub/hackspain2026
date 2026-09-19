@@ -9,7 +9,7 @@
 import { firstJsonObject, fileOnCaller, printedToolCall } from '../src/agent.js';
 import { closest, distance, fold, only } from '../src/fuzzy.js';
 import { locationById, planByName, providersByName, specialtyByName } from '../src/clinic-api.js';
-import { createCallState, recordMatch } from '../src/call-state.js';
+import { createCallState, readCallState, recordMatch, recordPatientField } from '../src/call-state.js';
 import { withoutDuplicates } from '../src/decider.js';
 import { catalogueSchema } from '../src/clinic-api.js';
 import { fakeCatalogue } from './fake-clinic.js';
@@ -125,6 +125,12 @@ const file = fileOnCaller(state) ?? '';
 check('the file names them', /P01132.*Juan Ruiz Moreno/.test(file), true);
 check('and says not to ask again', /do not ask for their name/.test(file), true);
 check('and carries the plan on record', /dkv/.test(file), true);
+check('a rejected id is not stored', recordPatientField(state, 'national_id', '60729982P').stored, false);
+const rejectedFile = fileOnCaller(state) ?? '';
+check('the agent is told the rejected id', /does not check out/.test(rejectedFile) && /60729982P/.test(rejectedFile), true);
+check('the state marks the rejected id', /Rejected \(ask again\): national_id/.test(readCallState(state)), true);
+check('a valid replacement id is stored', recordPatientField(state, 'national_id', '60729982T').stored, true);
+check('the rejected id prompt clears after a valid id', /does not check out/.test(fileOnCaller(state) ?? ''), false);
 
 // --- a decider that answers twice -------------------------------------------
 
