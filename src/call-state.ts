@@ -177,9 +177,94 @@ export function recordQuote(state: CallState, slots: QuotedSlot[]): void {
   for (const slot of slots) record(state, 'quoted', `${slot.start_time} ${slot.provider_id}`);
 }
 
-export function recordAccepted(state: CallState, slot: QuotedSlot): void {
+const ORDINALS: Record<string, number> = {
+  first: 0,
+  earliest: 0,
+  soonest: 0,
+  second: 1,
+  third: 2,
+  last: -1,
+  latest: -1,
+};
+
+/** Hour and minute of a quoted slot in Madrid, the clock the caller hears. */
+function clockFace(iso: string): { hour: number; minute: number } | undefined {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Madrid',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(iso));
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value);
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value);
+  return Number.isFinite(hour) && Number.isFinite(minute) ? { hour, minute } : undefined;
+}
+
+function saidTimes(turn: string): { hour: number; minute: number }[] {
+  const times: { hour: number; minute: number }[] = [];
+  for (const m of turn.matchAll(/\b(\d{1,2})\s*[:.\s]\s*(\d{2})\b/g)) {
+    times.push({ hour: Number(m[1]), minute: Number(m[2]) });
+  }
+  return times;
+}
+
+function sameClock(
+  slot: QuotedSlot,
+  said: { hour: number; minute: number },
+): boolean {
+  const face = clockFace(slot.start_time);
+  if (!face || face.minute !== said.minute) return false;
+  // "11:45" and "quarter to twelve in the morning" reach us as the 12-hour face.
+  return face.hour === said.hour || face.hour === said.hour + 12;
+}
+
+/**
+ * The model is meant to call accept_slot the moment the caller picks a time, and when it
+ * forgets, a call with a real slot on the table submits `no_action` for want of the ids.
+ * The caller's own words are enough to settle it without the model: a time that matches
+ * exactly one quoted slot, or an ordinal over the list we read out in order. Anything
+ * ambiguous is left alone — a wrong appointment is worse than none.
+ */
+export function acceptFromTranscript(
+  state: CallState,
+  turns: { role: string; text: string }[],
+): QuotedSlot | null {
+  if (state.accepted || state.quoted.length === 0) return null;
+  const spoken = turns.filter((t) => t.role === 'user');
+
+  for (let i = spoken.length - 1; i >= 0; i--) {
+    const text = spoken[i]!.text.toLowerCase();
+
+    const byClock = saidTimes(text).flatMap((said) =>
+      state.quoted.filter((slot) => sameClock(slot, said)),
+    );
+    if (byClock.length === 1) {
+      recordAccepted(state, byClock[0]!, 'inferred from the caller');
+      return byClock[0]!;
+    }
+    if (byClock.length > 1) return null;
+
+    // "the soonest you have" is how the request itself is phrased, so an ordinal only
+    // counts as a choice when it comes after the list was read out.
+    const ordinals =
+      i < spoken.length - 2
+        ? []
+        : Object.keys(ORDINALS).filter((word) => new RegExp(`\\b${word}\\b`).test(text));
+    if (ordinals.length === 1) {
+      const at = ORDINALS[ordinals[0]!]!;
+      const slot = at < 0 ? state.quoted[state.quoted.length - 1] : state.quoted[at];
+      if (slot) {
+        recordAccepted(state, slot, 'inferred from the caller');
+        return slot;
+      }
+    }
+  }
+  return null;
+}
+
+export function recordAccepted(state: CallState, slot: QuotedSlot, note?: string): void {
   state.accepted = slot;
-  record(state, 'accepted', `${slot.start_time} ${slot.provider_id}`);
+  record(state, 'accepted', `${slot.start_time} ${slot.provider_id}`, note);
 }
 
 /** An id stated and then contradicted. Explicit, so the journal shows both. */
@@ -231,7 +316,15 @@ export function readCallState(state: CallState): string {
         ` appointment_type_id=${a.appointment_type_id}` +
         (a.payable_with?.length ? ` payable_with=${a.payable_with.join(',')}` : ''),
     );
-  } else if (state.quoted.length > 0) lines.push(`Quoted, none accepted: ${state.quoted.map((s) => s.start_time).join(', ')}`);
+  } else if (state.quoted.length > 0) {
+    lines.push('Quoted, none accepted:');
+    for (const s of state.quoted) {
+      lines.push(
+        `  slot=${s.start_time} provider_id=${s.provider_id} location_id=${s.location_id}` +
+          ` appointment_type_id=${s.appointment_type_id}`,
+      );
+    }
+  }
 
   return lines.join('\n');
 }

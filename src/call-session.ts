@@ -5,7 +5,13 @@ import { GREETING, ReceptionistAgent } from './agent.js';
 import { MediaStreamAudioInput } from './audio-input.js';
 import { MediaStreamAudioOutput } from './audio-output.js';
 import { writeCallLog, type CallLog } from './call-log.js';
-import { createCallState, readCallState, recordMatch, type CallState } from './call-state.js';
+import {
+  acceptFromTranscript,
+  createCallState,
+  readCallState,
+  recordMatch,
+  type CallState,
+} from './call-state.js';
 import { createExtractor, type Extractor } from './extract.js';
 import type { Availability, Catalogue, ClinicApi } from './clinic-api.js';
 import { config } from './config.js';
@@ -318,6 +324,12 @@ export class CallSession {
     // and the decider reads the notes. Give it a slice of the window, not the window.
     this.#flushTurns();
     await this.#extractor?.settle(Math.max(0, Math.min(EXTRACT_SETTLE_MS, budget - 2_000)));
+
+    // A slot the caller chose but the model never held: the ids are all in the quote.
+    if (this.#state) {
+      const inferred = acceptFromTranscript(this.#state, this.#transcript);
+      if (inferred) this.#errors.push(`accepted slot inferred from the caller: ${inferred.start_time}`);
+    }
 
     const decided = await decide(
       {

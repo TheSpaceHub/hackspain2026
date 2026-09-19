@@ -13,7 +13,16 @@ import { resolveWhen, madridDate, addDays } from '../src/when.js';
 import { rankSites, haversineKm } from '../src/nearest-site.js';
 import { detectMedicalEmergency, applyEmergencyGuard, appointmentKindFor, enforceAppointmentType } from '../src/guards.js';
 import { providersByName, siteHours, type Catalogue } from '../src/clinic-api.js';
-import { createCallState, recordPatientField, recordRequest, retract, readCallState } from '../src/call-state.js';
+import {
+  acceptFromTranscript,
+  createCallState,
+  recordPatientField,
+  recordQuote,
+  recordRequest,
+  retract,
+  readCallState,
+  type QuotedSlot,
+} from '../src/call-state.js';
 
 let failed = 0;
 function check(name: string, actual: unknown, expected: unknown): void {
@@ -180,6 +189,43 @@ retract(state, 'given_name');
 check('a retracted field leaves the draft', state.patient.given_name, undefined);
 check('but stays in the journal', state.journal.filter((e) => e.note === 'retracted').length, 1);
 check('the readback names the intent', /book/.test(readCallState(state)), true);
+
+// --- the slot the caller chose and the model forgot to hold -----------------
+
+const quote = (start: string, provider: string): QuotedSlot => ({
+  provider_id: provider,
+  location_id: 'LOC_CENTRO',
+  appointment_type_id: 'AT_REVIEW',
+  start_time: start,
+});
+const monday = quote('2026-09-21T11:45:00+02:00', 'PR1');
+const noon = quote('2026-09-21T12:00:00+02:00', 'PR1');
+const tuesday = quote('2026-09-22T09:30:00+02:00', 'PR2');
+
+function afterQuote(said: string[]): QuotedSlot | null {
+  const call = createCallState('call-2');
+  recordQuote(call, [monday, noon, tuesday]);
+  return acceptFromTranscript(
+    call,
+    said.map((text) => ({ role: 'user', text })),
+  );
+}
+
+check('a time the caller says is matched to the quote', afterQuote(["Monday at 11 45 AM. Yeah, I'll take that."])?.start_time, monday.start_time);
+check('the afternoon face of the same clock', afterQuote(['12:00 works'])?.start_time, noon.start_time);
+check('an ordinal picks off the list we read out', afterQuote(['the first one please'])?.start_time, monday.start_time);
+check('and so does the last', afterQuote(["I'll take the last one"])?.start_time, tuesday.start_time);
+check('the request phrasing is not a choice', afterQuote(['what is the soonest you have', 'ok', 'thanks', 'bye']), null);
+check('nothing is chosen when nothing was said', afterQuote(["I'll think about it"]), null);
+
+const held = createCallState('call-3');
+recordQuote(held, [monday, noon]);
+held.accepted = noon;
+check('a slot already held is never overwritten', acceptFromTranscript(held, [{ role: 'user', text: '11:45 then' }]), null);
+
+const unchosen = createCallState('call-4');
+recordQuote(unchosen, [monday]);
+check('an unaccepted quote still carries its ids', /provider_id=PR1 location_id=LOC_CENTRO appointment_type_id=AT_REVIEW/.test(readCallState(unchosen)), true);
 
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);
 process.exitCode = failed === 0 ? 0 : 1;
