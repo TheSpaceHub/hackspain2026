@@ -159,7 +159,10 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           .describe('The caller\'s words for when they want to come, e.g. "next Tuesday afternoon" or "as soon as possible"'),
         specialty_id: z.string().optional(),
         provider_name: z.string().optional(),
-        location_id: z.string().optional(),
+        location_id: z
+          .string()
+          .optional()
+          .describe('The site exactly as the caller said it, every word, even if it sounds garbled ("Adrenal Source", "Arnal sir"); the diary works out which site is meant'),
       }),
       execute: async (args) => {
         // The model says "general practice" and "Centro"; the diary takes

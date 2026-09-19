@@ -81,6 +81,12 @@ check('misheard site', locationById(catalogue, 'Arenal Nortte')?.id, 'loc_norte'
 check('the clinic half heard as a name', locationById(catalogue, 'Reinaldo Centro')?.id, 'loc_centro');
 check('and heard as initials', locationById(catalogue, 'RNL Centro')?.id, 'loc_centro');
 check('the shared half alone picks no site', locationById(catalogue, 'Arenal'), undefined);
+// And the site half comes out as the nearest English word.
+check('"Adrenal Source" is Sur', locationById(catalogue, 'Adrenal Source')?.id, 'loc_sur');
+check('"Arnal sir" is Sur', locationById(catalogue, 'Arnal sir')?.id, 'loc_sur');
+check('"Autonau Soar" is Sur', locationById(catalogue, 'Autonau Soar')?.id, 'loc_sur');
+check('"Arenal North" is Norte', locationById(catalogue, 'Arenal North')?.id, 'loc_norte');
+check('"Arenal Center" is Centro', locationById(catalogue, 'Arenal Center')?.id, 'loc_centro');
 check('a site that is not ours is dropped', locationById(catalogue, 'Chamartín'), undefined);
 
 check('a doctor said exactly', providersByName(catalogue, 'Sáez').map((p) => p.id), ['prov_saez']);

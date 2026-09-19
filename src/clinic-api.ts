@@ -326,6 +326,18 @@ export function planByName(catalogue: Catalogue, spoken: string): { id: string; 
   );
 }
 
+/** How English STT renders the Spanish site words; the ones that turn up in call logs. */
+const SITE_WORD_SOUNDS: Record<string, string[]> = {
+  sur: ['sir', 'sor', 'soar', 'sore', 'source', 'sewer', 'south', 'store'],
+  norte: ['north', 'nortay', 'naughty', 'nordic'],
+  centro: ['center', 'centre', 'central', 'sentro'],
+};
+
+function soundsLike(spoken: string, word: string): boolean {
+  if (distance(spoken, word) <= tolerance(word)) return true;
+  return (SITE_WORD_SOUNDS[word] ?? []).some((sound) => distance(spoken, sound) <= tolerance(sound));
+}
+
 /**
  * The word that tells one site from another. Every site here is "Arenal <something>",
  * and it is the something the caller means — so a mishearing of the shared half
@@ -358,7 +370,7 @@ export function locationById(catalogue: Catalogue, id: string): Location | undef
   const said = needle.split(' ').filter((w) => w.length > 2);
   const hit = catalogue.locations.filter((l) =>
     distinctiveWords(catalogue, l).some((word) =>
-      said.some((spoken) => distance(spoken, word) <= tolerance(word)),
+      said.some((spoken) => soundsLike(spoken, word)),
     ),
   );
   return hit.length === 1 ? hit[0] : undefined;
