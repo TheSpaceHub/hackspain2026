@@ -10,7 +10,7 @@
  */
 
 import { z } from 'zod';
-import { closest, distance, fold, only, tolerance } from './fuzzy.js';
+import { closest, distance, fold, only, phoneticKey, tolerance } from './fuzzy.js';
 import { patientSchema, type Patient } from './schema.js';
 
 export const appointmentSchema = z.object({
@@ -238,12 +238,26 @@ export function providersByName(catalogue: Catalogue, spoken: string): Provider[
   const substring = folded.filter(({ name }) => name.includes(needle));
   if (substring.length > 0) return substring.map(({ p }) => p);
   // Each surname is an alias of its own: they say one word, the catalogue holds three.
-  return closest(
+  const near = closest(
     catalogue.providers.map((p) => ({ item: p, aliases: [p.name, ...fold(p.name).split(' ')] })),
     needle,
     undefined,
     true,
   ).map((m) => m.item);
+  if (near.length > 0) return near;
+  // The caller always means one of our doctors; the line garbled it. Take the nearest
+  // surname(s) by edit distance so the agent asks "Dr X?" instead of denying the doctor.
+  const scored = catalogue.providers.map((p) => ({
+    p,
+    d: Math.min(
+      ...fold(p.name)
+        .split(' ')
+        .filter((w) => w.length >= 3)
+        .map((w) => Math.min(distance(needle, w), distance(phoneticKey(needle), phoneticKey(w)) + 1)),
+    ),
+  }));
+  const best = Math.min(...scored.map((s) => s.d));
+  return scored.filter((s) => s.d === best).map((s) => s.p);
 }
 
 export function providersSpeaking(catalogue: Catalogue, language: string): Provider[] {

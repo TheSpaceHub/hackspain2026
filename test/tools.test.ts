@@ -132,8 +132,10 @@ check('an exact Vilar stays Vilar', providersByName({
   ...catalogue,
   providers: [...catalogue.providers, { ...catalogue.providers[0]!, id: 'PR4', name: 'Dr. Tomás Vilar' }],
 } as Catalogue, 'Vilar').map((p) => p.id), ['PR4']);
-check('Molina does not become an ambiguous doctor', providersByName(catalogue, 'Molina'), []);
-check('unrelated Pérez stays unmatched', providersByName(catalogue, 'Pérez'), []);
+// A garbled name always means one of our doctors: fall back to the nearest surname(s)
+// so the agent asks "Dr X?" rather than denying the doctor exists.
+check('a far-off name still yields the nearest doctor to confirm', providersByName(catalogue, 'Molina').length >= 1, true);
+check('a far-off name never yields nobody', providersByName(catalogue, 'Pérez').length >= 1, true);
 check('closure day has no hours anywhere', siteHours(catalogue, 'LOC_CENTRO', '2026-10-12'), []);
 check('Saturday hours at Centro', siteHours(catalogue, 'LOC_CENTRO', '2026-10-10'), ['09:00-14:00']);
 
