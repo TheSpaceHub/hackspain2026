@@ -4,6 +4,7 @@ import { describeError } from './errors.js';
 import { createAnthropicClient } from './models.js';
 import { deciderJsonSchema, deciderOutputSchema, type Action, type DeciderOutput } from './schema.js';
 import { formatTranscript, type TranscriptTurn } from './transcript.js';
+import { clog } from './log.js';
 
 /**
  * One LLM call, one action, on the transcript plus what the call established.
@@ -227,7 +228,7 @@ export function withoutDuplicates(output: DeciderOutput): DeciderOutput {
     return true;
   });
   if (actions.length === output.actions.length) return output;
-  console.warn(`[decider] dropped ${output.actions.length - actions.length} repeated action(s)`);
+  clog.warn(`[decider] dropped ${output.actions.length - actions.length} repeated action(s)`);
   return { ...output, actions };
 }
 

@@ -35,6 +35,7 @@ import {
 } from './call-state.js';
 import { geocodeMadrid, rankSites } from './nearest-site.js';
 import { resolveWhen } from './when.js';
+import { clog } from './log.js';
 
 export interface ToolDeps {
   state: CallState;
@@ -62,7 +63,7 @@ async function capped<T>(name: string, ms: number, work: Promise<T> | T): Promis
   try {
     return await Promise.race([
       Promise.resolve(work).catch((err: unknown) => {
-        console.error(`[tool ${name}] ${String(err)}`);
+        clog.error(`[tool ${name}] ${String(err)}`);
         return 'That lookup failed. Say the system is playing up, and offer to take their number.';
       }),
       new Promise<string>((resolve) => {
@@ -227,7 +228,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           const blocked = availability.blocked.map((entry) => entry.restriction).join('; ');
           if (blocked) {
             recordRequest(state, { blocked_by: blocked });
-            console.warn(`[find_slots] blocked: ${blocked}`);
+            clog.warn(`[find_slots] blocked: ${blocked}`);
           }
           return blocked
             ? `Nothing bookable: ${blocked}. Tell the caller plainly and do not offer a time.`

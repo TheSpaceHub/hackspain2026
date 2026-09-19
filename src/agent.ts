@@ -2,6 +2,7 @@ import { llm, voice } from '@livekit/agents';
 import { randomUUID } from 'node:crypto';
 import { buildTools, type ToolDeps } from './agent-tools.js';
 import type { CallState } from './call-state.js';
+import { clog } from './log.js';
 
 export const GREETING =
   "Good morning, Clínica Arenal, this is Ana speaking. How can I help you today?";
@@ -280,7 +281,7 @@ export class ReceptionistAgent extends voice.Agent {
           if (held === '') return;
           const call = printedToolCall(held.trim(), known);
           if (call) {
-            console.warn(`[agent] printed a ${call.name} tool call instead of making it`);
+            clog.warn(`[agent] printed a ${call.name} tool call instead of making it`);
             controller.enqueue({
               id: randomUUID(),
               delta: { role: 'assistant', toolCalls: [call] },
@@ -292,7 +293,7 @@ export class ReceptionistAgent extends voice.Agent {
             controller.enqueue(held);
             return;
           }
-          console.warn(
+          clog.warn(
             `[agent] unsalvageable printed call (tools: ${[...known].join(',')}): ${held.trim().slice(0, 300)}`,
           );
           this.printedCalls++;

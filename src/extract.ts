@@ -23,6 +23,7 @@ import {
   type PatientField,
 } from './call-state.js';
 import { config } from './config.js';
+import { clog } from './log.js';
 
 const PATIENT_FIELDS = [
   'given_name', 'first_surname', 'second_surname', 'national_id',
@@ -112,7 +113,7 @@ export function createExtractor(deps: ExtractorDeps): Extractor {
   const { state } = deps;
   const complete = deps.complete ?? workersAiComplete;
   const timeoutMs = deps.timeoutMs ?? DEFAULT_EXTRACT_TIMEOUT_MS;
-  const onError = deps.onError ?? ((message: string) => console.error(`[extract] ${message}`));
+  const onError = deps.onError ?? ((message: string) => clog.error(`[extract] ${message}`));
 
   // Serial: two extractions in flight would race on the same fields, and the later
   // exchange must win. A slow one therefore holds the next, which is fine — the caller
@@ -140,7 +141,7 @@ export function createExtractor(deps: ExtractorDeps): Extractor {
       else onError(`unparseable patch: ${raw.slice(0, 200)}`);
     } finally {
       const duration = Date.now() - startedAt;
-      if (duration > 6_000) console.warn(`[extract] slow: ${(duration / 1000).toFixed(1)}s`);
+      if (duration > 6_000) clog.warn(`[extract] slow: ${(duration / 1000).toFixed(1)}s`);
     }
   };
 
@@ -170,7 +171,7 @@ export function createExtractor(deps: ExtractorDeps): Extractor {
           }),
         ]);
         if (timedOut && queued > 0) {
-          console.warn(`[extract] settle: ${queued} exchanges still queued after ${Date.now() - startedAt}ms`);
+          clog.warn(`[extract] settle: ${queued} exchanges still queued after ${Date.now() - startedAt}ms`);
         }
       } finally {
         clearTimeout(timer);
@@ -198,7 +199,9 @@ export function parsePatch(raw: string): ExtractedPatch | null {
     else if (ch === '{') depth++;
     else if (ch === '}' && --depth === 0) {
       try {
-        const parsed = patchSchema.safeParse(JSON.parse(raw.slice(start, i + 1)));
+        const parsed = patchSchema.safeParse(
+          JSON.parse(raw.slice(start, i + 1), (_key, value) => (value === null ? undefined : value)),
+        );
         return parsed.success ? parsed.data : null;
       } catch {
         return null;
@@ -275,7 +278,7 @@ export function applyPatch(state: CallState, patch: ExtractedPatch, heard?: stri
     const value = real(patch.patient?.[field]);
     if (value === undefined) continue;
     if (heard !== undefined && !heardIt(field, value, heard)) {
-      console.warn(`[extract] dropped ${field} "${value}": not in what the caller said`);
+      clog.warn(`[extract] dropped ${field} "${value}": not in what the caller said`);
       continue;
     }
     const before = state.patient[field];
@@ -306,7 +309,9 @@ export function applyPatch(state: CallState, patch: ExtractedPatch, heard?: stri
     provider_name: real(patch.provider_name),
     when_phrase: real(patch.when_phrase),
     language: real(patch.language),
-    insurers: patch.insurers?.map(real).filter((i): i is string => i !== undefined),
+    insurers: patch.insurers
+      ?.map(real)
+      .filter((i): i is string => i !== undefined && /\p{L}/u.test(i)),
   };
   const changed = Object.fromEntries(
     Object.entries(request).filter(([key, value]) => {

@@ -31,6 +31,19 @@ check('prose around it is ignored', parsePatch('Sure! {"intent":"cancel"} hope t
 check('nothing usable is null, never a guess', parsePatch('I could not find anything'), null);
 check('a key outside the schema is dropped, not fatal', parsePatch('{"intent":"book","mood":"cross"}')?.intent, 'book');
 check('an invalid enum voids the patch rather than writing junk', parsePatch('{"intent":"chat"}'), null);
+{
+  const parsed = parsePatch(
+    '{"intent":"register","insurers":["1"],"language":null,"caller_name":null,"caller_is_patient":true,"patient":{"given_name":"Ana","email":null}}',
+  );
+  check('null fields no longer invalidate an otherwise valid patch', parsed?.intent, 'register');
+  check('null top-level fields are dropped', 'language' in (parsed ?? {}), false);
+  check('null caller names are dropped', 'caller_name' in (parsed ?? {}), false);
+  check('non-null caller fields survive', parsed?.caller_is_patient, true);
+}
+{
+  const parsed = parsePatch('{"patient":{"given_name":"Ana","email":null}}');
+  check('nested nulls are dropped without losing the patient patch', parsed?.patient, { given_name: 'Ana' });
+}
 
 // --- what may reach the notes -----------------------------------------------
 
@@ -50,7 +63,7 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
 
 {
   const state = createCallState('call-2');
-  applyPatch(state, { patient: { national_id: '4 8 0 6 4 7 1 6 y' }, insurers: ['Nueva Mutua Sanitaria'] });
+  applyPatch(state, { patient: { national_id: '4 8 0 6 4 7 1 6 y' }, insurers: ['1', 'Nueva Mutua Sanitaria'] });
   check('a spelled-out id is normalised on the way in', state.patient.national_id, '48064716Y');
   check('a spoken plan becomes its id', state.request.insurers, ['nueva_mutua_sanitaria']);
 

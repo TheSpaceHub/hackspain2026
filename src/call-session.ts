@@ -23,6 +23,7 @@ import {
   overrideFlooredBooking,
 } from './guards.js';
 import { mulawToPcm16 } from './mulaw.js';
+import { callContext } from './log.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
 import { submitActions, type SubmitResult } from './submit.js';
@@ -103,6 +104,7 @@ export class CallSession {
   // --- wire ---------------------------------------------------------------
 
   #onMessage(data: unknown): void {
+    if (this.#callId) callContext.enterWith(this.#callId);
     let msg: InboundMessage;
     try {
       msg = JSON.parse(String(data)) as InboundMessage;
@@ -136,38 +138,40 @@ export class CallSession {
 
     // start.callSid is the call_id; never mint one.
     this.#callId = msg.start?.callSid ?? msg.start?.streamSid ?? '';
-    this.#streamSid = msg.start?.streamSid ?? msg.streamSid ?? '';
-    this.#fromNumber = msg.start?.customParameters?.from_number;
-    this.#startedAt = Date.now();
-    this.#state = createCallState(this.#callId, this.#fromNumber);
-    this.#extractor = createExtractor({
-      state: this.#state,
-      onError: (message) => this.#errors.push(`extract: ${message}`),
+    callContext.run(this.#callId, () => {
+      this.#streamSid = msg.start?.streamSid ?? msg.streamSid ?? '';
+      this.#fromNumber = msg.start?.customParameters?.from_number;
+      this.#startedAt = Date.now();
+      this.#state = createCallState(this.#callId, this.#fromNumber);
+      this.#extractor = createExtractor({
+        state: this.#state,
+        onError: (message) => this.#errors.push(`extract: ${message}`),
+      });
+
+      // The line they rang from is a free directory query, and it resolves while the
+      // greeting is still playing — often before they finish their first sentence.
+      if (this.#state.from_number) this.#identifyByPhone(this.#state, this.#state.from_number);
+
+      console.log(
+        `[call ${this.#callId}] start · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
+      );
+
+      this.#shared.store.write({
+        type: 'call_started',
+        call_id: this.#callId,
+        stream_sid: this.#streamSid,
+        from_number: this.#fromNumber,
+        started_at: new Date(this.#startedAt).toISOString(),
+      });
+
+      // Never run past three minutes.
+      this.#wallClock = setTimeout(() => {
+        this.#endedBy = 'wall_clock';
+        void this.finish('wall_clock');
+      }, config.maxCallMs);
+
+      void this.#startSession();
     });
-
-    // The line they rang from is a free directory query, and it resolves while the
-    // greeting is still playing — often before they finish their first sentence.
-    if (this.#state.from_number) this.#identifyByPhone(this.#state, this.#state.from_number);
-
-    console.log(
-      `[call ${this.#callId}] start · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
-    );
-
-    this.#shared.store.write({
-      type: 'call_started',
-      call_id: this.#callId,
-      stream_sid: this.#streamSid,
-      from_number: this.#fromNumber,
-      started_at: new Date(this.#startedAt).toISOString(),
-    });
-
-    // Never run past three minutes.
-    this.#wallClock = setTimeout(() => {
-      this.#endedBy = 'wall_clock';
-      void this.finish('wall_clock');
-    }, config.maxCallMs);
-
-    void this.#startSession();
   }
 
   #onMedia(msg: { media?: { payload?: string } }): void {
