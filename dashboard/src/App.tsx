@@ -1,4 +1,3 @@
-import { History, LayoutDashboard, Radio } from 'lucide-react';
 import { useMemo } from 'react';
 import { FinishedCallsView } from '@/components/calls/finished-calls-view';
 import { AppShell, type NavItem } from '@/components/layout/app-shell';
@@ -10,12 +9,6 @@ import { useNow } from '@/hooks/use-now';
 import { useRoute, type View } from '@/hooks/use-route';
 import { callStatus } from '@/lib/agent/model';
 
-const TITLES: Record<View, string> = {
-  overview: 'Overview',
-  live: 'Live calls',
-  finished: 'Finished calls',
-};
-
 /** One feed for the whole console: a single SSE connection, whatever view is open. */
 export function App() {
   const feed = useCallFeed();
@@ -26,9 +19,9 @@ export function App() {
   const nav: NavItem[] = useMemo(() => {
     const live = feed.calls.filter((c) => callStatus(c, now) === 'live').length;
     return [
-      { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-      { id: 'live', label: 'Live', icon: Radio, count: live, pulse: live > 0 },
-      { id: 'finished', label: 'Finished', icon: History, count: feed.calls.length - live },
+      { id: 'overview', label: 'Overview' },
+      { id: 'live', label: 'Live', count: live, pulse: live > 0 },
+      { id: 'finished', label: 'Finished', count: feed.calls.length - live },
     ];
   }, [feed.calls, now]);
 
@@ -39,7 +32,6 @@ export function App() {
       nav={nav}
       active={route.view}
       onNavigate={(id) => navigate({ view: id as View, callId: null })}
-      title={TITLES[route.view]}
       clinicApi={health?.clinic_api ?? null}
     >
       {route.view === 'overview' ? (

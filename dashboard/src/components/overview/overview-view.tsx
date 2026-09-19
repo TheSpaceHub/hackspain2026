@@ -57,7 +57,7 @@ export function OverviewView({ feed, onOpenCall, onViewFinished }: OverviewViewP
   const rate = t && t.ended ? Math.round((t.with_record / t.ended) * 100) : null;
 
   return (
-    <div className="mx-auto max-w-[1440px] space-y-4 px-4 pb-4">
+    <div className="space-y-4 p-4">
       <div className="flex items-center justify-between gap-4">
         <Tabs value={rangeId} onValueChange={(v) => setRangeId(v as RangeId)}>
           <TabsList aria-label="Time range">
@@ -80,7 +80,7 @@ export function OverviewView({ feed, onOpenCall, onViewFinished }: OverviewViewP
 
       {/* Held at reduced opacity while a new range loads — no skeleton, no jump. */}
       <div className={cn('space-y-4 transition-opacity', stale && 'opacity-60')}>
-        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <KpiTile
             icon={Radio}
             label="Calls in progress"
@@ -118,14 +118,14 @@ export function OverviewView({ feed, onOpenCall, onViewFinished }: OverviewViewP
 
         {stats && (
           <>
-            <div className="grid gap-4 xl:grid-cols-3">
-              <div className="xl:col-span-2">
+            <div className="grid gap-4 lg:grid-cols-3">
+              <div className="lg:col-span-2">
                 <VolumeCard stats={stats} range={range} />
               </div>
               <OutcomesCard stats={stats} range={range} />
             </div>
-            <div className="grid gap-4 xl:grid-cols-3">
-              <div className="xl:col-span-2">
+            <div className="grid gap-4 lg:grid-cols-3">
+              <div className="lg:col-span-2">
                 <RecentCallsCard calls={feed.calls} now={now} onOpen={onOpenCall} onViewAll={onViewFinished} />
               </div>
               <PipelineHealthCard stats={stats} />

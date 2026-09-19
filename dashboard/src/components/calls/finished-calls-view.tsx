@@ -44,7 +44,7 @@ export function FinishedCallsView({ feed, selectedId, onSelect: select }: Finish
   }, [selectedId, loaded, loadCall]);
 
   return (
-    <div className="grid h-full grid-cols-[360px_1fr] gap-4 px-4 pb-4">
+    <div className="grid h-full grid-cols-[360px_1fr] gap-4 p-4">
       <Card size="sm" className="min-h-0 gap-0 py-0">
         <CallList calls={finished} selectedId={selectedId} onSelect={select} now={now} />
       </Card>
