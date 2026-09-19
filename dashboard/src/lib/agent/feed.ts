@@ -78,6 +78,11 @@ function applyEvent(state: FeedState, e: FeedEvent): FeedState {
       return withCall(state, e.call_id, (prev) =>
         mergeCall(prev, { ...emptyCall(e.call_id, new Date().toISOString()), submissions: [toSubmission(e)] }),
       );
+
+    case 'call_alerts':
+      return withCall(state, e.call_id, (prev) =>
+        mergeCall(prev, { ...emptyCall(e.call_id, new Date().toISOString()), alerts: e.alerts }),
+      );
   }
 }
 
@@ -146,5 +151,6 @@ export function mergeCall(prev: Call | undefined, next: Call): Call {
         : next.outcomes.length > 0
           ? next.outcomes
           : prev.outcomes,
+    alerts: known(next.alerts, prev.alerts),
   };
 }

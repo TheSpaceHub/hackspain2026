@@ -1,4 +1,4 @@
-import { History, Radio, ShieldCheck, Timer, Unplug } from 'lucide-react';
+import { Radio, ShieldCheck, Timer, TriangleAlert, Unplug } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { EmptyState } from '@/components/calls/empty-state';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -12,13 +12,10 @@ import { cn } from '@/lib/utils';
 import { KpiTile } from './kpi-tile';
 import { OutcomesCard } from './outcomes-card';
 import { PipelineHealthCard } from './pipeline-health-card';
-import { RecentCallsCard } from './recent-calls-card';
 import { VolumeCard } from './volume-card';
 
 interface OverviewViewProps {
   feed: CallFeed;
-  onOpenCall: (id: string) => void;
-  onViewFinished: () => void;
 }
 
 /**
@@ -26,7 +23,7 @@ interface OverviewViewProps {
  * shape behind them. One range filter scopes everything below it; "in progress"
  * is the exception, because it is now by definition.
  */
-export function OverviewView({ feed, onOpenCall, onViewFinished }: OverviewViewProps) {
+export function OverviewView({ feed }: OverviewViewProps) {
   const [rangeId, setRangeId] = useState<RangeId>('today');
   const range = RANGES.find((r) => r.id === rangeId)!;
   const now = useNow(5_000);
@@ -36,10 +33,8 @@ export function OverviewView({ feed, onOpenCall, onViewFinished }: OverviewViewP
 
   const trends = useMemo(() => {
     const series = stats?.series ?? [];
-    let running = 0;
     return {
       started: series.map((b) => b.calls),
-      finished: series.map((b) => (running += b.calls)),
       recordRate: series.map((b) => (b.calls ? b.with_record / b.calls : null)),
       length: series.map((b) => b.call_ms_p50),
     };
@@ -91,12 +86,16 @@ export function OverviewView({ feed, onOpenCall, onViewFinished }: OverviewViewP
             trendLabel={`Calls started ${range.phrase}`}
           />
           <KpiTile
-            icon={History}
-            label="Finished calls"
-            value={t ? t.ended : '—'}
-            hint={t ? `${range.phrase[0]!.toUpperCase()}${range.phrase.slice(1)}` : ' '}
-            trend={trends.finished}
-            trendLabel={`Calls finished, cumulative ${range.phrase}`}
+            icon={TriangleAlert}
+            label="Calls with alerts"
+            value={t ? t.flagged : '—'}
+            hint={
+              t
+                ? t.flagged
+                  ? `${t.critical} critical · of ${t.ended} finished ${range.phrase}`
+                  : `None of ${t.ended} finished ${range.phrase}`
+                : ' '
+            }
           />
           <KpiTile
             icon={ShieldCheck}
@@ -117,20 +116,14 @@ export function OverviewView({ feed, onOpenCall, onViewFinished }: OverviewViewP
         </div>
 
         {stats && (
-          <>
-            <div className="grid gap-4 lg:grid-cols-3">
-              <div className="lg:col-span-2">
-                <VolumeCard stats={stats} range={range} />
-              </div>
-              <OutcomesCard stats={stats} range={range} />
+          // Volume and health stack on the left; outcomes, which grows with its reasons, takes the full height on the right.
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="flex flex-col gap-4 lg:col-span-2">
+              <VolumeCard stats={stats} range={range} />
+              <PipelineHealthCard stats={stats} className="flex-1" />
             </div>
-            <div className="grid gap-4 lg:grid-cols-3">
-              <div className="lg:col-span-2">
-                <RecentCallsCard calls={feed.calls} now={now} onOpen={onOpenCall} onViewAll={onViewFinished} />
-              </div>
-              <PipelineHealthCard stats={stats} />
-            </div>
-          </>
+            <OutcomesCard stats={stats} range={range} />
+          </div>
         )}
       </div>
     </div>

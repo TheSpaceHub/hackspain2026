@@ -1,3 +1,5 @@
+import type { Alert } from './alerts.js';
+
 /**
  * Aggregates for the console's overview, computed from one row per call. Pure, so
  * the worker only runs the query and this decides what the numbers mean.
@@ -14,8 +16,12 @@ export interface StatsRow {
   used_floor: number;
   /** The first accepted (200/409) action on the call, or null when nothing was accepted. */
   outcome: string | null;
+  /** That action's `reason` (no_action, escalate), when it carries one. */
+  outcome_reason: string | null;
   /** Every submission attempted, accepted or not. */
   submissions: number;
+  /** JSON Alert[], derived by the worker; null until it has run. */
+  alerts: string | null;
 }
 
 export interface Distribution {
@@ -38,9 +44,17 @@ export interface Stats {
     rejected: number;
     /** The decider failed and the always-submit floor answered. */
     floor_used: number;
+    /** Ended with at least one alert. */
+    flagged: number;
+    /** Ended with a critical alert: lost whatever the case was. */
+    critical: number;
   };
+  /** Ended calls carrying each alert. */
+  alerts: Record<string, number>;
   /** Ended calls by the first accepted action; `none` for no record. */
   outcomes: Record<string, number>;
+  /** The same calls by reason, per action that carries one: `{ no_action: { out_of_scope: 3 } }`. */
+  reasons: Record<string, Record<string, number>>;
   latency: {
     call_ms: Distribution;
     session_start_ms: Distribution;
@@ -50,6 +64,16 @@ export interface Stats {
   bucket_ms: number;
   /** Calls started per bucket, oldest first, from `since` (or the first call) to now. */
   series: { at: string; calls: number; with_record: number; call_ms_p50: number | null }[];
+}
+
+function parseAlerts(json: string | null): Pick<Alert, 'id' | 'level'>[] {
+  if (!json) return [];
+  try {
+    const list: unknown = JSON.parse(json);
+    return Array.isArray(list) ? (list as Alert[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 function quantile(sorted: number[], q: number): number | null {
@@ -70,10 +94,25 @@ export function computeStats(rows: StatsRow[], since: string | null, bucketMs: n
   const ended = rows.filter((r) => r.ended_at !== null);
   const withRecord = ended.filter((r) => r.outcome !== null);
 
+  const alerts: Record<string, number> = {};
+  let flagged = 0;
+  let critical = 0;
+  for (const r of ended) {
+    const list = parseAlerts(r.alerts);
+    if (list.length > 0) flagged++;
+    if (list.some((a) => a.level === 'critical')) critical++;
+    for (const id of new Set(list.map((a) => a.id))) alerts[id] = (alerts[id] ?? 0) + 1;
+  }
+
   const outcomes: Record<string, number> = {};
+  const reasons: Record<string, Record<string, number>> = {};
   for (const r of ended) {
     const key = r.outcome ?? 'none';
     outcomes[key] = (outcomes[key] ?? 0) + 1;
+    if (r.outcome && r.outcome_reason) {
+      const byReason = (reasons[r.outcome] ??= {});
+      byReason[r.outcome_reason] = (byReason[r.outcome_reason] ?? 0) + 1;
+    }
   }
 
   // The series starts where the range does, or at the first call for "all time",
@@ -111,8 +150,12 @@ export function computeStats(rows: StatsRow[], since: string | null, bucketMs: n
       without_record: ended.length - withRecord.length,
       rejected: ended.filter((r) => r.outcome === null && r.submissions > 0).length,
       floor_used: ended.filter((r) => r.used_floor === 1).length,
+      flagged,
+      critical,
     },
+    alerts,
     outcomes,
+    reasons,
     latency: {
       call_ms: distribution(ended.map((r) => r.call_ms)),
       session_start_ms: distribution(ended.map((r) => r.session_start_ms)),

@@ -26,22 +26,30 @@ export function FinishedCallsView({ feed, selectedId, onSelect: select }: Finish
   const finished = useMemo(() => feed.calls.filter((c) => callStatus(c, now) !== 'live'), [feed.calls, now]);
   const selected = selectedId ? feed.calls.find((c) => c.id === selectedId) : undefined;
 
-  const { loadCall } = feed;
+  const { loadCall, connected } = feed;
+
+  // A reconnect means the agent may have restarted mid-load: fetch the open call again.
   useEffect(() => {
-    if (!selectedId || loaded.has(selectedId)) return;
+    if (connected) setLoaded(new Set());
+  }, [connected]);
+
+  useEffect(() => {
+    if (!selectedId || !connected || loaded.has(selectedId)) return;
     let cancelled = false;
     setLoading(selectedId);
     loadCall(selectedId)
+      .then(() => {
+        // Only a load that worked counts; a failed one is retried on the next reconnect.
+        if (!cancelled) setLoaded((prev) => new Set(prev).add(selectedId));
+      })
       .catch((err: unknown) => console.warn('[calls] could not load', selectedId, err))
       .finally(() => {
-        if (cancelled) return;
-        setLoaded((prev) => new Set(prev).add(selectedId));
-        setLoading(null);
+        if (!cancelled) setLoading(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [selectedId, loaded, loadCall]);
+  }, [selectedId, connected, loaded, loadCall]);
 
   return (
     <div className="grid h-full grid-cols-[360px_1fr] gap-4 p-4">

@@ -35,7 +35,7 @@ export function App() {
       clinicApi={health?.clinic_api ?? null}
     >
       {route.view === 'overview' ? (
-        <OverviewView feed={feed} onOpenCall={openFinished} onViewFinished={() => openFinished(null)} />
+        <OverviewView feed={feed} />
       ) : route.view === 'live' ? (
         <LiveView
           feed={feed}

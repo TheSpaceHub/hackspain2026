@@ -105,7 +105,12 @@ export function RecordCard({ call }: { call: Call }) {
         </dl>
 
         <div className="space-y-2">
-          {call.submissions.length === 0 ? (
+          {call.submissions.length === 0 && call.outcomes.length > 0 ? (
+            // The list knows actions were sent; their bodies just are not loaded yet.
+            <p className="text-sm text-muted-foreground">
+              {call.outcomes.length} {call.outcomes.length === 1 ? 'submission' : 'submissions'} on record — loading details…
+            </p>
+          ) : call.submissions.length === 0 ? (
             <p className="flex items-center gap-1.5 text-sm text-red-700">
               <TriangleAlert className="size-4" />
               Nothing was submitted — always a failed case.
