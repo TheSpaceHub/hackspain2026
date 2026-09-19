@@ -280,12 +280,13 @@ function harness(
 {
   const h = harness();
   const ambiguous = await h.call('find_slots', { when_phrase: 'tomorrow', provider_name: 'Sáe' });
-  check('a name matching two doctors is a question, not a guess', /Ask which one/.test(ambiguous), true);
+  check('a name matching two doctors is a spelling request, not a guess', /spell the surname/.test(ambiguous), true);
   check('and nothing is looked up until it is answered', h.clinic.requests.some((r) => r.path === '/api/v1/availability'), false);
 
   const doctor = await h.call('clinic_fact', { doctor_name: 'Cid' });
   check('a doctor is described off the catalogue', /physiotherapy/.test(doctor), true);
-  check('a garbled doctor name is never denied', /No doctor of that name/.test(await h.call('clinic_fact', { doctor_name: 'House' })), false);
+  const garbled = await h.call('clinic_fact', { doctor_name: 'House' });
+  check('a garbled doctor name asks for the spelling, never denies', /spell the surname/.test(garbled) && !/No doctor of that name/.test(garbled), true);
   check('a site closed that day says so', /closed that day/.test(await h.call('clinic_fact', { location_id: 'loc_norte', date: '2026-10-10' })), true);
 }
 

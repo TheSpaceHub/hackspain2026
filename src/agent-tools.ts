@@ -116,6 +116,16 @@ function resolve(
   return lookup(catalogue, said);
 }
 
+/**
+ * A doctor's name that is not one unmistakable match is never resolved here: the agent
+ * asks the caller to spell it. The nearest surnames go along so it can offer them.
+ */
+function spellDoctor(catalogue: Catalogue, spoken: string, found: Catalogue['providers']): string {
+  const candidates = found.length > 0 ? found : providersByName(catalogue, spoken, true);
+  const names = candidates.map((p) => `${p.name} (${p.specialty_name ?? 'unknown'})`).join(', ');
+  return `"${spoken}" is not a clear match for one doctor${names ? `; it could be ${names}` : ''}. Ask the caller to spell the surname letter by letter and read it back, then look again. Do not pick one, and do not say we have no such doctor.`;
+}
+
 /** Plans the clinic actually sells. A misheard insurer is dropped, not priced against. */
 function knownPlanIds(catalogue: Catalogue | null, spoken: string[]): string[] {
   if (!catalogue) return [];
@@ -198,10 +208,8 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         let providerId = request.provider_id;
         let namedProvider: Catalogue['providers'][number] | undefined;
         if (args.provider_name && catalogue) {
-          const found = providersByName(catalogue, args.provider_name, true);
-          if (found.length > 1) {
-            return `The name was unclear; the doctors it could be: ${found.map((p) => `${p.name} in ${p.specialty_name ?? 'unknown'}`).join(', ')}. Ask which one they mean (never say we have no such doctor).`;
-          }
+          const found = providersByName(catalogue, args.provider_name);
+          if (found.length !== 1) return spellDoctor(catalogue, args.provider_name, found);
           if (found.length === 1) {
             namedProvider = found[0]!;
             providerId = namedProvider.id;
@@ -461,10 +469,8 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
       execute: async (args) => {
         if (!catalogue) return 'Cannot check that from here. Tell the caller the clinic will confirm.';
         if (args.doctor_name) {
-          const found = providersByName(catalogue, args.doctor_name, true);
-          if (found.length > 1) {
-            return `The name was unclear; it could be: ${found.map((p) => `${p.name} in ${p.specialty_name ?? 'unknown'}`).join(', ')}. Ask which one they mean (never say we have no such doctor).`;
-          }
+          const found = providersByName(catalogue, args.doctor_name);
+          if (found.length !== 1) return spellDoctor(catalogue, args.doctor_name, found);
           return found
             .map(
               (p) =>

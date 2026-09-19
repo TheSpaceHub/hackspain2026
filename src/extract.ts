@@ -78,7 +78,7 @@ Rules:
 - caller_is_patient is false only when the caller says the appointment is for someone else; set relationship when they name it.
 - retracted lists fields the caller corrected and has not yet replaced.
 - when_phrase is the caller's own words for when they want to come ("Thursday morning"), never a date you computed.
-- provider_name, insurers and specialty_id must name items in the clinic's fixed vocabulary; what the caller said is always one of them, garbled by transcription ("Sayas" → Sáez, "Fenitas" → sanitas), so write the closest list item; null only if nothing on the list is plausible.
+- provider_name, insurers and specialty_id must name items in the clinic's fixed vocabulary; write one only when what the caller said is unmistakably that item or they spelled it; anything doubtful ("Sayas", "Fenitas") is null — never the closest guess.
 
 Schema: {"patient":{"given_name","first_surname","second_surname","national_id","date_of_birth","phone","email","insurer"},"retracted":[],"intent":"book|reschedule|cancel|register|question","complaint","specialty_id","provider_name","when_phrase","language","insurers":[],"caller_is_patient":bool,"caller_name","relationship"}`;
 
