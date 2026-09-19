@@ -1,8 +1,8 @@
-import { FlaskConical, Globe, Hospital, Phone } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { FlaskConical, Globe, Hospital, Phone, Unplug } from 'lucide-react';
+import { useEffect, type ReactNode } from 'react';
 import { useNow } from '@/hooks/use-now';
 import { formatClock, formatDay } from '@/lib/format';
-import { isSimUrl } from '@/lib/sim/client';
+import { MODE_LABEL, type ConsoleMode } from '@/lib/mode';
 import { cn } from '@/lib/utils';
 
 export interface NavItem {
@@ -19,7 +19,8 @@ interface AppShellProps {
   onNavigate: (id: string) => void;
   /** The clinic API the agent is wired to, from its /health. */
   clinicApi: string | null;
-  /** A shared clinic (sim/) answers on /__sim — a local clinic API is then that, not the mock. */
+  mode: ConsoleMode;
+  /** A shared clinic (sim/) answers on /__sim — shown when the agent is not using it. */
   simRunning: boolean;
   children: ReactNode;
 }
@@ -83,20 +84,57 @@ function Tabs({ nav, active, onNavigate }: Pick<AppShellProps, 'nav' | 'active' 
   );
 }
 
+const MODE_ICON = { live: Globe, simulation: Hospital, mock: FlaskConical, unknown: Unplug } as const;
+
+const MODE_PILL: Record<ConsoleMode, string> = {
+  live: 'border-emerald-600/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300',
+  simulation: 'border-violet-600/40 bg-violet-500/10 text-violet-800 dark:text-violet-300',
+  mock: 'border-amber-600/40 bg-amber-500/10 text-amber-800 dark:text-amber-300',
+  unknown: 'border-border bg-muted text-muted-foreground',
+};
+
 /**
- * Which clinic the agent submits to. Worth having in sight at all times: a test run
+ * Which world the agent submits to. Worth having in sight at all times: a test run
  * against the real board leaves real records.
  */
-function ClinicApi({ url, simRunning }: { url: string | null; simRunning: boolean }) {
-  const local = !!url && /\/\/(127\.0\.0\.1|localhost|\[::1\])/.test(url);
-  const sim = local && simRunning && isSimUrl(url);
-  const Icon = sim ? Hospital : local ? FlaskConical : Globe;
+function ModePill({ mode, url }: { mode: ConsoleMode; url: string | null }) {
+  const Icon = MODE_ICON[mode];
   return (
-    <span className="flex items-center gap-1.5" title={url ? `Clinic API · ${url}` : 'Clinic API unknown'}>
-      <Icon className="size-4" />
-      {url ? (sim ? 'Shared clinic' : local ? 'Local mock' : 'Prosper') : '—'}
+    <span
+      className={cn('flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide', MODE_PILL[mode])}
+      title={url ? `Clinic API · ${url}` : 'The agent did not answer /health'}
+    >
+      <Icon className="size-3.5" />
+      {MODE_LABEL[mode]}
     </span>
   );
+}
+
+/** A strip under the header for the two states that must never be confused. */
+function ModeBanner({ mode, url, simRunning }: { mode: ConsoleMode; url: string | null; simRunning: boolean }) {
+  if (mode === 'simulation') {
+    return (
+      <div className="flex shrink-0 items-center gap-2 border-b border-violet-600/30 bg-violet-500/10 px-4 py-1 text-xs text-violet-900 dark:text-violet-200">
+        <Hospital className="size-3.5" />
+        <b className="font-semibold">Simulation.</b> Calls book into the shared local clinic ({url}) — nothing here reaches Prosper. Reset it from the
+        Clinic tab.
+      </div>
+    );
+  }
+  if (mode === 'live') {
+    return (
+      <div className="flex shrink-0 items-center gap-2 border-b border-emerald-600/30 bg-emerald-500/10 px-4 py-1 text-xs text-emerald-900 dark:text-emerald-200">
+        <Globe className="size-3.5" />
+        <b className="font-semibold">Live.</b> Calls book into the real clinic ({url}).
+        {simRunning && (
+          <span className="text-emerald-900/70 dark:text-emerald-200/70">
+            A sim is running on this machine but the agent is not using it — start the agent with <code className="font-mono">pnpm start:sim</code>.
+          </span>
+        )}
+      </div>
+    );
+  }
+  return null;
 }
 
 function Clock() {
@@ -110,18 +148,22 @@ function Clock() {
   );
 }
 
-export function AppShell({ nav, active, onNavigate, clinicApi, simRunning, children }: AppShellProps) {
+export function AppShell({ nav, active, onNavigate, clinicApi, mode, simRunning, children }: AppShellProps) {
+  useEffect(() => {
+    document.title = mode === 'simulation' ? '[SIM] Agent la L' : mode === 'live' ? '[LIVE] Agent la L' : 'Agent la L';
+  }, [mode]);
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background">
       <header className="flex h-12 shrink-0 items-center gap-6 border-b px-4">
         <Brand />
         <Tabs nav={nav} active={active} onNavigate={onNavigate} />
         <div className="ml-auto flex items-center gap-4 text-sm text-muted-foreground">
-          <ClinicApi url={clinicApi} simRunning={simRunning} />
+          <ModePill mode={mode} url={clinicApi} />
           <span className="h-4 w-px bg-border" />
           <Clock />
         </div>
       </header>
+      <ModeBanner mode={mode} url={clinicApi} simRunning={simRunning} />
       <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
     </div>
   );

@@ -187,12 +187,16 @@ curl -N localhost:8788/__sim/events?since=0 # every hold, release, booking… as
   landing on the same cell at the same instant cannot both win.
 - `test/sim.test.ts` covers the diary, the holds, the window, persistence and the SSE
   stream against the bundled catalogue and a fixed clock; `pnpm test:sim`.
-- **The console shows it.** With the sim up, the dashboard grows a **Clinic** tab: each
-  provider's day as 15-minute cells (the clinic's own bookings, ones made by calls, slots
-  on hold coloured per call), the live holds with their countdown, the event stream, and
-  Reset / Re-snapshot. A call's holds and bookings also appear on its transcript, and
-  everything links back to the call. The tab is absent when nothing answers on `/__sim`
-  (Vite proxies it to `VITE_SIM_ORIGIN`, default `http://localhost:8788`).
+- **The console has two modes, decided by the agent.** It reads the agent's `/health`
+  `clinic_api`: pointed at real Prosper (`pnpm start`) the console is **Live** — green
+  pill and banner, the dashboard as it always was. Pointed at the sim (`pnpm start:sim`)
+  it is **Simulation** — violet pill and banner, `[SIM]` in the tab title, and a
+  **Clinic** tab: each provider's day as 15-minute cells (the clinic's own bookings,
+  ones made by calls, slots on hold coloured per call), the live holds with their
+  countdown, the event stream, and Reset / Re-snapshot. A call's holds and bookings
+  also appear on its transcript, and everything links back to the call. A sim running
+  next to a live agent is not simulation mode — the banner says so and the Clinic tab
+  stays hidden (Vite proxies `/__sim` to `VITE_SIM_ORIGIN`, default `http://localhost:8788`).
 
 ### Reading the call log
 

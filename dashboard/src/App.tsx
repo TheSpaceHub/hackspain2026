@@ -11,6 +11,7 @@ import { useRoute, type View } from '@/hooks/use-route';
 import { SimContext, type SimContextValue } from '@/hooks/sim-context';
 import { useSimFeed } from '@/hooks/use-sim-feed';
 import { callStatus } from '@/lib/agent/model';
+import { consoleMode } from '@/lib/mode';
 import { liveHolds } from '@/lib/sim/model';
 
 /**
@@ -23,6 +24,8 @@ export function App() {
   const health = useAgentHealth(feed.connected);
   const [route, navigate] = useRoute();
   const now = useNow(5_000);
+  const clinicApi = health?.clinic_api ?? null;
+  const mode = consoleMode(clinicApi);
 
   const nav: NavItem[] = useMemo(() => {
     const live = feed.calls.filter((c) => callStatus(c, now) === 'live').length;
@@ -31,13 +34,13 @@ export function App() {
       { id: 'live', label: 'Live', count: live, pulse: live > 0 },
       { id: 'finished', label: 'Finished', count: feed.calls.length - live },
     ];
-    // The clinic tab only when there is a clinic to show: against real Prosper there is none.
-    if (sim.available || route.view === 'clinic') {
+    // The clinic tab belongs to simulation mode only: in live mode the clinic is Prosper's, not ours.
+    if (mode === 'simulation' || route.view === 'clinic') {
       const holds = liveHolds(sim.holds, now).length;
       items.push({ id: 'clinic', label: 'Clinic', count: holds, pulse: holds > 0 });
     }
     return items;
-  }, [feed.calls, now, sim.available, sim.holds, route.view]);
+  }, [feed.calls, now, mode, sim.holds, route.view]);
 
   const openFinished = (callId: string | null): void => navigate({ view: 'finished', callId });
   /** From the clinic to the call that did it: live if it still is, finished otherwise. */
@@ -58,7 +61,8 @@ export function App() {
         nav={nav}
         active={route.view}
         onNavigate={(id) => navigate({ view: id as View, callId: null })}
-        clinicApi={health?.clinic_api ?? null}
+        clinicApi={clinicApi}
+        mode={mode}
         simRunning={sim.available === true}
       >
         {route.view === 'overview' ? (
@@ -69,7 +73,7 @@ export function App() {
             date={route.callId}
             onDate={(date) => navigate({ view: 'clinic', callId: date })}
             onOpenCall={openCall}
-            agentClinicApi={health?.clinic_api ?? null}
+            agentClinicApi={clinicApi}
           />
         ) : route.view === 'live' ? (
           <LiveView

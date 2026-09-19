@@ -75,8 +75,8 @@ export function ClinicView({ sim, date: routeDate, onDate, onOpenCall, agentClin
     return (
       <div className="h-full p-4">
         <EmptyState icon={Unplug} title="No shared clinic running">
-          The console looks for the sim on :8788. Start it with <code className="font-mono text-xs">pnpm sim</code> and point the agent at it
-          with <code className="font-mono text-xs">PROSPER_API_BASE_URL=http://127.0.0.1:8788 SIM_HOLDS=1</code>.
+          Simulation mode needs the sim on :8788 and the agent pointed at it: <code className="font-mono text-xs">pnpm sim</code> then{' '}
+          <code className="font-mono text-xs">pnpm start:sim</code>. Live mode is the plain <code className="font-mono text-xs">pnpm start</code>.
         </EmptyState>
       </div>
     );
@@ -156,8 +156,8 @@ export function ClinicView({ sim, date: routeDate, onDate, onOpenCall, agentClin
 
       {agentElsewhere && (
         <p className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-          The agent is submitting to <span className="font-mono">{agentClinicApi}</span>, not to this clinic — calls will not show up here. Point it
-          at the sim with <code className="font-mono">PROSPER_API_BASE_URL=http://127.0.0.1:8788 SIM_HOLDS=1</code>.
+          The console is in live mode: the agent submits to <span className="font-mono">{agentClinicApi}</span>, not to this clinic, so calls
+          will not show up here. For simulation mode restart the agent with <code className="font-mono">pnpm start:sim</code>.
         </p>
       )}
 
