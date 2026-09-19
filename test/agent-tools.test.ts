@@ -305,6 +305,55 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   );
   check('a placeholder address is bounced back as a question', /Ask them which street/.test(near), true);
 
+  // "I'm at Calle de Alcalá 54, where can you see me on Thursday?" — the address goes to
+  // the geocoder while the day goes to the diary, and the answer is one appointment at
+  // the nearest site that can actually take them.
+  {
+    const nearClinic = new FakeClinic();
+    let askedDiaryAt = 0;
+    const nearApi = new ClinicApi({
+      baseUrl: 'https://fake.local',
+      apiKey: 'k',
+      fetch: ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        askedDiaryAt = Date.now();
+        return nearClinic.fetch(input, init);
+      }) as typeof fetch,
+    });
+    const nearState = createCallState('call-nearest');
+    let placedAt = 0;
+    const geoTools = buildTools({
+      state: nearState,
+      api: nearApi,
+      catalogue,
+      now: () => NOW,
+      geocode: async (address) => {
+        await new Promise((done) => setTimeout(done, 30));
+        placedAt = Date.now();
+        return { latitude: 40.4195, longitude: -3.6921, address: `${address}, Madrid`, exact: true };
+      },
+    }) as unknown as Record<string, llm.FunctionTool>;
+
+    const answer = String(
+      await geoTools.nearest_site!.execute(
+        { address: 'Calle de Alcalá 54', specialty_id: 'general practice', when_phrase: 'tomorrow' } as never,
+        {} as never,
+      ),
+    );
+    check('the diary is asked while the address is still being placed', askedDiaryAt < placedAt, true);
+    check('and it was the diary that was asked', nearClinic.requests[0]?.path, '/api/v1/availability');
+    check('the nearest site that can see them is proposed', /Arenal Centro: /.test(answer), true);
+    check('and the proposed slot is quoted, so accept_slot can take it', nearState.quoted.length, 1);
+
+    const three = String(
+      await geoTools.nearest_site!.execute({ address: 'Calle de Alcalá 54' } as never, {} as never),
+    );
+    check(
+      'without a day they still get the three nearest, in order',
+      /Arenal Centro about .*Arenal Sur about .*Arenal Norte about/.test(three),
+      true,
+    );
+  }
+
   const identified = String(
     await tools.identify_patient!.execute({ name: 'unknown' } as never, {} as never),
   );

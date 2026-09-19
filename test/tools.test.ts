@@ -10,7 +10,7 @@
 
 import { normalizeNationalId, normalizePhone, normalizeEmail, normalizeDate, normalizeName } from '../src/normalize.js';
 import { resolveWhen, madridDate, addDays } from '../src/when.js';
-import { rankSites, haversineKm } from '../src/nearest-site.js';
+import { rankSites, haversineKm, flatKm, metricAt, geocodeMadrid } from '../src/nearest-site.js';
 import { detectMedicalEmergency, applyEmergencyGuard, appointmentKindFor, enforceAppointmentType } from '../src/guards.js';
 import { providersByName, siteHours, type Catalogue } from '../src/clinic-api.js';
 import {
@@ -118,6 +118,66 @@ check(
   ['LOC_NORTE'],
 );
 check('distance is straight-line km', Math.round(haversineKm({ latitude: 40.4168, longitude: -3.7038 }, { latitude: 40.4762, longitude: -3.6882 })), 7);
+check('the three nearest, and no more, are what the caller is read', rankSites(catalogue, origin).slice(0, 3).length, 3);
+
+// The projection is fixed once per caller and each site is then arithmetic; across a
+// city that has to agree with the great circle to within a house's width.
+{
+  const metric = metricAt(origin.latitude);
+  const worst = Math.max(
+    ...catalogue.locations.map((l) => {
+      const site = { latitude: l.latitude!, longitude: l.longitude! };
+      return Math.abs(flatKm(metric, origin, site) - haversineKm(origin, site));
+    }),
+  );
+  check('flat ranking agrees with the great circle', worst < 0.02, true);
+}
+
+// --- geocoding -------------------------------------------------------------
+
+{
+  const googled = (body: unknown): typeof globalThis.fetch =>
+    (async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof globalThis.fetch;
+
+  const rooftop = await geocodeMadrid('Calle de Alcalá 54', {
+    apiKey: 'test',
+    fetch: googled({
+      status: 'OK',
+      results: [
+        {
+          formatted_address: 'C. de Alcalá 54, Madrid',
+          geometry: { location: { lat: 40.4195, lng: -3.6921 }, location_type: 'ROOFTOP' },
+        },
+      ],
+    }),
+  });
+  check('a door number is placed exactly', [rooftop?.latitude, rooftop?.exact], [40.4195, true]);
+
+  const street = await geocodeMadrid('Calle de Alcalá', {
+    apiKey: 'test',
+    fetch: googled({
+      status: 'OK',
+      results: [{ geometry: { location: { lat: 40.42, lng: -3.69 }, location_type: 'GEOMETRIC_CENTER' } }],
+    }),
+  });
+  check('a street centroid is flagged as not the number', street?.exact, false);
+
+  const nowhere = await geocodeMadrid('Calle que no existe', {
+    apiKey: 'test',
+    fetch: googled({ status: 'ZERO_RESULTS', results: [] }),
+  });
+  check('an address nobody can place is nothing, not a guess', nowhere, null);
+
+  let asked = '';
+  await geocodeMadrid('Gran Vía 1', {
+    apiKey: '',
+    fetch: (async (url: URL) => {
+      asked = String(url);
+      return new Response('[]', { status: 200 });
+    }) as unknown as typeof globalThis.fetch,
+  });
+  check('without a Google key the open geocoder answers', asked.includes('nominatim'), true);
+}
 
 // --- catalogue queries -----------------------------------------------------
 
