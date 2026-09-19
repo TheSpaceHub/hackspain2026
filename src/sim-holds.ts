@@ -1,9 +1,9 @@
 /**
- * Opt-in: `SIM_HOLDS=1` with `PROSPER_API_BASE_URL` pointing at the local sim
- * (`pnpm sim`). Off — the default — nothing here runs and the agent talks to
- * Prosper exactly as before.
+ * What a call does differently in simulation mode (`clinic-target.ts`): the agent
+ * boots into it with `SIM_HOLDS=1`, or is switched into it from the console. In live
+ * mode nothing here runs and the agent talks to Prosper exactly as before.
  *
- * On, two things happen. Every request carries the call's id (`X-Sim-Call-Id`), so
+ * In simulation, two things happen. Every request carries the call's id (`X-Sim-Call-Id`), so
  * the sim hides the slots other live calls are holding while still showing this
  * call its own. And `accept_slot` asks the sim for a hold before telling the caller
  * the time is theirs: a refusal means another call got there first, and the model is
@@ -11,8 +11,6 @@
  */
 import { callContext } from './log.js';
 import type { QuotedSlot } from './call-state.js';
-
-export const simHoldsEnabled = process.env.SIM_HOLDS === '1';
 
 /** A fetch that names the call. Used by ClinicApi when the sim is on. */
 export function simFetch(base: typeof globalThis.fetch = globalThis.fetch): typeof globalThis.fetch {

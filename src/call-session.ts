@@ -27,7 +27,8 @@ import {
 import { mulawToPcm16 } from './mulaw.js';
 import { callContext, clog } from './log.js';
 import { attachBrief } from './patient-brief.js';
-import { holdSlot, releaseHolds, simHoldsEnabled } from './sim-holds.js';
+import { holdSlot, releaseHolds } from './sim-holds.js';
+import { clinicTarget, type ClinicMode, type ClinicTarget } from './clinic-target.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
 import { submitActions, type SubmitResult } from './submit.js';
@@ -47,8 +48,8 @@ export interface Shared {
   keyterms: string[];
   clinicBriefing: string;
   store: Store;
-  /** Read-only lookups. One client, so the catalogue is fetched once for the process. */
-  api: ClinicApi;
+  /** Read-only lookups, one client per clinic so the catalogue is fetched once for the process. */
+  api: Readonly<Record<ClinicMode, ClinicApi>>;
   /** Doctors, sites, plans and closures, parsed at boot. Null only if /clinic was down. */
   catalogue: Catalogue | null;
 }
@@ -60,6 +61,8 @@ export interface Shared {
 export class CallSession {
   readonly #ws: WebSocket;
   readonly #shared: Shared;
+  /** The clinic this call books into, fixed when the socket opens: a mode switch never moves a call mid-way. */
+  readonly #clinic: ClinicTarget;
 
   #callId = '';
   #streamSid = '';
@@ -100,6 +103,7 @@ export class CallSession {
   constructor(ws: WebSocket, shared: Shared) {
     this.#ws = ws;
     this.#shared = shared;
+    this.#clinic = clinicTarget();
 
     ws.on('message', (data) => this.#onMessage(data));
     ws.on('close', () => {
@@ -234,12 +238,12 @@ export class CallSession {
       const state = this.#state ?? createCallState(this.#callId, this.#fromNumber);
       const agent = new ReceptionistAgent({
         state,
-        api: this.#shared.api,
+        api: this.#shared.api[this.#clinic.mode],
         catalogue: this.#shared.catalogue,
-        ...(simHoldsEnabled
+        ...(this.#clinic.mode === 'simulation'
           ? {
               hold: async (slot: QuotedSlot) => {
-                const refused = await holdSlot(config.prosper.baseUrl, this.#callId, slot, state.matched?.patient_id);
+                const refused = await holdSlot(this.#clinic.baseUrl, this.#callId, slot, state.matched?.patient_id);
                 return refused?.detail ?? null;
               },
             }
@@ -365,7 +369,7 @@ export class CallSession {
 
   /** Best-effort: a caller the directory knows by their own number needs no questions. */
   #identifyByPhone(state: CallState, phone: string): void {
-    void this.#shared.api
+    void this.#shared.api[this.#clinic.mode]
       .findPatient({ phone })
       .then((matches) => {
         // Two people on one landline is a household, not an identification.
@@ -503,7 +507,7 @@ export class CallSession {
     const submitStartedAt = Date.now();
     let submissions: SubmitResult[] = [];
     if (this.#callId) {
-      submissions = await submitActions(this.#callId, actions);
+      submissions = await submitActions(this.#callId, actions, this.#clinic.baseUrl);
 
       // A 422 records nothing at all, so a rejected body leaves the call with no record —
       // which scores exactly like never answering. Only 422 is worth retrying: 404 is the
@@ -515,9 +519,9 @@ export class CallSession {
         this.#errors.push(
           `submission rejected (${submissions.map((s) => `${s.action}=${s.status}`).join(' ')}); falling back to no_action`,
         );
-        submissions = submissions.concat(await submitActions(this.#callId, [FLOOR_ACTION]));
+        submissions = submissions.concat(await submitActions(this.#callId, [FLOOR_ACTION], this.#clinic.baseUrl));
       }
-      if (simHoldsEnabled) await releaseHolds(config.prosper.baseUrl, this.#callId);
+      if (this.#clinic.mode === 'simulation') await releaseHolds(this.#clinic.baseUrl, this.#callId);
     } else {
       this.#errors.push('no call_id: never received a start message, nothing to submit against');
     }

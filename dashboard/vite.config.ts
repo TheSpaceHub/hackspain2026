@@ -22,6 +22,7 @@ export default defineConfig({
     // Same-origin in dev, so EventSource needs no CORS dance and cookies would carry.
     proxy: {
       '/health': AGENT_ORIGIN,
+      '/mode': AGENT_ORIGIN,
       '/calls': AGENT_ORIGIN,
       '/stats': AGENT_ORIGIN,
       '/events': { target: AGENT_ORIGIN, changeOrigin: true, ws: false },

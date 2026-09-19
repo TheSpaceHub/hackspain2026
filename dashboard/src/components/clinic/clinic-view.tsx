@@ -206,7 +206,11 @@ export function ClinicView({ sim, date: routeDate, onDate, onOpenCall, agentClin
           <Card size="sm" className="min-h-0 flex-1 gap-2">
             <CardHeader>
               <CardTitle>Events</CardTitle>
-              <CardDescription>What the clinic just did, newest first.</CardDescription>
+              <CardDescription>
+                The clinic's activity log, newest first: every call that opened or ended, each slot a call held (or
+                was refused because another call had it), every booking, reschedule, cancellation and new patient,
+                and each reset. Click a line to open the call that did it.
+              </CardDescription>
             </CardHeader>
             <CardContent className="min-h-0 flex-1 overflow-y-auto">
               <EventTicker events={sim.events} onOpenCall={onOpenCall} />

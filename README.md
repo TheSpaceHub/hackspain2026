@@ -187,16 +187,24 @@ curl -N localhost:8788/__sim/events?since=0 # every hold, release, booking… as
   landing on the same cell at the same instant cannot both win.
 - `test/sim.test.ts` covers the diary, the holds, the window, persistence and the SSE
   stream against the bundled catalogue and a fixed clock; `pnpm test:sim`.
-- **The console has two modes, decided by the agent.** It reads the agent's `/health`
-  `clinic_api`: pointed at real Prosper (`pnpm start`) the console is **Live** — green
-  pill and banner, the dashboard as it always was. Pointed at the sim (`pnpm start:sim`)
-  it is **Simulation** — violet pill and banner, `[SIM]` in the tab title, and a
-  **Clinic** tab: each provider's day as 15-minute cells (the clinic's own bookings,
-  ones made by calls, slots on hold coloured per call), the live holds with their
-  countdown, the event stream, and Reset / Re-snapshot. A call's holds and bookings
-  also appear on its transcript, and everything links back to the call. A sim running
-  next to a live agent is not simulation mode — the banner says so and the Clinic tab
-  stays hidden (Vite proxies `/__sim` to `VITE_SIM_ORIGIN`, default `http://localhost:8788`).
+- **The agent has two modes, and the console's pill switches them.** The agent knows
+  both clinics (`PROSPER_API_BASE_URL` and the sim, `SIM_URL`, default `:8788`) and boots
+  into one: `pnpm start` is **Live**, `pnpm start:sim` is **Simulation**. `/health`
+  reports the mode; `POST /mode {"mode":"live"|"simulation"}` changes it for **new
+  calls** — a call already open finishes against the clinic it started on. The console
+  reads `/health` and shows Live as a green pill and banner (the dashboard as it always
+  was) and Simulation as a violet pill and banner, `[SIM]` in the tab title, and a
+  **Clinic** tab. Clicking the top-right pill flips the mode (going live asks first).
+- **The Clinic tab** is the sim's diary: each provider's day as 15-minute cells (the
+  clinic's own bookings, ones made by calls, slots on hold coloured per call), the live
+  holds with their countdown, Reset / Re-snapshot, and **Events** — the clinic's activity
+  log: calls opening and closing, every hold taken or refused (another call or an
+  existing appointment had the slot), releases and expiries, bookings, reschedules,
+  cancellations, new patients, no-action/escalation outcomes, resets and snapshots, each
+  linked to the call that did it. A call's holds and bookings also appear on its
+  transcript. A sim running next to a live agent is not simulation mode — the banner says
+  so and the Clinic tab stays hidden (Vite proxies `/__sim` to `VITE_SIM_ORIGIN`, default
+  `http://localhost:8788`).
 
 ### Reading the call log
 

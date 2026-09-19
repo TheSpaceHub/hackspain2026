@@ -21,7 +21,7 @@ import { liveHolds } from '@/lib/sim/model';
 export function App() {
   const feed = useCallFeed();
   const sim = useSimFeed();
-  const health = useAgentHealth(feed.connected);
+  const { health, setMode, switching } = useAgentHealth(feed.connected);
   const [route, navigate] = useRoute();
   const now = useNow(5_000);
   const clinicApi = health?.clinic_api ?? null;
@@ -63,6 +63,16 @@ export function App() {
         onNavigate={(id) => navigate({ view: id as View, callId: null })}
         clinicApi={clinicApi}
         mode={mode}
+        onMode={
+          health?.mode
+            ? (m) => {
+                if (m === 'live' && !window.confirm('Switch to LIVE? New calls will book into the real Prosper clinic.')) return;
+                if (m === 'live' && route.view === 'clinic') navigate({ view: 'overview', callId: null });
+                void setMode(m).catch((err: unknown) => window.alert(`Could not switch mode: ${String(err)}`));
+              }
+            : undefined
+        }
+        switching={switching}
         simRunning={sim.available === true}
       >
         {route.view === 'overview' ? (
