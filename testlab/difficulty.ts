@@ -9,6 +9,8 @@
  * caller already is, so the same case can be run at four heights and the point
  * at which the agent stops coping is the score.
  */
+import type { AudioBed } from '../mock/world/suite/types.js';
+import type { Accent } from './audio.js';
 import type { Behaviour } from './behaviour.js';
 
 export interface Difficulty {
@@ -24,13 +26,22 @@ export interface Difficulty {
   lead_min_ms: number;
   /** Turns granted on top of the case's own cap: a hard call is a longer one. */
   extra_turns: number;
+  /**
+   * The line the call comes in on. Null leaves the case and the traits to decide;
+   * `silence` at Easy means a clean line whatever they asked for.
+   */
+  audio: AudioBed | null;
+  /** The agent's own accent, or one from further off, which the recogniser likes less. */
+  accent: Accent;
+  /** Quieter than the recogniser would like: 1 is an ordinary voice. */
+  gain: number;
 }
 
 export const DIFFICULTIES: Difficulty[] = [
   {
     id: 'easy',
     label: 'Easy',
-    description: 'Says everything plainly, confirms first time, has their details to hand.',
+    description: 'Plain words, confirms first time, clean line, the accent the agent knows.',
     instructions: [
       'This is a good day and an easy call for you. You say what you want in plain words, you give a date and a',
       'time as a date and a time, your details are in front of you, and when they read something back you say',
@@ -40,21 +51,28 @@ export const DIFFICULTIES: Difficulty[] = [
     lead_scale: 0.6,
     lead_min_ms: 0,
     extra_turns: 0,
+    // A studio line: whatever room the case wanted, Easy takes it away.
+    audio: { background: 'silence', signal_to_noise_db: null },
+    accent: 'local',
+    gain: 1,
   },
   {
     id: 'normal',
     label: 'Normal',
-    description: 'An ordinary call: answers what is asked, confirms once.',
+    description: 'An ordinary call: answers what is asked, confirms once, whatever line the case has.',
     instructions: '',
     wpm_scale: 1,
     lead_scale: 1,
     lead_min_ms: 0,
     extra_turns: 0,
+    audio: null,
+    accent: 'local',
+    gain: 1,
   },
   {
     id: 'hard',
     label: 'Hard',
-    description: 'Roundabout about times and places, confirms only once it is repeated back.',
+    description: 'Roundabout, confirms only on a read-back, a room behind them and a far accent.',
     instructions: [
       'This call is hard work, not because you mean it to be. You put things roundaboutly the first time —',
       'the day as "end of next week", the place as "the usual one" — and it takes a direct question to get the',
@@ -66,11 +84,15 @@ export const DIFFICULTIES: Difficulty[] = [
     lead_scale: 1.5,
     lead_min_ms: 900,
     extra_turns: 4,
+    // A room behind them and an accent the recogniser was not tuned on.
+    audio: { background: 'room', signal_to_noise_db: 16 },
+    accent: 'far',
+    gain: 0.85,
   },
   {
     id: 'brutal',
     label: 'Brutal',
-    description: 'Vague throughout, changes their mind once, needs it all confirmed twice.',
+    description: 'Vague throughout, changes their mind, and ringing from the street on a bad handset.',
     instructions: [
       'Everything about this call is against them, though none of it is meant unkindly. You describe rather than',
       'name — the specialty, the site, the doctor, the day all come out sideways, and even asked directly you',
@@ -83,6 +105,10 @@ export const DIFFICULTIES: Difficulty[] = [
     lead_scale: 2,
     lead_min_ms: 1_600,
     extra_turns: 8,
+    // Outside, on a bad handset, in an accent from the other side of the language.
+    audio: { background: 'street', signal_to_noise_db: 9 },
+    accent: 'far',
+    gain: 0.7,
   },
 ];
 
@@ -106,5 +132,19 @@ export function atDifficulty(behaviour: Behaviour, difficulty: Difficulty): Beha
     instructions,
     wpm: Math.round(behaviour.wpm * difficulty.wpm_scale),
     lead_ms: Math.max(Math.round(behaviour.lead_ms * difficulty.lead_scale), difficulty.lead_min_ms),
+    accent: difficulty.accent,
+    gain: behaviour.gain * difficulty.gain,
+    audio: noisier(behaviour.audio, difficulty.audio),
   };
+}
+
+/**
+ * The worse of two lines, so turning the dial up never quietens a call: Easy's
+ * silence wins outright because it is the one level that promises a clean line.
+ */
+export function noisier(theirs: AudioBed | null, level: AudioBed | null): AudioBed | null {
+  if (level === null) return theirs;
+  if (level.background === 'silence') return level;
+  if (theirs === null || theirs.background === 'silence') return level;
+  return (theirs.signal_to_noise_db ?? 99) <= (level.signal_to_noise_db ?? 99) ? theirs : level;
 }

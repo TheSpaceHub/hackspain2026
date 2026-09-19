@@ -10,6 +10,7 @@
  * can stand.
  */
 import type { AudioBed } from '../mock/world/suite/types.js';
+import type { Accent } from './audio.js';
 
 export interface Behaviour {
   id: string;
@@ -28,6 +29,8 @@ export interface Behaviour {
   gain: number;
   /** Replaces the case's own bed when set. */
   audio: AudioBed | null;
+  /** The agent's own accent unless the difficulty moved it further off. */
+  accent: Accent;
 }
 
 const base = {
@@ -38,6 +41,7 @@ const base = {
   barge_in: false,
   gain: 1,
   audio: null,
+  accent: 'local',
 } satisfies Omit<Behaviour, 'id' | 'label' | 'description'>;
 
 export const BEHAVIOURS: Behaviour[] = [
@@ -238,5 +242,6 @@ export function blendBehaviours(ids: readonly string[]): Behaviour {
     gain: chosen.reduce((g, b) => Math.min(g, b.gain), 1.15),
     // The worst line of the lot: the loudest room at the lowest signal-to-noise.
     audio: beds.length === 0 ? null : beds.reduce((a, b) => ((b.signal_to_noise_db ?? 99) < (a.signal_to_noise_db ?? 99) ? b : a)),
+    accent: chosen.find((b) => b.accent === 'far')?.accent ?? 'local',
   };
 }

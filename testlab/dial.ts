@@ -13,6 +13,7 @@ import type { Case } from '../mock/world/suite/types.js';
 import { mix, SAMPLE_RATE, say, silence } from './audio.js';
 import type { Behaviour } from './behaviour.js';
 import { callerFor } from './caller.js';
+import { noisier } from './difficulty.js';
 import type { Vocabulary } from './vocabulary.js';
 import type { AgentFeed, Turn } from './feed.js';
 
@@ -77,11 +78,13 @@ export async function dial(opts: DialOptions): Promise<CallOutcome> {
   const voice = {
     language: kase.language,
     sex: kase.persona.voice,
+    accent: behaviour.accent,
     wpm: behaviour.wpm,
     gain: behaviour.gain,
   };
-  // The behaviour's own room wins: "ringing from a motorway" is the point of it.
-  const bedOf = behaviour.audio ?? kase.audio;
+  // Whichever line is worse: a noise case keeps its own motorway even on Hard, and
+  // Easy's clean line beats both, because that is the one thing Easy promises.
+  const bedOf = noisier(kase.audio, behaviour.audio) ?? kase.audio;
 
   const outcome: CallOutcome = {
     call_id: callId,

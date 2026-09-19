@@ -184,8 +184,21 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
             <div>
               <p className="text-xs font-medium text-muted-foreground">How hard they make it</p>
               <p className="mb-2 text-xs text-muted-foreground">
-                The same caller, turned up: how roundabout the ask is, how much they volunteer, and how many times
-                the appointment has to be read back before they will agree to it.
+                The same caller, turned up: how roundabout the ask is, how much they volunteer, how many times the
+                appointment has to be read back — and the line itself, which gains a room, an accent from further
+                off and a quieter handset as it goes up. Easy strips all of that back to a clean line.
+                {level && level.id !== 'normal' && (
+                  <>
+                    {' '}
+                    <span className="text-foreground">
+                      {level.audio === null || level.audio.background === 'silence'
+                        ? 'Clean line'
+                        : `${level.audio.background} at ${level.audio.signal_to_noise_db} dB`}
+                      , {level.accent === 'far' ? 'a far accent' : 'the local accent'}
+                      {level.extra_turns > 0 ? `, +${level.extra_turns} turns` : ''}.
+                    </span>
+                  </>
+                )}
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {levels.map((d) => (

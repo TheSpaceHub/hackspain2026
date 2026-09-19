@@ -8,7 +8,7 @@
  */
 
 import { blendBehaviours } from '../testlab/behaviour.js';
-import { atDifficulty, difficultyOf } from '../testlab/difficulty.js';
+import { atDifficulty, difficultyOf, noisier } from '../testlab/difficulty.js';
 import { interleave } from '../testlab/runner.js';
 import { blendVocabularies } from '../testlab/vocabulary.js';
 
@@ -65,6 +65,28 @@ check('and drags: slower, with longer gaps', turnedUp.wpm <= both.wpm && turnedU
 check(
   'a cooperative caller at brutal is still told how hard it is',
   atDifficulty(blendBehaviours([]), difficultyOf('brutal')).instructions.includes('change your mind'),
+);
+
+// And the line the call arrives on, which is the difficulty's too.
+const noisyCase = { background: 'street', signal_to_noise_db: 5 } as const;
+check(
+  'a noise case keeps its own line on a hard run',
+  noisier(noisyCase, difficultyOf('hard').audio) === noisyCase,
+  JSON.stringify(noisier(noisyCase, difficultyOf('hard').audio)),
+);
+check(
+  'a quiet case gets the room the level brings',
+  noisier(null, difficultyOf('hard').audio)?.background === 'room',
+);
+check(
+  'easy clears the line even for a noise case',
+  noisier(noisyCase, difficultyOf('easy').audio)?.background === 'silence',
+);
+check(
+  'the accent moves with the level, and the voice quietens',
+  atDifficulty(both, difficultyOf('brutal')).accent === 'far' &&
+    difficultyOf('easy').accent === 'local' &&
+    atDifficulty(both, difficultyOf('brutal')).gain < both.gain,
 );
 
 // And the order a round is dialled in: round-robin over the problems, so a round read

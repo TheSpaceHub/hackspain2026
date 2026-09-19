@@ -65,6 +65,10 @@ export interface Difficulty {
   lead_scale: number;
   lead_min_ms: number;
   extra_turns: number;
+  /** The line the call comes in on; null leaves it to the case and the traits. */
+  audio: { background: string; signal_to_noise_db: number | null } | null;
+  accent: 'local' | 'far';
+  gain: number;
 }
 
 /** Which suite is loaded, and the seed the random asks came out of. */
