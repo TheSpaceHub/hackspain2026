@@ -126,6 +126,12 @@ function harness(
   await numeric.call('accept_slot', { choice: 1 });
   check('without a spoken time the numeric choice is honored', numeric.state.accepted?.start_time, numeric.state.quoted[0]!.start_time);
 
+  // Elena's call: the held slot was re-looked-up and re-offered four times until the wall.
+  const again = await numeric.call('find_slots', { when_phrase: 'as soon as possible', specialty_id: 'general_practice' });
+  check('find_slots refuses to look again while a slot is held', /already held/.test(again), true);
+  const released = await numeric.call('release_slot', {});
+  check('release_slot lets go of the held slot', /Released/.test(released) && numeric.state.accepted === null, true);
+
   // Ten silent callers were booked because the model "accepted" for them after a nudge.
   const silent = harness({}, undefined);
   silent.state.caller_turns = 2;

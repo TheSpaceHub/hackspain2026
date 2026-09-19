@@ -242,6 +242,11 @@ export function providersByName(catalogue: Catalogue, spoken: string, nearest = 
   if (exact.length > 0) return exact.map(({ p }) => p);
   const substring = folded.filter(({ name }) => name.includes(needle));
   if (substring.length > 0) return substring.map(({ p }) => p);
+  // "Jocta or tease Vidal": STT mangles the first surname but a word of what was said is
+  // exactly one doctor's surname. One doctor and only one is unmistakable, not a guess.
+  const words = needle.split(/[^a-z]+/).filter((w) => w.length >= 4);
+  const byWord = folded.filter(({ name }) => name.split(' ').some((w) => words.includes(w)));
+  if (byWord.length === 1) return byWord.map(({ p }) => p);
   // Each surname is an alias of its own: they say one word, the catalogue holds three.
   const near = closest(
     catalogue.providers.map((p) => ({ item: p, aliases: [p.name, ...fold(p.name).split(' ')] })),

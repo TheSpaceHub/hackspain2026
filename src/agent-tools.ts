@@ -26,6 +26,7 @@ import {
 import {
   knownPlans,
   recordAccepted,
+  releaseAccepted,
   recordMatch,
   recordQuote,
   callerSilentSinceQuote,
@@ -191,6 +192,11 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         // `general_practice` and `loc_centro`, and rejects the whole query otherwise. A
         // filter we cannot resolve is dropped rather than sent: a wider search still
         // answers the caller, a 422 does not.
+        if (state.accepted) {
+          const a = state.accepted;
+          const who = catalogue?.providers.find((p) => p.id === a.provider_id)?.name ?? a.provider_id;
+          return `A slot is already held for this caller: ${speakTime(a.start_time)} with ${who} at ${siteName(catalogue, a.location_id)}. Do not look again or offer anything else. If they are unsure, confirm that one back in one sentence; if they say it is wrong, call release_slot first.`;
+        }
         const request0 = state.request;
         const saidSpecialty = real(args.specialty_id) ?? request0.specialty_id;
         const saidLocation = real(args.location_id) ?? request0.location_id;
@@ -420,6 +426,17 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
       },
     }),
 
+    release_slot: llm.tool({
+      description:
+        'Let go of the slot currently held, because the caller has changed their mind or said it is wrong. Only then may find_slots be called again.',
+      parameters: z.object({}),
+      execute: async () => {
+        if (!state.accepted) return 'Nothing is held.';
+        const was = speakTime(state.accepted.start_time);
+        releaseAccepted(state, 'caller declined it');
+        return `Released ${was}. Ask what would suit instead, then call find_slots.`;
+      },
+    }),
     list_appointments: llm.tool({
       description:
         'The patient\'s appointments already in the diary. Needed before moving or cancelling one: it is the only place the appointment reference comes from.',

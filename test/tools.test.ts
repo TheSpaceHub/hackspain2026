@@ -124,6 +124,11 @@ check('distance is straight-line km', Math.round(haversineKm({ latitude: 40.4168
 // --- catalogue queries -----------------------------------------------------
 
 check('a near-miss surname returns both, to be asked about', providersByName(catalogue, 'Sáez').map((p) => p.id), ['PR1']);
+check(
+  'a garbled phrase holding exactly one surname word is that doctor',
+  providersByName(catalogue, 'Jocta or tease Iglesias').map((p) => p.id),
+  ['PR3'],
+);
 check('accent-blind', providersByName(catalogue, 'saez').map((p) => p.id), ['PR1']);
 check('partial surname returns every candidate', providersByName(catalogue, 'sáe').map((p) => p.id), ['PR1', 'PR2']);
 check('phonetic Sayas reaches Sáez', providersByName(catalogue, 'Sayas').map((p) => p.id), ['PR1']);

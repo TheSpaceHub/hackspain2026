@@ -408,6 +408,12 @@ export function recordAccepted(state: CallState, slot: QuotedSlot, note?: string
   record(state, 'accepted', `${slot.start_time} ${slot.provider_id}`, note);
 }
 
+export function releaseAccepted(state: CallState, note?: string): void {
+  if (!state.accepted) return;
+  record(state, 'accepted', null, note ?? 'released');
+  state.accepted = null;
+}
+
 /** An id stated and then contradicted. Explicit, so the journal shows both. */
 export function retract(state: CallState, field: PatientField | keyof CallRequest): void {
   delete state.rejected[field as PatientField];
