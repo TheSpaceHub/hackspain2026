@@ -18,6 +18,7 @@ import {
   recordMatch,
   recordQuote,
   recordRequest,
+  recordThirdParty,
   setPlanVocabulary,
 } from '../src/call-state.js';
 import { bookFromState, enforcePolicy, overrideFlooredBooking } from '../src/guards.js';
@@ -141,6 +142,17 @@ function harness(
     /Already identified: Alberto Rubio Sanz \(P00389\)/.test(relookup) && known.state.matched?.patient_id === 'P00389',
     true,
   );
+
+  // Cristina: phone-matched mother, "for my child" → the diary must wait for the child.
+  const mother = harness({}, undefined);
+  recordMatch(mother.state, { patient_id: 'P01073', given_name: 'Cristina', first_surname: 'Suárez' }, undefined, 'phone');
+  recordThirdParty(mother.state, false, { relationship: 'child' });
+  const waitForChild = await mother.call('find_slots', { when_phrase: 'as soon as possible', specialty_id: 'spec_gp' });
+  check('find_slots will not book the phone owner for her child', /not identified yet/.test(waitForChild) && mother.state.quoted.length === 0, true);
+  const child = await mother.call('identify_patient', { name: 'Marta Ruiz', national_id: '12345678Z' });
+  check('the child can be looked up despite the phone match', /Found Marta/.test(child) && mother.state.matched?.patient_id === 'pat_001', true);
+  const forChild = await mother.call('find_slots', { when_phrase: 'as soon as possible', specialty_id: 'spec_gp' });
+  check('and the diary opens once the child is identified', /Offer|soonest/.test(forChild), true);
 
   // Ten silent callers were booked because the model "accepted" for them after a nudge.
   const silent = harness({}, undefined);

@@ -102,6 +102,27 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
 }
 
 {
+  // Oliver: "for myself", yet the model marked him a parent. Cristina: "for my child",
+  // yet the model left her as the patient. The caller's words win both ways.
+  const oliver = createCallState('call-oliver');
+  applyPatch(
+    oliver,
+    { caller_is_patient: false, relationship: 'parent' },
+    'I need a dermatology appointment for myself. There is a mole on my back.',
+  );
+  check('"for myself" overrides a third-party guess', oliver.caller_is_patient, true);
+
+  const cristina = createCallState('call-cristina');
+  applyPatch(
+    cristina,
+    { caller_is_patient: true, specialty_id: 'paediatrics' },
+    'I need the earliest pediatrics appointment for my child. He has had a cough for 3 weeks.',
+  );
+  check('"for my child" makes it a third-party call', cristina.caller_is_patient, false);
+  check('with the kinship recorded', cristina.caller?.relationship, 'child');
+}
+
+{
   const noRelationship = createCallState('call-caller-default');
   applyPatch(noRelationship, { caller_is_patient: false, caller_name: 'Ana' });
   check('caller_is_patient false without a relationship is ignored', noRelationship.caller_is_patient, true);

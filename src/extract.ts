@@ -91,6 +91,20 @@ const RELATIONSHIPS = new Set([
   'pareja', 'cuidador', 'tutor', 'hermano', 'hermana', 'abuelo', 'abuela',
 ]);
 
+const SELF = /\b(for|para) (myself|me|mi|m[ií] mism[oa])\b|\bpara m[ií]\b/i;
+const FOR_KIN = new RegExp(
+  `\\b(?:for|para) (?:my|our|mi|nuestr[oa]) (?:(?:little |young |old |elderly )?)(${[...RELATIONSHIPS].join('|')}|kid|boy|girl|baby|mum|mom|dad|grandma|grandpa|ni[nñ][oa]|beb[eé]|mam[aá]|pap[aá])\\b`,
+  'i',
+);
+
+/** "for my daughter" → "daughter"; "for myself" → "self"; nothing said → undefined. */
+export function whoIsItFor(heard: string): string | undefined {
+  const kin = FOR_KIN.exec(heard);
+  if (kin) return kin[1]!.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  if (SELF.test(heard)) return 'self';
+  return undefined;
+}
+
 let PROVIDER_CATALOGUE: Catalogue | null = null;
 
 export function setProviderVocabulary(catalogue: Catalogue | null): void {
@@ -404,7 +418,19 @@ export function applyPatch(state: CallState, patch: ExtractedPatch, heard?: stri
   );
   if (Object.keys(changed).length > 0) recordRequest(state, changed);
 
-  if (patch.caller_is_patient !== undefined) {
+  // The caller's own words settle who the appointment is for; the model's guess does not
+  // override them (Oliver said "for myself" and was marked a parent; Cristina said "for my
+  // child" and was booked herself).
+  const said = heard ? whoIsItFor(heard) : undefined;
+  if (said === 'self') {
+    if (!state.caller_is_patient) recordThirdParty(state, true, { relationship: undefined });
+  } else if (said) {
+    if (state.caller_is_patient || state.caller?.relationship !== said) {
+      recordThirdParty(state, false, { relationship: said });
+    }
+  }
+
+  if (patch.caller_is_patient !== undefined && said === undefined) {
     const caller = { name: real(patch.caller_name), relationship: relationship(patch.relationship) };
     const unchanged =
       state.caller_is_patient === patch.caller_is_patient &&

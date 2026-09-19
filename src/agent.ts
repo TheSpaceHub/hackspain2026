@@ -211,6 +211,14 @@ export function fileOnCaller(state: CallState): string | undefined {
       ? missingForRegistration(state).map((field) => fieldLabels[field])
       : [];
   if (missing.length > 0) rejected.push(`Still missing for the file: ${missing.join(', ')}`);
+  if (!state.caller_is_patient && (!state.matched || state.matched_by === 'phone')) {
+    rejected.push(
+      `The appointment is for the caller's ${state.caller?.relationship ?? 'someone else'}, not for the caller${state.matched ? ` (${state.matched.given_name ?? 'the phone owner'} is who the phone belongs to)` : ''}. You do not know who that patient is yet: ask for the patient's full name and date of birth and call identify_patient before checking the diary.`,
+    );
+  }
+  if (state.request.intent === 'book' && state.quoted.length > 0 && !state.accepted) {
+    rejected.push('No time has been accepted and nothing is booked: do not tell them they are booked or say goodbye as if they were — ask plainly whether the time suits.');
+  }
 
   const extra = rejected.join(' ');
   let file: string | undefined;
@@ -225,7 +233,10 @@ export function fileOnCaller(state: CallState): string | undefined {
       patient.insurer ? `plan on record ${patient.insurer}` : undefined,
     ].filter(Boolean);
     const brief = state.brief ? describeBrief(state.brief) : '';
-    file = `The clinic's file for the number they are ringing from: ${facts.join(', ')}. They are identified: do not ask for their name, their DNI or NIE, or their date of birth. Greet them by their first name and get on with what they want.${brief ? ` Rules for this patient: ${brief} You may state these facts to the caller plainly (which doctors do not take their plan, what their plan does not cover, whether a referral is needed); never quote a price.` : ''}`;
+    const ownerIsCaller = !state.caller_is_patient && state.matched_by === 'phone';
+    file = ownerIsCaller
+      ? `The clinic's file for the number they are ringing from: ${facts.join(', ')}. That is the caller, not the patient; their record, plan and rules do not apply to this appointment.`
+      : `The clinic's file for the number they are ringing from: ${facts.join(', ')}. They are identified: do not ask for their name, their DNI or NIE, or their date of birth. Greet them by their first name and get on with what they want.${brief ? ` Rules for this patient: ${brief} You may state these facts to the caller plainly (which doctors do not take their plan, what their plan does not cover, whether a referral is needed); never quote a price.` : ''}`;
   }
   return file && extra ? `${file} ${extra}` : file ?? (extra || undefined);
 }

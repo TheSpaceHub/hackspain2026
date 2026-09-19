@@ -98,6 +98,21 @@ async function capped<T>(name: string, ms: number, work: Promise<T> | T): Promis
  */
 const PLACEHOLDERS = new Set(['unknown', 'n/a', 'na', 'none', 'null', 'undefined', '']);
 
+/**
+ * The caller said the appointment is for someone else, and the only record we hold is
+ * the phone owner's (Cristina rang for her child and was booked herself). Nothing may
+ * be looked up or held until that patient is identified.
+ */
+export function forWhomUnknown(state: CallState): string | undefined {
+  if (state.caller_is_patient) return undefined;
+  if (state.matched && state.matched_by === 'lookup') return undefined;
+  const who = state.caller?.relationship ?? 'someone else';
+  const owner = state.matched
+    ? ` ${[state.matched.given_name, state.matched.first_surname].filter(Boolean).join(' ')} is the owner of the phone, not the patient, so their record and age do not apply.`
+    : '';
+  return `The appointment is for the caller's ${who}, and that patient is not identified yet.${owner} Ask for the patient's full name and date of birth, call identify_patient with them, and only then check the diary.`;
+}
+
 function real(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   return PLACEHOLDERS.has(value.trim().toLowerCase()) ? undefined : value;
@@ -160,7 +175,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           name: real(args.name),
           national_id: real(args.national_id) ? state.patient.national_id ?? args.national_id : undefined,
           date_of_birth: real(args.date_of_birth),
-          phone: real(args.phone) ?? state.patient.phone,
+          phone: real(args.phone) ?? (state.caller_is_patient ? state.patient.phone : undefined),
         };
         if (!query.name && !query.national_id && !query.date_of_birth && !query.phone) {
           return 'Nothing to search on yet — ask for a name and one identifier.';
@@ -198,6 +213,8 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         // `general_practice` and `loc_centro`, and rejects the whole query otherwise. A
         // filter we cannot resolve is dropped rather than sent: a wider search still
         // answers the caller, a 422 does not.
+        const forSomeoneElse = forWhomUnknown(state);
+        if (forSomeoneElse) return forSomeoneElse;
         if (state.accepted) {
           const a = state.accepted;
           const who = catalogue?.providers.find((p) => p.id === a.provider_id)?.name ?? a.provider_id;
@@ -364,6 +381,8 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
       // The model sends "3" as often as 3, and a rejected call is a silent turn.
       parameters: z.object({ choice: z.coerce.number().int().describe('1, 2 or 3 as you read them out') }),
       execute: async (args) => {
+        const forSomeoneElse = forWhomUnknown(state);
+        if (forSomeoneElse) return forSomeoneElse;
         let slot = state.quoted[args.choice - 1];
         if (!slot) return 'That is not one of the times you offered. Read the list again or call find_slots.';
         if (state.matched && slot.for_patient_id !== state.matched.patient_id) {
