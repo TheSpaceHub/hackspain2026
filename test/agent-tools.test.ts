@@ -218,5 +218,43 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   check('a failing lookup is admitted to, not invented around', /failed/.test(onFail), true);
 }
 
+// --- what a small model actually sends --------------------------------------
+
+{
+  const clinic = new FakeClinic();
+  const api = new ClinicApi({ baseUrl: 'https://fake.local', apiKey: 'k', fetch: clinic.fetch });
+  const state = createCallState('call-sloppy');
+  const tools = buildTools({ state, api, catalogue, now: () => NOW }) as unknown as Record<string, llm.FunctionTool>;
+
+  // Llama hands booleans and arrays back as strings; a rejected call is a lost turn.
+  const third = tools.record_third_party!;
+  const parsedThird = third.parameters.parse({ caller_is_patient: 'false', relationship: 'daughter' });
+  check('a stringified boolean is taken at its word', parsedThird.caller_is_patient, false);
+
+  const request = tools.record_request!;
+  check('a stringified empty array is taken as empty', request.parameters.parse({ insurers: '[]' }).insurers, []);
+  check(
+    'a stringified array of plans survives',
+    request.parameters.parse({ insurers: '["Sanitas"]' }).insurers,
+    ['Sanitas'],
+  );
+
+  // And it fills fields it does not know with the word "unknown".
+  const field = tools.record_patient_field!;
+  await field.execute({ field: 'given_name', value: 'unknown' } as never, {} as never);
+  check('a placeholder name is never written down', state.patient.given_name, undefined);
+  await field.execute({ field: 'given_name', value: 'Joaquín' } as never, {} as never);
+  check('a real name is', state.patient.given_name, 'Joaquín');
+
+  await request.execute({ intent: 'register', when_phrase: 'unknown' } as never, {} as never);
+  check('a placeholder when is dropped', state.request.when_phrase, undefined);
+  check('the intent beside it is kept', state.request.intent, 'register');
+
+  const near = String(
+    await tools.nearest_site!.execute({ address: 'unknown' } as never, {} as never),
+  );
+  check('a placeholder address is bounced back as a question', /Ask them which street/.test(near), true);
+}
+
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);
 process.exitCode = failed === 0 ? 0 : 1;

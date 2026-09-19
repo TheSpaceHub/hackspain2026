@@ -72,6 +72,37 @@ async function capped<T>(name: string, ms: number, work: Promise<T> | T): Promis
   }
 }
 
+/**
+ * Small models hand back JSON-in-JSON — `"true"` for a boolean, `"[]"` for an array —
+ * and a strict schema turns that into a rejected tool call the caller waits through.
+ * The value is unambiguous, so take it rather than lose the turn.
+ */
+const looseBoolean = z.preprocess(
+  (v) => (v === 'true' ? true : v === 'false' ? false : v),
+  z.boolean(),
+);
+
+const looseStringArray = z.preprocess((v) => {
+  if (typeof v !== 'string') return v;
+  try {
+    const parsed: unknown = JSON.parse(v);
+    return Array.isArray(parsed) ? parsed : [v];
+  } catch {
+    return v.trim() === '' ? [] : [v];
+  }
+}, z.array(z.string()));
+
+/**
+ * The same models fill required-looking fields with `"unknown"` rather than leaving them
+ * out, and a patient called Unknown is worse than a patient with no name yet.
+ */
+const PLACEHOLDERS = new Set(['unknown', 'n/a', 'na', 'none', 'null', 'undefined', '']);
+
+function real(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return PLACEHOLDERS.has(value.trim().toLowerCase()) ? undefined : value;
+}
+
 const PATIENT_FIELDS = [
   'given_name', 'first_surname', 'second_surname', 'national_id',
   'date_of_birth', 'phone', 'email', 'insurer',
@@ -94,10 +125,10 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
       }),
       execute: async (args) => {
         const query = {
-          name: args.name,
-          national_id: args.national_id ? state.patient.national_id ?? args.national_id : undefined,
-          date_of_birth: args.date_of_birth,
-          phone: args.phone ?? state.patient.phone,
+          name: real(args.name),
+          national_id: real(args.national_id) ? state.patient.national_id ?? args.national_id : undefined,
+          date_of_birth: real(args.date_of_birth),
+          phone: real(args.phone) ?? state.patient.phone,
         };
         if (!query.name && !query.national_id && !query.date_of_birth && !query.phone) {
           return 'Nothing to search on yet — ask for a name and one identifier.';
@@ -122,7 +153,9 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         value: z.string().describe('Exactly as the caller said it, including spelled-out letters'),
       }),
       execute: async (args) => {
-        const result = recordPatientField(state, args.field as PatientField, args.value);
+        const value = real(args.value);
+        if (value === undefined) return `You do not have their ${args.field} yet. Ask for it.`;
+        const result = recordPatientField(state, args.field as PatientField, value);
         return result.problem
           ? `Saved ${args.field} as ${result.value}, but ${result.problem}. Ask them for it once more.`
           : `Saved ${args.field}.`;
@@ -140,10 +173,19 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         location_id: z.string().optional(),
         when_phrase: z.string().optional().describe('The caller\'s own words, e.g. "Thursday morning"'),
         language: z.string().optional().describe('A language they asked the doctor to speak'),
-        insurers: z.array(z.string()).optional().describe('Every plan named on this call'),
+        insurers: looseStringArray.optional().describe('Every plan named on this call'),
       }),
       execute: async (args) => {
-        recordRequest(state, args);
+        recordRequest(state, {
+          ...args,
+          specialty_id: real(args.specialty_id),
+          complaint: real(args.complaint),
+          provider_name: real(args.provider_name),
+          location_id: real(args.location_id),
+          when_phrase: real(args.when_phrase),
+          language: real(args.language),
+          insurers: args.insurers?.map(real).filter((i): i is string => i !== undefined),
+        });
         return 'Noted.';
       },
     }),
@@ -152,14 +194,14 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
       description:
         'The caller is ringing about somebody else. Call it as soon as you know, so the appointment goes to the patient and not to the caller.',
       parameters: z.object({
-        caller_is_patient: z.boolean(),
+        caller_is_patient: looseBoolean,
         caller_name: z.string().optional(),
         relationship: z.string().optional().describe('e.g. daughter, husband, carer'),
       }),
       execute: async (args) => {
         recordThirdParty(state, args.caller_is_patient, {
-          name: args.caller_name,
-          relationship: args.relationship,
+          name: real(args.caller_name),
+          relationship: real(args.relationship),
         });
         return args.caller_is_patient
           ? 'Noted, they are the patient.'
@@ -296,7 +338,11 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
       }),
       execute: async (args) => {
         if (!catalogue) return 'Cannot check that from here. Take the request and let the clinic come back to them.';
-        const origin = await geocodeMadrid(args.address);
+        const address = real(args.address);
+        if (address === undefined || address.split(/\s+/).length < 2) {
+          return 'That is not an address. Ask them which street or neighbourhood they are in before calling this again.';
+        }
+        const origin = await geocodeMadrid(address);
         if (!origin) return 'Could not place that address. Ask which part of Madrid they are in.';
         const ranked = rankSites(catalogue, origin, { specialty_id: args.specialty_id });
         if (ranked.length === 0) return 'No site offers that. Say so plainly.';
