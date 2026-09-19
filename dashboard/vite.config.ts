@@ -5,6 +5,8 @@ import { defineConfig } from 'vite';
 
 /** The agent process from the repo root: its HTTP/SSE console lives on :7860. */
 const AGENT_ORIGIN = process.env.VITE_AGENT_ORIGIN ?? 'http://localhost:7860';
+/** The local Prosper (pnpm mock) — it owns the generated world, so the test lab lives there. */
+const TESTLAB_ORIGIN = process.env.VITE_TESTLAB_ORIGIN ?? 'http://localhost:8787';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -23,6 +25,7 @@ export default defineConfig({
       '/calls': AGENT_ORIGIN,
       '/stats': AGENT_ORIGIN,
       '/events': { target: AGENT_ORIGIN, changeOrigin: true, ws: false },
+      '/__testlab': { target: TESTLAB_ORIGIN, changeOrigin: true },
     },
   },
 });
