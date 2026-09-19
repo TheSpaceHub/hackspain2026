@@ -21,20 +21,44 @@ const exec = promisify(execFile);
 export const SAMPLE_RATE = 8000;
 
 /** espeak-ng speaks es and ca as well, which is what problem 11 needs. */
-const VOICES: Record<string, { male: string; female: string }> = {
-  en: { male: 'en-us', female: 'en-us+f3' },
-  es: { male: 'es', female: 'es+f3' },
-  ca: { male: 'ca', female: 'ca+f3' },
+const VOICES: Record<string, Record<Accent, { male: string; female: string }>> = {
+  en: {
+    local: { male: 'en-us', female: 'en-us+f3' },
+    far: { male: 'en-gb-scotland', female: 'en-gb-scotland+f3' },
+  },
+  es: {
+    local: { male: 'es', female: 'es+f3' },
+    far: { male: 'es-419', female: 'es-419+f3' },
+  },
+  ca: {
+    local: { male: 'ca', female: 'ca+f3' },
+    far: { male: 'ca', female: 'ca+f3' },
+  },
 };
 
 let warnedSilence = false;
 let warnedAura = false;
 
-/** Aura has no Catalan, so a Catalan line is spoken by a Peninsular Spanish voice. */
-const AURA: Record<string, { male: string; female: string }> = {
-  en: { male: 'aura-2-arcas-en', female: 'aura-2-thalia-en' },
-  es: { male: 'aura-2-alvaro-es', female: 'aura-2-diana-es' },
-  ca: { male: 'aura-2-alvaro-es', female: 'aura-2-diana-es' },
+/**
+ * Aura has no Catalan, so a Catalan line is spoken by a Peninsular Spanish voice.
+ *
+ * Each language also has an away-from-home accent — a clinic in Spain takes calls
+ * from Latin America, and a recogniser tuned to Peninsular Spanish is a fair thing
+ * to test. `local` is the accent the agent is built for; `far` is the one it is not.
+ */
+const AURA: Record<string, Record<Accent, { male: string; female: string }>> = {
+  en: {
+    local: { male: 'aura-2-arcas-en', female: 'aura-2-thalia-en' },
+    far: { male: 'aura-2-draco-en', female: 'aura-2-amalthea-en' },
+  },
+  es: {
+    local: { male: 'aura-2-alvaro-es', female: 'aura-2-diana-es' },
+    far: { male: 'aura-2-luciano-es', female: 'aura-2-antonia-es' },
+  },
+  ca: {
+    local: { male: 'aura-2-alvaro-es', female: 'aura-2-diana-es' },
+    far: { male: 'aura-2-aquila-es', female: 'aura-2-celeste-es' },
+  },
 };
 
 /**
@@ -42,7 +66,7 @@ const AURA: Record<string, { male: string; female: string }> = {
  * resampling — clamped, because past a point it stops sounding like a person.
  */
 async function aura(line: string, voice: Voice, key: string): Promise<Int16Array> {
-  const v = AURA[voice.language] ?? AURA.en!;
+  const v = (AURA[voice.language] ?? AURA.en!)[voice.accent ?? 'local'];
   const model = voice.sex === 'female' ? v.female : v.male;
   const url = `https://api.deepgram.com/v1/speak?model=${model}&encoding=linear16&sample_rate=${SAMPLE_RATE}&container=none`;
   const res = await fetch(url, {
@@ -71,9 +95,13 @@ function pace(pcm: Int16Array, rate: number): Int16Array {
   return out;
 }
 
+/** Where the caller learnt to speak: the agent's own accent, or one from further off. */
+export type Accent = 'local' | 'far';
+
 export interface Voice {
   language: string;
   sex: 'male' | 'female';
+  accent?: Accent;
   /** Words per minute; 150 is ordinary speech. */
   wpm?: number;
   /** Linear gain, under 1 for a caller who is hard to hear. */
@@ -100,7 +128,7 @@ export async function say(line: string, voice: Voice): Promise<Int16Array> {
       await exec('say', ['-r', String(voice.wpm ?? 150), '-o', wav, '--file-format=WAVE', '--data-format=LEI16@8000', line]);
       return amplify(toMono(await readWav(wav), SAMPLE_RATE), voice.gain ?? 1);
     }
-    const v = VOICES[voice.language] ?? VOICES.en!;
+    const v = (VOICES[voice.language] ?? VOICES.en!)[voice.accent ?? 'local'];
     const args = ['-v', voice.sex === 'female' ? v.female : v.male, '-s', String(voice.wpm ?? 150), '-w', wav, line];
     await exec('espeak-ng', args);
     return amplify(toMono(await readWav(wav), SAMPLE_RATE), voice.gain ?? 1);
