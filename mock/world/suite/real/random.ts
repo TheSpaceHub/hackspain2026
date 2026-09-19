@@ -123,27 +123,34 @@ async function expectationFor(w: RealWorld, ask: Ask): Promise<{ actions: Expect
   return null;
 }
 
-export async function randomCases(w: RealWorld, seed: number, count: number): Promise<Case[]> {
+/**
+ * `viable` keeps only asks the clinic can actually book; off, the impossible ones
+ * (full day, wrong specialty, out of network) stay in and are graded on the refusal.
+ */
+export async function randomCases(w: RealWorld, seed: number, count: number, viable = false): Promise<Case[]> {
   const next = rng(seed);
-  const asks = Array.from({ length: count * 3 }, () => askOf(w, next));
+  const asks = Array.from({ length: count * (viable ? 10 : 3) }, () => askOf(w, next));
   const out: Case[] = [];
   for (const ask of asks) {
     if (out.length >= count) break;
     const expectation = await expectationFor(w, ask);
     if (!expectation) continue;
+    if (viable && expectation.actions.some((a) => a.action !== 'BOOK')) continue;
     const line = wording(ask);
     const n = String(out.length + 1).padStart(2, '0');
     out.push(
       makeCase('the_real_call', {
         id: `random-${seed}-${n}`,
         problem: '',
-        title: `Random: ${ask.said} for ${fullName(ask.patient)}${ask.day ? ` on ${ask.day}` : ''}`,
+        title: `Random${viable ? ' (viable)' : ''}: ${ask.said} for ${fullName(ask.patient)}${ask.day ? ` on ${ask.day}` : ''}`,
         summary: `${line} Whatever the platform answers to that is what the agent has to arrive at.`,
         origin: [
           `Generated from seed ${seed}, ask ${n} of ${count}: a real patient of the clinic,`,
           `${ask.said}${ask.provider ? ` with ${ask.provider.name}` : ''}${ask.location ? ` at ${ask.location.name}` : ''},`,
           ask.day ? `on ${ask.day}` : 'as soon as possible',
-          `— none of it chosen to fit. The expectation is the live availability call's own answer:`,
+          viable
+            ? `— kept only because the clinic can book it. The expectation is the live availability call's own answer:`
+            : `— none of it chosen to fit. The expectation is the live availability call's own answer:`,
           `${expectation.note}. The same seed gives this ask back.`,
         ].join(' '),
         from_number: e164(ask.patient),

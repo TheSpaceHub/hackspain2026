@@ -12,7 +12,7 @@ interface RunControlsProps {
   suite: SuiteResponse;
   busy: boolean;
   onRun: (req: RunRequest) => void;
-  onRegenerate: (req: { seed: number; random: number }) => void;
+  onRegenerate: (req: { seed: number; random: number; viable: boolean }) => void;
 }
 
 /**
@@ -31,6 +31,7 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
   const [confirmed, setConfirmed] = useState(false);
   const [seed, setSeed] = useState(suite.generation.seed);
   const [random, setRandom] = useState(suite.generation.random);
+  const [viable, setViable] = useState(suite.generation.viable);
 
   const toggle = (set: ReadonlySet<string>, id: string): ReadonlySet<string> => {
     const next = new Set(set);
@@ -43,8 +44,6 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
   // The traits blend into one person, so a case is one call — except the Switchboard's,
   // which is the same case dialled several times at once.
   const calls = picked.reduce((n, c) => n + Math.max(1, c.burst), 0);
-  const traits = suite.behaviours.filter((b) => behaviours.has(b.id));
-  const voices = suite.vocabularies.filter((v) => vocabularies.has(v.id));
   const levels = suite.difficulties ?? [];
   const level = levels.find((d) => d.id === difficulty);
 
@@ -74,7 +73,6 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
           {problems.size === 0 ? 'Every problem' : `${problems.size} problem${problems.size === 1 ? '' : 's'}`} ·{' '}
           {chosenCases} cases · one caller of {behaviours.size} trait{behaviours.size === 1 ? '' : 's'} ·{' '}
           <span className="text-foreground">{calls} calls</span>
-          {calls !== chosenCases && ' (the Switchboard dials its case many times over)'}
         </CardDescription>
       </CardHeader>
 
@@ -105,20 +103,10 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
             </select>
           </label>
         </div>
-        <p className="-mt-2 text-xs text-muted-foreground">
-          {mode === 'persona' && suite.persona_caller
-            ? `A caller agent (${suite.persona_caller}) reads what the agent says and answers it.`
-            : 'Fixed lines, in order — no model, and no reaction to what the agent says.'}
-        </p>
-
         <Separator />
 
         <div>
-          <p className="text-xs font-medium text-muted-foreground">Who is ringing</p>
-          <p className="mb-2 text-xs text-muted-foreground">
-            Everything picked here is the same person: talks over <em>and</em> will not listen is one caller who does
-            both, on every call — not a call each.
-          </p>
+          <p className="mb-2 text-xs font-medium text-muted-foreground">Who is ringing</p>
           <div className="flex flex-wrap gap-1.5">
             {suite.behaviours.map((b) => {
               const on = behaviours.has(b.id);
@@ -145,10 +133,7 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
         <Separator />
 
         <div>
-          <p className="text-xs font-medium text-muted-foreground">How they talk</p>
-          <p className="mb-2 text-xs text-muted-foreground">
-            Also blended into that one caller: vague <em>and</em> code-switching is one person doing both.
-          </p>
+          <p className="mb-2 text-xs font-medium text-muted-foreground">How they talk</p>
           <div className="flex flex-wrap gap-1.5">
             {suite.vocabularies.map((v) => {
               const on = vocabularies.has(v.id);
@@ -171,9 +156,7 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
             })}
           </div>
           {mode === 'script' && vocabularies.size > 0 && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              Scripts say the same words whoever is talking — how they talk only bites in persona mode.
-            </p>
+            <p className="mt-2 text-xs text-muted-foreground">Persona mode only.</p>
           )}
         </div>
 
@@ -182,24 +165,7 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
             <Separator />
 
             <div>
-              <p className="text-xs font-medium text-muted-foreground">How hard they make it</p>
-              <p className="mb-2 text-xs text-muted-foreground">
-                The same caller, turned up: how roundabout the ask is, how much they volunteer, how many times the
-                appointment has to be read back — and the line itself, which gains a room, an accent from further
-                off and a quieter handset as it goes up. Easy strips all of that back to a clean line.
-                {level && level.id !== 'normal' && (
-                  <>
-                    {' '}
-                    <span className="text-foreground">
-                      {level.audio === null || level.audio.background === 'silence'
-                        ? 'Clean line'
-                        : `${level.audio.background} at ${level.audio.signal_to_noise_db} dB`}
-                      , {level.accent === 'far' ? 'a far accent' : 'the local accent'}
-                      {level.extra_turns > 0 ? `, +${level.extra_turns} turns` : ''}.
-                    </span>
-                  </>
-                )}
-              </p>
+              <p className="mb-2 text-xs font-medium text-muted-foreground">Difficulty</p>
               <div className="flex flex-wrap gap-1.5">
                 {levels.map((d) => (
                   <button
@@ -218,16 +184,17 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
                   </button>
                 ))}
               </div>
-              {level && <p className="mt-2 text-xs text-muted-foreground">{level.description}</p>}
+              {level && level.id !== 'normal' && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {level.audio === null || level.audio.background === 'silence'
+                    ? 'Clean line'
+                    : `${level.audio.background} at ${level.audio.signal_to_noise_db} dB`}
+                  , {level.accent === 'far' ? 'far accent' : 'local accent'}
+                  {level.extra_turns > 0 ? `, +${level.extra_turns} turns` : ''}
+                </p>
+              )}
             </div>
           </>
-        )}
-
-        {traits.length + voices.length > 0 && (
-          <p className="rounded-md bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
-            This run's caller: {[...traits, ...voices].map((t) => t.label.toLowerCase()).join(', ')}
-            {level && level.id !== 'normal' ? `, and ${level.label.toLowerCase()} going on for the agent` : ''}.
-          </p>
         )}
 
         <Separator />
@@ -259,27 +226,20 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
                     onChange={(e) => setRandom(Number(e.target.value))}
                   />
                 </label>
-                <Button variant="outline" size="sm" onClick={() => onRegenerate({ seed, random })} disabled={busy}>
+                <Button variant="outline" size="sm" onClick={() => onRegenerate({ seed, random, viable })} disabled={busy}>
                   <Dices /> Generate
                 </Button>
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">
-                Four or five hand-written cases per problem, built on the clinic this mock is serving: the ask is
-                fixed, the record they are graded against is computed from the diary as it stands, so they stay right
-                as it moves.
-              </p>
-              <p className="mt-2 text-xs text-muted-foreground">
-                The random asks on top are arbitrary over the real patients — a doctor they have never seen, a day that
-                may be closed. Most are impossible on purpose, and what is graded is whatever the live availability
-                call answers. The same seed gives the same asks back; each case says which seed it came out of.
-              </p>
+              <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" checked={viable} onChange={(e) => setViable(e.target.checked)} />
+                Viable only
+                <span title="On: only asks the clinic can book. Off: impossible asks stay in and are graded on the refusal.">
+                  {viable ? '(bookable asks)' : '(impossible asks too)'}
+                </span>
+              </label>
             </>
           ) : (
-            <p className="text-xs text-muted-foreground">
-              Four or five cases per problem, hand-written against the generated world: the ask is fixed, and the
-              record each is graded against is computed from that world's own diary, so nothing is hard-coded. Start
-              the mock with MOCK_MIRROR=1 to build them from the real clinic and add random asks on top.
-            </p>
+            <p className="text-xs text-muted-foreground">Start the mock with MOCK_MIRROR=1 for real-clinic cases.</p>
           )}
         </div>
 

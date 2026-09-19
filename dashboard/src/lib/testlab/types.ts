@@ -76,6 +76,7 @@ export interface Generation {
   source: 'real' | 'generated';
   seed: number;
   random: number;
+  viable: boolean;
 }
 
 export interface SuiteResponse {

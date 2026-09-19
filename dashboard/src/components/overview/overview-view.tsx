@@ -38,7 +38,7 @@ export function OverviewView({ feed, mode }: OverviewViewProps) {
     return {
       started: series.map((b) => b.calls),
       recordRate: series.map((b) => (b.calls ? b.with_record / b.calls : null)),
-      length: series.map((b) => b.call_ms_p50),
+      length: series.map((b) => b.call_ms_avg),
     };
   }, [stats]);
 
@@ -82,7 +82,6 @@ export function OverviewView({ feed, mode }: OverviewViewProps) {
             icon={Radio}
             label="Calls in progress"
             value={inProgress}
-            hint={inProgress ? 'On the line right now' : 'The line is quiet'}
             pulse={inProgress > 0}
             trend={trends.started}
             trendLabel={`Calls started ${range.phrase}`}
@@ -91,29 +90,23 @@ export function OverviewView({ feed, mode }: OverviewViewProps) {
             icon={TriangleAlert}
             label="Calls with alerts"
             value={t ? t.flagged : '—'}
-            hint={
-              t
-                ? t.flagged
-                  ? `${t.critical} critical · of ${t.ended} finished ${range.phrase}`
-                  : `None of ${t.ended} finished ${range.phrase}`
-                : ' '
-            }
+            hint={t ? `${t.critical} critical` : ' '}
           />
           <KpiTile
             icon={ShieldCheck}
-            label="Record rate"
+            label="Calls ending with a record"
             value={rate === null ? '—' : `${rate}%`}
-            hint={t ? (t.without_record ? `${t.without_record} ended with no record` : 'Every finished call left a record') : ' '}
+            hint={t ? `${t.with_record} of ${t.ended}` : ' '}
             trend={trends.recordRate}
-            trendLabel="Share of calls with an accepted submission"
+            trendLabel="Record rate per bucket"
           />
           <KpiTile
             icon={Timer}
-            label="Median call"
-            value={stats?.latency.call_ms.p50 != null ? formatDuration(stats.latency.call_ms.p50) : '—'}
-            hint={stats?.latency.call_ms.p95 != null ? `p95 ${formatDuration(stats.latency.call_ms.p95)} · cut at 3:00` : 'Cut at 3:00'}
+            label="Avg time per call"
+            value={stats?.latency.call_ms.avg != null ? formatDuration(stats.latency.call_ms.avg) : '—'}
+            hint=" "
             trend={trends.length}
-            trendLabel="Median call length per bucket"
+            trendLabel="Average call length per bucket"
           />
         </div>
 

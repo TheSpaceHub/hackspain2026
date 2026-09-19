@@ -5,7 +5,7 @@
  * against and the records they are graded on; the dashboard only needs a browser.
  *
  *   GET  /__testlab                 problems, cases, behaviours and vocabularies
- *   POST /__testlab/suite           {seed?, random?} rebuild the real-clinic suite
+ *   POST /__testlab/suite           {seed?, random?, viable?} rebuild the real-clinic suite
  *   POST /__testlab/runs            {case_ids?, problem_ids?, behaviours?, vocabularies?, mode?, concurrency?}
  *   GET  /__testlab/runs            every run, newest first
  *   GET  /__testlab/runs/:id        one run, with every result and the issue drafts
@@ -29,7 +29,7 @@ import { VOCABULARIES } from '../../testlab/vocabulary.js';
 export interface Lab {
   suite: Suite;
   generation: Generation;
-  regenerate: (seed: number, random: number) => Promise<Suite>;
+  regenerate: (seed: number, random: number, viable: boolean) => Promise<Suite>;
 }
 
 export function testlabRoutes(router: Router, lab: Lab, runner: Runner): void {
@@ -50,11 +50,12 @@ export function testlabRoutes(router: Router, lab: Lab, runner: Runner): void {
     .get('/__testlab', () => ok(describe()), { public: true })
     .post('/__testlab/suite', async ({ body }) => {
       const parsed = await body();
-      const req = (parsed.ok ? (parsed.value ?? {}) : {}) as { seed?: number; random?: number };
+      const req = (parsed.ok ? (parsed.value ?? {}) : {}) as { seed?: number; random?: number; viable?: boolean };
       const seed = Number.isFinite(req.seed) ? Number(req.seed) : lab.generation.seed + 1;
       const random = Number.isFinite(req.random) ? Number(req.random) : lab.generation.random;
+      const viable = typeof req.viable === 'boolean' ? req.viable : lab.generation.viable;
       try {
-        await lab.regenerate(seed, Math.min(Math.max(0, random), 60));
+        await lab.regenerate(seed, Math.min(Math.max(0, random), 60), viable);
         return ok(describe());
       } catch (err) {
         return fail(409, String(err instanceof Error ? err.message : err));

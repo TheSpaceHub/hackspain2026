@@ -20,7 +20,7 @@ export interface TestLab {
   select: (runId: string | null) => void;
   start: (req: RunRequest) => Promise<void>;
   stop: (runId: string) => Promise<void>;
-  regenerate: (req: { seed?: number; random?: number }) => Promise<void>;
+  regenerate: (req: { seed?: number; random?: number; viable?: boolean }) => Promise<void>;
 }
 
 /** Results arrive one call at a time; re-reading the whole run keeps this honest and simple. */
@@ -116,7 +116,7 @@ export function useTestLab(): TestLab {
     [refreshRun],
   );
 
-  const regenerate = useCallback(async (req: { seed?: number; random?: number }) => {
+  const regenerate = useCallback(async (req: { seed?: number; random?: number; viable?: boolean }) => {
     setError(null);
     try {
       setSuite(await regenerateSuite(req));

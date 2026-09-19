@@ -18,7 +18,7 @@ export function fetchSuite(signal?: AbortSignal): Promise<SuiteResponse> {
 }
 
 /** Rebuild the random asks. Same seed, same asks — that is the whole point of it. */
-export async function regenerateSuite(req: { seed?: number; random?: number }): Promise<SuiteResponse> {
+export async function regenerateSuite(req: { seed?: number; random?: number; viable?: boolean }): Promise<SuiteResponse> {
   const res = await fetch(`${ORIGIN}/__testlab/suite`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

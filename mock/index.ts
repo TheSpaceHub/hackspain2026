@@ -51,6 +51,7 @@ const generation: Generation = {
   source: mirror ? 'real' : 'generated',
   seed: Number(process.env.MOCK_SUITE_SEED ?? 1),
   random: mirror ? Number(process.env.MOCK_SUITE_RANDOM ?? 12) : 0,
+  viable: process.env.MOCK_SUITE_VIABLE === '1',
 };
 
 const started = Date.now();
@@ -62,9 +63,9 @@ const lab = {
   suite: real ? await buildRealSuite(real, generation) : buildSuite(world),
   generation,
   /** Rebuilding is how a run is made repeatable: same seed, same asks. */
-  regenerate: async (seed: number, random: number) => {
+  regenerate: async (seed: number, random: number, viable: boolean) => {
     if (!real) throw new Error('only the real-clinic suite can be regenerated (MOCK_MIRROR=1)');
-    lab.generation = { source: 'real', seed, random };
+    lab.generation = { source: 'real', seed, random, viable };
     lab.suite = await buildRealSuite(real, lab.generation);
     runner.useSuite(lab.suite);
     return lab.suite;

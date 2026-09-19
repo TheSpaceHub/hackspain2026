@@ -12,10 +12,12 @@ export interface Generation {
   /** Only the random cases use it; the written ones are what the clinic says today. */
   seed: number;
   random: number;
+  /** Random asks restricted to ones the clinic can book. */
+  viable: boolean;
 }
 
-export async function buildRealSuite(w: RealWorld, gen: { seed: number; random: number }): Promise<Suite> {
+export async function buildRealSuite(w: RealWorld, gen: { seed: number; random: number; viable: boolean }): Promise<Suite> {
   const written = await realCases(w);
-  const random = gen.random > 0 ? await randomCases(w, gen.seed, gen.random) : [];
+  const random = gen.random > 0 ? await randomCases(w, gen.seed, gen.random, gen.viable) : [];
   return suiteOf([...written, ...random]);
 }

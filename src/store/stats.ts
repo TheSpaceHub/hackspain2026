@@ -25,8 +25,7 @@ export interface StatsRow {
 }
 
 export interface Distribution {
-  p50: number | null;
-  p95: number | null;
+  avg: number | null;
   max: number | null;
   n: number;
 }
@@ -63,7 +62,7 @@ export interface Stats {
   };
   bucket_ms: number;
   /** Calls started per bucket, oldest first, from `since` (or the first call) to now. */
-  series: { at: string; calls: number; with_record: number; call_ms_p50: number | null }[];
+  series: { at: string; calls: number; with_record: number; call_ms_avg: number | null }[];
 }
 
 function parseAlerts(json: string | null): Pick<Alert, 'id' | 'level'>[] {
@@ -76,15 +75,14 @@ function parseAlerts(json: string | null): Pick<Alert, 'id' | 'level'>[] {
   }
 }
 
-function quantile(sorted: number[], q: number): number | null {
-  if (sorted.length === 0) return null;
-  const i = Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1));
-  return sorted[i]!;
+function average(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return Math.round(values.reduce((sum, x) => sum + x, 0) / values.length);
 }
 
 function distribution(values: (number | null)[]): Distribution {
-  const v = values.filter((x): x is number => typeof x === 'number').sort((a, b) => a - b);
-  return { p50: quantile(v, 0.5), p95: quantile(v, 0.95), max: v.length ? v[v.length - 1]! : null, n: v.length };
+  const v = values.filter((x): x is number => typeof x === 'number');
+  return { avg: average(v), max: v.length ? Math.max(...v) : null, n: v.length };
 }
 
 /** At most this many buckets, whatever the range — a series, not a histogram. */
@@ -126,7 +124,7 @@ export function computeStats(rows: StatsRow[], since: string | null, bucketMs: n
     at: new Date(start + i * width).toISOString(),
     calls: 0,
     with_record: 0,
-    call_ms_p50: null as number | null,
+    call_ms_avg: null as number | null,
   }));
   const lengths = series.map((): number[] => []);
   for (const r of rows) {
@@ -138,7 +136,7 @@ export function computeStats(rows: StatsRow[], since: string | null, bucketMs: n
     if (r.call_ms !== null) lengths[i]!.push(r.call_ms);
   }
   series.forEach((b, i) => {
-    b.call_ms_p50 = quantile(lengths[i]!.sort((x, y) => x - y), 0.5);
+    b.call_ms_avg = average(lengths[i]!);
   });
 
   return {

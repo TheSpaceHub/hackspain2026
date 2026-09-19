@@ -1,5 +1,5 @@
 import { CircleCheck, CircleDashed, CircleX, TriangleAlert } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { Stats } from '@/lib/agent/stats';
 import { formatDuration, formatLatency } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -21,8 +21,6 @@ function grade(value: number | null, [watch, risk]: [number, number]): Health {
 
 interface Check {
   name: string;
-  /** Why it matters, in the words of the rules. */
-  why: string;
   reading: string;
   health: Health;
   /** 0–1 of the budget used; omitted for counts. */
@@ -39,42 +37,36 @@ function checks(s: Stats): Check[] {
   const CAP = 180_000;
   return [
     {
-      name: 'Submission window',
-      why: 'POST within 30 s of hang-up, or 410',
-      reading: l.close_to_submitted_ms.n ? `p95 ${formatLatency(l.close_to_submitted_ms.p95)} · max ${formatLatency(l.close_to_submitted_ms.max)}` : '—',
-      health: grade(l.close_to_submitted_ms.max, [10_000, 20_000]),
-      meter: (l.close_to_submitted_ms.max ?? 0) / WINDOW,
+      name: 'Avg time to submit',
+      reading: l.close_to_submitted_ms.n ? formatLatency(l.close_to_submitted_ms.avg) : '—',
+      health: grade(l.close_to_submitted_ms.avg, [10_000, 20_000]),
+      meter: (l.close_to_submitted_ms.avg ?? 0) / WINDOW,
     },
     {
-      name: 'Call length',
-      why: 'Cut at 3:00 — a call that runs out fails',
-      reading: l.call_ms.n ? `p50 ${formatDuration(l.call_ms.p50)} · p95 ${formatDuration(l.call_ms.p95)}` : '—',
-      health: grade(l.call_ms.p95, [120_000, 150_000]),
-      meter: (l.call_ms.p95 ?? 0) / CAP,
+      name: 'Avg time per call',
+      reading: l.call_ms.n ? formatDuration(l.call_ms.avg) : '—',
+      health: grade(l.call_ms.avg, [120_000, 150_000]),
+      meter: (l.call_ms.avg ?? 0) / CAP,
     },
     {
-      name: 'Decider',
-      why: 'Runs inside the submission window',
-      reading: l.decider_ms.n ? `p50 ${formatLatency(l.decider_ms.p50)} · p95 ${formatLatency(l.decider_ms.p95)}` : '—',
-      health: grade(l.decider_ms.p95, [8_000, 15_000]),
-      meter: (l.decider_ms.p95 ?? 0) / WINDOW,
+      name: 'Avg decider time',
+      reading: l.decider_ms.n ? formatLatency(l.decider_ms.avg) : '—',
+      health: grade(l.decider_ms.avg, [8_000, 15_000]),
+      meter: (l.decider_ms.avg ?? 0) / WINDOW,
     },
     {
-      name: 'Agent ready',
-      why: 'Session up before the caller speaks',
-      reading: l.session_start_ms.n ? `p95 ${formatLatency(l.session_start_ms.p95)}` : '—',
-      health: grade(l.session_start_ms.p95, [1_000, 2_000]),
-      meter: (l.session_start_ms.p95 ?? 0) / 2_000,
+      name: 'Avg time to answer',
+      reading: l.session_start_ms.n ? formatLatency(l.session_start_ms.avg) : '—',
+      health: grade(l.session_start_ms.avg, [1_000, 2_000]),
+      meter: (l.session_start_ms.avg ?? 0) / 2_000,
     },
     {
-      name: 'Decider fell back',
-      why: 'The floor answered instead of the model',
+      name: 'Calls using fallback decision',
       reading: `${t.floor_used} of ${t.ended}`,
       health: t.ended ? grade(t.floor_used, [1, Math.max(2, Math.ceil(t.ended * 0.1))]) : 'none',
     },
     {
       name: 'Calls without a record',
-      why: 'Nothing accepted is always a failed case',
       reading: `${t.without_record} of ${t.ended}`,
       health: t.ended ? grade(t.without_record, [1, 1]) : 'none',
     },
@@ -86,7 +78,6 @@ export function PipelineHealthCard({ stats, className }: { stats: Stats; classNa
     <Card size="sm" className={className}>
       <CardHeader>
         <CardTitle>Pipeline health</CardTitle>
-        <CardDescription>How close the agent runs to the platform’s limits</CardDescription>
       </CardHeader>
       <CardContent>
       <ul className="grid gap-x-8 lg:grid-cols-2">
@@ -95,10 +86,7 @@ export function PipelineHealthCard({ stats, className }: { stats: Stats; classNa
           return (
             <li key={c.name} className="space-y-2 border-t py-3">
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">{c.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">{c.why}</p>
-                </div>
+                <p className="min-w-0 text-sm font-medium">{c.name}</p>
                 <span className={cn('flex shrink-0 items-center gap-1 text-xs font-medium', st.text)}>
                   <st.icon className="size-3.5" aria-hidden />
                   {st.label}
