@@ -24,8 +24,6 @@ interface AppShellProps {
   /** Flip the agent between the real clinic and the sim. Absent on agents that cannot. */
   onMode?: (mode: AgentMode) => void;
   switching: boolean;
-  /** A shared clinic (sim/) answers on /__sim — shown when the agent is not using it. */
-  simRunning: boolean;
   children: ReactNode;
 }
 
@@ -133,40 +131,13 @@ function ModePill({
       onClick={() => onMode(next)}
       disabled={switching}
       className={cn(classes, 'group cursor-pointer transition-opacity hover:opacity-80 disabled:cursor-wait disabled:opacity-60')}
-      title={`Clinic API · ${url}\nClick to switch to ${MODE_LABEL[next]} for new calls`}
+      title={`New calls book into ${url}${mode === 'simulation' ? ' — nothing reaches Prosper' : ' — the real clinic'}.\nClick to switch to ${MODE_LABEL[next]}; calls already open finish where they started.`}
     >
       <Icon className="size-3.5" />
       {switching ? 'Switching…' : MODE_LABEL[mode]}
       <ArrowLeftRight className="size-3 opacity-50 group-hover:opacity-100" />
     </button>
   );
-}
-
-/** A strip under the header for the two states that must never be confused. */
-function ModeBanner({ mode, url, simRunning }: { mode: ConsoleMode; url: string | null; simRunning: boolean }) {
-  if (mode === 'simulation') {
-    return (
-      <div className="flex shrink-0 items-center gap-2 border-b border-violet-600/30 bg-violet-500/10 px-4 py-1 text-xs text-violet-900 dark:text-violet-200">
-        <Hospital className="size-3.5" />
-        <b className="font-semibold">Simulation.</b> New calls book into the shared local clinic ({url}) — nothing here reaches Prosper. Reset it
-        from the Clinic tab; click the pill above to go back to live.
-      </div>
-    );
-  }
-  if (mode === 'live') {
-    return (
-      <div className="flex shrink-0 items-center gap-2 border-b border-emerald-600/30 bg-emerald-500/10 px-4 py-1 text-xs text-emerald-900 dark:text-emerald-200">
-        <Globe className="size-3.5" />
-        <b className="font-semibold">Live.</b> New calls book into the real clinic ({url}).
-        {simRunning && (
-          <span className="text-emerald-900/70 dark:text-emerald-200/70">
-            A sim is running on this machine — click the pill above to send new calls there instead.
-          </span>
-        )}
-      </div>
-    );
-  }
-  return null;
 }
 
 function Clock() {
@@ -180,7 +151,7 @@ function Clock() {
   );
 }
 
-export function AppShell({ nav, active, onNavigate, clinicApi, mode, onMode, switching, simRunning, children }: AppShellProps) {
+export function AppShell({ nav, active, onNavigate, clinicApi, mode, onMode, switching, children }: AppShellProps) {
   useEffect(() => {
     document.title = mode === 'simulation' ? '[SIM] Agent la L' : mode === 'live' ? '[LIVE] Agent la L' : 'Agent la L';
   }, [mode]);
@@ -195,7 +166,6 @@ export function AppShell({ nav, active, onNavigate, clinicApi, mode, onMode, swi
           <Clock />
         </div>
       </header>
-      <ModeBanner mode={mode} url={clinicApi} simRunning={simRunning} />
       <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
     </div>
   );

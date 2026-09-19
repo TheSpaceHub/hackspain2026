@@ -73,7 +73,6 @@ export function App() {
             : undefined
         }
         switching={switching}
-        simRunning={sim.available === true}
       >
         {route.view === 'overview' ? (
           <OverviewView feed={feed} />
