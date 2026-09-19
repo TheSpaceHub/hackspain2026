@@ -77,12 +77,12 @@ export const BEHAVIOURS: Behaviour[] = [
     ...base,
     id: 'long_silences',
     label: 'Long silences',
-    description: 'Leaves eight to ten seconds of dead air before each answer.',
+    description: 'Leaves about ten seconds of dead air before each answer.',
     instructions: [
       'You are distracted — the television is on and a child is asking you something. You take a long time to',
       'come back to the phone, and when you do you sometimes ask them to repeat what they said.',
     ].join(' '),
-    lead_ms: 9_000,
+    lead_ms: 10_000,
     tail_ms: 2_000,
   },
   {
