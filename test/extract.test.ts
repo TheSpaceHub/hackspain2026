@@ -233,7 +233,7 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
     { role: 'assistant', text: 'What is your full name and date of birth?' },
     { role: 'user', text: 'Ana Ruiz, 14 March 1990.' },
     { role: 'assistant', text: 'And your phone and email?' },
-    { role: 'user', text: 'Six hundred, nine nine nine, eight eight eight, ana@example.com.' },
+    { role: 'user', text: 'My phone is 600999888 and my email is ana@example.com.' },
   ]);
   check('the final transcript pass fills registration notes', state.patient.given_name, 'Ana');
   check('the final transcript pass fills the date', state.patient.date_of_birth, '1990-03-14');

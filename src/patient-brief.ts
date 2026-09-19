@@ -108,10 +108,10 @@ export function describeBrief(brief: PatientBrief): string {
     }
     if (facts.length > 0) lines.push(`Plan ${brief.plan.name}: ${facts.join('; ')}.`);
   }
-  if (brief.referrals_held.length > 0) {
+  if (brief.plan && brief.referrals_held.length > 0) {
     lines.push(`Referral held for ${brief.referrals_held.join(', ')}.`);
   }
-  if (brief.referral_missing.length > 0) {
+  if (brief.plan && brief.referral_missing.length > 0) {
     lines.push(`Referral needed for ${names(brief.referral_missing)}.`);
   }
   if (brief.visit_kind !== 'unknown') {
