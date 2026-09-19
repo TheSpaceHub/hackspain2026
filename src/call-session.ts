@@ -15,7 +15,7 @@ import {
 } from './call-state.js';
 import { createExtractor, DEFAULT_EXTRACT_TIMEOUT_MS, type Extractor } from './extract.js';
 import type { Availability, Catalogue, ClinicApi } from './clinic-api.js';
-import { config } from './config.js';
+import { config, SILENCE_NUDGE_MS } from './config.js';
 import { FLOOR_ACTION, decide, type DeciderResult } from './decider.js';
 import {
   applyEmergencyGuard,
@@ -78,6 +78,7 @@ export class CallSession {
   #framesOut = 0;
   #errors: string[] = [];
   #finishing: Promise<void> | null = null;
+  #closing = false;
   #endedBy = 'unknown';
   #transcript: TranscriptTurn[] = [];
   #state: CallState | null = null;
@@ -87,6 +88,9 @@ export class CallSession {
   #availability: Availability | null = null;
   /** Turns already handed to the store, so a live flush never re-sends one. */
   #turnsWritten = 0;
+  #silenceTimer: NodeJS.Timeout | null = null;
+  #nudges = 0;
+  #greetingFinished = false;
 
   constructor(ws: WebSocket, shared: Shared) {
     this.#ws = ws;
@@ -233,17 +237,99 @@ export class CallSession {
       await session.start({ agent });
       this.#sessionStartMs = Date.now() - t0;
 
-      // Speak first: the harness cuts a call with no audible audio from us.
-      session.say(GREETING, { allowInterruptions: true });
-
       // A turn lands in the store as soon as it is final, so a crash mid-call still
       // leaves the conversation on disk. The write crosses to the worker thread.
       session.on(voice.AgentSessionEventTypes.ConversationItemAdded, () => this.#flushTurns());
+      session.on(voice.AgentSessionEventTypes.UserInputTranscribed, () => this.#clearSilenceTimer());
+      session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
+        if (event.newState === 'listening') {
+          this.#armSilenceTimer();
+        } else {
+          this.#clearSilenceTimer();
+        }
+      });
+      session.on(voice.AgentSessionEventTypes.UserStateChanged, (event) => {
+        if (event.newState === 'speaking') {
+          this.#clearSilenceTimer();
+        } else if (event.newState === 'listening') {
+          this.#armSilenceTimer();
+        }
+      });
+
+      // Speak first: the harness cuts a call with no audible audio from us.
+      const greeting = session.say(GREETING, { allowInterruptions: true });
+      void greeting.waitForPlayout().then(
+        () => {
+          this.#greetingFinished = true;
+          this.#armSilenceTimer();
+        },
+        (err: unknown) => this.#errors.push(`greeting playout: ${String(err)}`),
+      );
     } catch (err) {
       this.#errors.push(`session start: ${String(err)}`);
       console.error(`[call ${this.#callId}] session start failed: ${String(err)}`);
       // The call is lost; the submission is not.
       void this.finish('session_start_failed');
+    }
+  }
+
+  #clearSilenceTimer(): void {
+    if (this.#silenceTimer) clearTimeout(this.#silenceTimer);
+    this.#silenceTimer = null;
+  }
+
+  #armSilenceTimer(): void {
+    this.#clearSilenceTimer();
+    const session = this.#session;
+    if (
+      !session ||
+      this.#closing ||
+      !this.#greetingFinished ||
+      session.agentState !== 'listening'
+    ) return;
+    this.#silenceTimer = setTimeout(() => {
+      this.#silenceTimer = null;
+      void this.#handleSilence();
+    }, SILENCE_NUDGE_MS);
+  }
+
+  async #handleSilence(): Promise<void> {
+    try {
+      const session = this.#session;
+      if (
+        !session ||
+        this.#closing ||
+        session.agentState !== 'listening' ||
+        session.userState === 'speaking'
+      ) return;
+
+      this.#nudges++;
+      clog.info(`[silence] no caller speech for ${SILENCE_NUDGE_MS / 1000}s · nudge ${this.#nudges}`);
+      if (this.#nudges <= 2) {
+        try {
+          session.generateReply({
+            instructions:
+              'The caller has said nothing for several seconds since your last sentence. In one short sentence check they are still there and repeat your last question or the appointment you offered (with day and time), so they can answer with a yes.',
+            allowInterruptions: true,
+          });
+        } catch (err) {
+          this.#errors.push(`silence nudge: ${String(err)}`);
+        }
+        return;
+      }
+
+      try {
+        const goodbye = session.say(
+          "I'm sorry, I can't hear you. Please call us back at Clínica Arenal whenever suits you. Goodbye.",
+          { allowInterruptions: true },
+        );
+        await goodbye.waitForPlayout();
+      } catch (err) {
+        this.#errors.push(`silence goodbye: ${String(err)}`);
+      }
+      if (!this.#closing) void this.finish('caller_silent');
+    } catch (err) {
+      this.#errors.push(`silence timer: ${String(err)}`);
     }
   }
 
@@ -303,6 +389,8 @@ export class CallSession {
   }
 
   async #finish(trigger: string): Promise<void> {
+    this.#closing = true;
+    this.#clearSilenceTimer();
     if (this.#endedBy === 'unknown') this.#endedBy = trigger;
     if (this.#wallClock) clearTimeout(this.#wallClock);
 
