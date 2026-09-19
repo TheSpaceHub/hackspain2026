@@ -20,9 +20,17 @@ export interface Stats {
     without_record: number;
     rejected: number;
     floor_used: number;
+    /** Ended with at least one alert. */
+    flagged: number;
+    /** Ended with a critical alert. */
+    critical: number;
   };
   /** Ended calls by first accepted action; `none` for no record. */
+  /** Ended calls carrying each alert. */
+  alerts: Record<string, number>;
   outcomes: Record<string, number>;
+  /** The same calls by reason, per action that carries one: `{ no_action: { out_of_scope: 3 } }`. */
+  reasons: Record<string, Record<string, number>>;
   latency: {
     call_ms: Distribution;
     session_start_ms: Distribution;

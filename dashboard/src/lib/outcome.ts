@@ -29,22 +29,34 @@ export function actionTone(action: string): Tone {
   return ACTIONS[action]?.tone ?? 'secondary';
 }
 
+/** `caller_not_authorised` → `caller not authorised`. */
+export function reasonLabel(reason: string): string {
+  return reason.replace(/_/g, ' ');
+}
+
 export interface OutcomeSummary {
   label: string;
+  /** The first action's reason, when it carries one. */
+  reason: string | null;
   tone: Tone;
   /** Further actions on the same call, beyond the first. */
   more: number;
 }
 
 export function summariseOutcome(call: Call, status: CallStatus): OutcomeSummary {
-  if (status === 'stale') return { label: 'Lost', tone: 'destructive', more: 0 };
+  if (status === 'stale') return { label: 'Lost', reason: null, tone: 'destructive', more: 0 };
   const accepted = call.outcomes.filter((o: Outcome) => isAccepted(o.status));
   const first = accepted[0];
   // Nothing on record scores the same as a crash: always wrong, so it reads as one.
   if (!first) {
     return call.outcomes.length > 0
-      ? { label: 'Rejected', tone: 'destructive', more: 0 }
-      : { label: 'No record', tone: 'destructive', more: 0 };
+      ? { label: 'Rejected', reason: null, tone: 'destructive', more: 0 }
+      : { label: 'No record', reason: null, tone: 'destructive', more: 0 };
   }
-  return { label: actionLabel(first.action), tone: actionTone(first.action), more: accepted.length - 1 };
+  return {
+    label: actionLabel(first.action),
+    reason: first.reason,
+    tone: actionTone(first.action),
+    more: accepted.length - 1,
+  };
 }

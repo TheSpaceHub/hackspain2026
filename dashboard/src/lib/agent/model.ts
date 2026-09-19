@@ -3,6 +3,9 @@
  * here and only here, so the SSE-vs-REST disagreements (0/1 vs boolean, JSON text
  * vs arrays) are settled once instead of in every component.
  */
+import type { Alert } from '@agent/store/alerts';
+
+export type { Alert };
 import type {
   CallDetailResponse,
   CallEnded,
@@ -42,6 +45,8 @@ export interface Submission {
 export interface Outcome {
   action: string;
   status: number;
+  /** Why, for the actions that carry one (no_action, escalate) — what Prosper grades. */
+  reason: string | null;
 }
 
 export interface Call {
@@ -73,6 +78,8 @@ export interface Call {
   turns: Turn[];
   submissions: Submission[];
   outcomes: Outcome[];
+  /** What went wrong, as the agent's store derived it; null until it has said. */
+  alerts: Alert[] | null;
 }
 
 export type CallStatus = 'live' | 'ended' | 'stale';
@@ -100,13 +107,14 @@ function parseJson<T>(text: string | null | undefined, fallback: T): T {
   }
 }
 
-/** "book=200,cancel=409" → [{book,200},{cancel,409}]. */
+/** "book=200,no_action=200:out_of_scope" → [{book,200,null},{no_action,200,out_of_scope}]. */
 export function parseOutcome(outcome: string | null): Outcome[] {
   if (!outcome) return [];
-  return outcome.split(',').flatMap((pair) => {
-    const eq = pair.lastIndexOf('=');
+  return outcome.split(',').flatMap((item) => {
+    const eq = item.indexOf('=');
     if (eq < 1) return [];
-    return [{ action: pair.slice(0, eq), status: Number(pair.slice(eq + 1)) }];
+    const [status = '', reason] = item.slice(eq + 1).split(':');
+    return [{ action: item.slice(0, eq), status: Number(status), reason: reason || null }];
   });
 }
 
@@ -128,6 +136,7 @@ export function emptyCall(id: string, startedAt: string): Call {
     turns: [],
     submissions: [],
     outcomes: [],
+    alerts: null,
   };
 }
 
@@ -154,6 +163,7 @@ export function fromCallRecord(r: CallRecord): Call {
       usedFloor: r.used_floor === 1,
     },
     errors: parseJson<string[]>(r.errors, []),
+    alerts: r.alerts ? parseJson<Alert[]>(r.alerts, []) : null,
   };
 }
 
@@ -229,5 +239,6 @@ export function toSubmission(s: SubmissionRecord | SubmissionRow): Submission {
 }
 
 export function toOutcome(s: Submission): Outcome {
-  return { action: s.action, status: s.status };
+  const reason = s.body && typeof s.body === 'object' ? (s.body as { reason?: unknown }).reason : undefined;
+  return { action: s.action, status: s.status, reason: typeof reason === 'string' ? reason : null };
 }

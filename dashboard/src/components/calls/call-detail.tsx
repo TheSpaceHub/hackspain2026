@@ -2,6 +2,7 @@ import { PhoneIncoming, PhoneOff } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { type Call, callStatus } from '@/lib/agent/model';
 import { formatClock, formatDay, formatDuration, formatPhone, shortId } from '@/lib/format';
+import { AlertsPanel, flaggedSeqs } from './alerts';
 import { OutcomeBadge } from './outcome-badge';
 import { RecordCard } from './record-card';
 import { TimelineEvent, Transcript } from './transcript';
@@ -60,12 +61,13 @@ export function CallDetail({ call, loading, now }: CallDetailProps) {
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-muted/40">
         <div className="mx-auto max-w-3xl space-y-5 px-4 py-5">
+          <AlertsPanel alerts={call.alerts} />
           <TimelineEvent>
             <PhoneIncoming className="size-3.5" />
             Call connected · {formatClock(call.startedAt, true)}
           </TimelineEvent>
 
-          {loading ? <TranscriptSkeleton /> : <Transcript turns={call.turns} />}
+          {loading ? <TranscriptSkeleton /> : <Transcript turns={call.turns} flagged={flaggedSeqs(call.alerts)} />}
 
           {hungUpAt && (
             <TimelineEvent>
