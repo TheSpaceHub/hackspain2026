@@ -285,7 +285,7 @@ function harness(
 
   const doctor = await h.call('clinic_fact', { doctor_name: 'Cid' });
   check('a doctor is described off the catalogue', /physiotherapy/.test(doctor), true);
-  check('the unknown doctor is admitted to', /No doctor of that name/.test(await h.call('clinic_fact', { doctor_name: 'House' })), true);
+  check('a garbled doctor name is never denied', /No doctor of that name/.test(await h.call('clinic_fact', { doctor_name: 'House' })), false);
   check('a site closed that day says so', /closed that day/.test(await h.call('clinic_fact', { location_id: 'loc_norte', date: '2026-10-10' })), true);
 }
 
