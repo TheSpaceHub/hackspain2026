@@ -87,9 +87,27 @@ export const catalogueSchema = z.looseObject({
     .optional(),
   providers: z.array(providerSchema).default([]),
   locations: z.array(locationSchema).default([]),
-  specialties: z.array(z.looseObject({ id: z.string(), name: z.string() })).default([]),
-  appointment_types: z.array(z.looseObject({ id: z.string(), name: z.string() })).default([]),
-  plans: z.array(z.looseObject({ id: z.string(), name: z.string() })).default([]),
+  specialties: z.array(z.looseObject({
+    id: z.string(),
+    name: z.string(),
+    min_age_months: z.number().nullable().default(null),
+    max_age_months: z.number().nullable().default(null),
+    referral_required: z.boolean().default(false),
+    covered_by: z.array(z.looseObject({ id: z.string(), name: z.string() })).default([]),
+  })).default([]),
+  appointment_types: z.array(z.looseObject({
+    id: z.string(),
+    name: z.string(),
+    new_patient_requirement: z.string().nullable().default(null),
+    specialty_id: z.string().nullable().default(null),
+  })).default([]),
+  plans: z.array(z.looseObject({
+    id: z.string(),
+    name: z.string(),
+    uncovered_specialty_names: z.array(z.string()).default([]),
+    uncovered_location_names: z.array(z.string()).default([]),
+    refused_by: z.array(z.string()).default([]),
+  })).default([]),
 });
 export type Catalogue = z.infer<typeof catalogueSchema>;
 
@@ -357,5 +375,4 @@ export function siteHours(catalogue: Catalogue, locationId: string, isoDate: str
 export function isClosureDay(catalogue: Catalogue, isoDate: string): boolean {
   return (catalogue.calendar?.closure_days ?? []).includes(isoDate);
 }
-
 

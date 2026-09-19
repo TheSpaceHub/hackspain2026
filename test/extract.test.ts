@@ -8,9 +8,10 @@
  */
 
 import { applyPatch, createExtractor, parsePatch, type Complete } from '../src/extract.js';
-import { createCallState, readCallState, recordMatch } from '../src/call-state.js';
+import { createCallState, readCallState, recordMatch, setPlanVocabulary } from '../src/call-state.js';
 
 let failed = 0;
+setPlanVocabulary([{ id: 'nueva_mutua_sanitaria', name: 'Nueva Mutua Sanitaria' }]);
 function check(name: string, actual: unknown, expected: unknown): void {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
@@ -217,6 +218,26 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
   await extractor.settle(1_000);
   check('a failed extraction is logged, not thrown into the call', errors.length, 1);
   check('and the notes are merely empty', state.request.intent, undefined);
+}
+
+{
+  const state = createCallState('call-final-pass');
+  state.request.intent = 'register';
+  const extractor = createExtractor({
+    state,
+    complete: () => Promise.resolve(
+      '{"patient":{"given_name":"Ana","first_surname":"Ruiz","national_id":"48064716Y","date_of_birth":"1990-03-14","phone":"600999888","email":"ana@example.com"}}',
+    ),
+  });
+  await extractor.finalPass([
+    { role: 'assistant', text: 'What is your full name and date of birth?' },
+    { role: 'user', text: 'Ana Ruiz, 14 March 1990.' },
+    { role: 'assistant', text: 'And your phone and email?' },
+    { role: 'user', text: 'Six hundred, nine nine nine, eight eight eight, ana@example.com.' },
+  ]);
+  check('the final transcript pass fills registration notes', state.patient.given_name, 'Ana');
+  check('the final transcript pass fills the date', state.patient.date_of_birth, '1990-03-14');
+  check('the final transcript pass fills contact details', state.patient.phone, '600999888');
 }
 
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);

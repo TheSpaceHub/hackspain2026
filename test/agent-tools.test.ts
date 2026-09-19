@@ -299,11 +299,23 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
 // --- which plan the visit is billed to ---------------------------------------
 
 {
-  setPlanVocabulary(catalogue.plans);
+  setPlanVocabulary([
+    ...catalogue.plans,
+    { id: 'cigna', name: 'Cigna' },
+    { id: 'mapfre', name: 'Mapfre Salud' },
+  ]);
 
   check('a plan said out loud is written down as the clinic bills it', planId('Sanitas'), 'sanitas');
   check('accents and all', planId('ASISA'), 'asisa');
-  check('a plan nobody offers is kept as spoken, not swapped for a real one', planId('Wizard Cover'), 'wizard_cover');
+  check('a plan nobody offers is dropped', planId('Wizard Cover'), '');
+  check('a fuzzy ASISA is resolved to the real plan', planId('acisa'), 'asisa');
+  check('a fuzzy Sanitas is resolved to the real plan', planId('Fenitas'), 'sanitas');
+  check('a fuzzy Cigna is resolved to the real plan', planId('Signa'), 'cigna');
+  check('a fuzzy Mapfre is resolved to the real plan', planId('Mafre Salud'), 'mapfre');
+  check('a numeric placeholder plan is dropped', planId('1'), '');
+  const heard = createCallState('call-heard-insurer');
+  recordRequest(heard, { insurers: ['ACISA', '1'] });
+  check('a heard insurer keeps only real plans', heard.request.insurers, ['asisa']);
 
   const h = harness();
   await h.call('identify_patient', { national_id: '12345678Z' });
@@ -325,6 +337,29 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
     h.state,
   );
   check('a placeholder never reaches the clinic', invented.action.policy_id, 'sanitas');
+}
+
+{
+  setPlanVocabulary([
+    { id: 'dkv', name: 'DKV' },
+    { id: 'sanitas', name: 'Sanitas' },
+  ]);
+  const state = createCallState('call-policy-order');
+  recordMatch(state, {
+    patient_id: 'pat-dkv',
+    insurer: 'dkv',
+  });
+  recordRequest(state, { insurers: ['Sanitas'] });
+  recordAccepted(state, {
+    provider_id: 'prov',
+    location_id: 'loc',
+    appointment_type_id: 'apt',
+    start_time: '2026-10-08T09:00:00+02:00',
+    payable_with: ['dkv', 'sanitas'],
+  });
+  check('the matched record plan is primary when both plans pay', choosePolicy(state), 'dkv');
+  state.accepted!.payable_with = ['sanitas'];
+  check('the heard plan wins when it is the only payable plan', choosePolicy(state), 'sanitas');
 }
 
 {

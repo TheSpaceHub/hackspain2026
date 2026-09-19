@@ -15,7 +15,10 @@ import {
   normalizePhone,
   type Normalized,
 } from './normalize.js';
-import { distance, fold as fuzzyFold, tolerance } from './fuzzy.js';
+import { distance, fold as fuzzyFold, only, tolerance } from './fuzzy.js';
+import { describeBrief } from './patient-brief.js';
+import { clog } from './log.js';
+import type { PatientBrief } from './patient-brief.js';
 import type { Patient } from './schema.js';
 
 /** Everything the caller can tell us about the patient, before the directory confirms it. */
@@ -73,6 +76,7 @@ export interface CallState {
   patient: PatientDraft;
   /** The directory row we settled on. `patient_id` comes from here and nowhere else. */
   matched: Patient | null;
+  brief?: PatientBrief;
   /** Problem 9: booking for the caller instead of the patient is the failure mode. */
   caller_is_patient: boolean;
   caller?: { name?: string; relationship?: string };
@@ -135,6 +139,10 @@ export function recordPatientField(
   spoken: string,
 ): RecordResult {
   const { value, problem } = NORMALIZERS[field](spoken);
+  if (field === 'insurer' && !value) {
+    clog.warn(`[state] dropped insurer "${spoken}": not a plan the clinic bills`);
+    return { value: '', stored: false, problem: 'not a plan the clinic bills' };
+  }
   record(state, field, value, problem);
   state.patient[field] = value;
   return { value, stored: true, problem };
@@ -153,6 +161,8 @@ export function recordRequest(state: CallState, patch: Partial<CallRequest>): Ca
     if (id && !state.request.insurers.includes(id)) {
       state.request.insurers.push(id);
       record(state, 'request.insurer', id);
+    } else if (!id) {
+      clog.warn(`[state] dropped insurer "${insurer}": not a plan the clinic bills`);
     }
   }
   return state.request;
@@ -308,6 +318,10 @@ export function readCallState(state: CallState): string {
     `Patient: ${patient}` +
       (!state.matched && state.phone_match_rejected ? ' · number on file belongs to someone else' : ''),
   );
+  if (state.brief) {
+    const described = describeBrief(state.brief);
+    if (described) lines.push(`Rules for this patient: ${described}`);
+  }
 
   const draft = Object.entries(state.patient)
     .map(([k, v]) => `${k}=${v}`)
@@ -371,19 +385,16 @@ const fold = (text: string): string =>
 
 /** The clinic's id for a spoken plan, or the spoken plan tidied up when it knows none. */
 export function planId(spoken: string): string {
-  const said = fold(spoken);
-  if (!said) return '';
-  const match =
-    PLANS.find((plan) => fold(plan.id) === said || fold(plan.name) === said) ??
-    // "Sanitas" for "Sanitas Más": a prefix on a word boundary, never a substring, so
-    // "Mutua" cannot silently pick whichever mutua happens to be listed first.
-    PLANS.find((plan) => fold(plan.name).startsWith(`${said} `) || fold(plan.id).startsWith(`${said} `));
-  return match ? match.id : said.replace(/ /g, '_');
+  const match = only(
+    PLANS.map((plan) => ({ item: plan, aliases: [plan.id, plan.name] })),
+    spoken,
+  );
+  return match?.id ?? '';
 }
 
 /** Every plan this call knows of, the ones the caller named first. */
 export function knownPlans(state: CallState): string[] {
-  return [...state.request.insurers, state.patient.insurer, state.matched?.insurer].filter(
+  return [state.matched?.insurer, ...state.request.insurers, state.patient.insurer].filter(
     (plan): plan is string => typeof plan === 'string' && plan.trim() !== '',
   );
 }
@@ -393,9 +404,8 @@ export function knownPlans(state: CallState): string[] {
  *
  * Not a judgement: /availability prices the slot against every plan we passed it and
  * returns `payable_with`, so the answer is the intersection of that with the plans this
- * call knows of. A plan named on the call outranks the one on the record — which is the
- * whole of the second policy: the caller volunteers it, the diary re-prices, and the
- * survivor is what we submit.
+ * call knows of. The record plan is primary; a plan named on the call is a second policy
+ * and wins only when it is the one the diary says the accepted slot can be billed against.
  */
 export function choosePolicy(state: CallState): string | undefined {
   const named = knownPlans(state);

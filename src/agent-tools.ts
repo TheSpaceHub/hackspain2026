@@ -33,6 +33,7 @@ import {
   type CallState,
   type QuotedSlot,
 } from './call-state.js';
+import { attachBrief, describeBrief } from './patient-brief.js';
 import { geocodeMadrid, rankSites } from './nearest-site.js';
 import { resolveWhen } from './when.js';
 import { clog } from './log.js';
@@ -139,8 +140,10 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         }
         const patient = matches[0]!;
         recordMatch(state, patient);
+        attachBrief(state, catalogue, now());
         const visited = patient.has_visited_before ? 'has been seen here before' : 'has never been seen here';
-        return `Found ${[patient.given_name, patient.first_surname].filter(Boolean).join(' ')}, ${visited}, plan on record ${patient.insurer ?? 'none'}. Do not read this back.`;
+        const brief = state.brief ? describeBrief(state.brief) : '';
+        return `Found ${[patient.given_name, patient.first_surname].filter(Boolean).join(' ')}, ${visited}, plan on record ${patient.insurer ?? 'none'}.${brief ? ` ${brief}` : ''} Do not read this back.`;
       },
     }),
 

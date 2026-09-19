@@ -6,7 +6,8 @@ export const callContext = new AsyncLocalStorage<string>();
 
 function tag(): string {
   const id = callContext.getStore();
-  return id ? `[call ${id.slice(0, 8)}] ` : '';
+  const at = new Date().toISOString().slice(11, 23);
+  return id ? `[${at}] [call ${id.slice(0, 8)}] ` : `[${at}] `;
 }
 
 export const clog = {

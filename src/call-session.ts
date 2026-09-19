@@ -8,11 +8,12 @@ import { writeCallLog, type CallLog } from './call-log.js';
 import {
   acceptFromTranscript,
   createCallState,
+  missingForRegistration,
   readCallState,
   recordMatch,
   type CallState,
 } from './call-state.js';
-import { createExtractor, type Extractor } from './extract.js';
+import { createExtractor, DEFAULT_EXTRACT_TIMEOUT_MS, type Extractor } from './extract.js';
 import type { Availability, Catalogue, ClinicApi } from './clinic-api.js';
 import { config } from './config.js';
 import { FLOOR_ACTION, decide, type DeciderResult } from './decider.js';
@@ -23,7 +24,8 @@ import {
   overrideFlooredBooking,
 } from './guards.js';
 import { mulawToPcm16 } from './mulaw.js';
-import { callContext } from './log.js';
+import { callContext, clog } from './log.js';
+import { attachBrief } from './patient-brief.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
 import { submitActions, type SubmitResult } from './submit.js';
@@ -153,7 +155,7 @@ export class CallSession {
       if (this.#state.from_number) this.#identifyByPhone(this.#state, this.#state.from_number);
 
       console.log(
-        `[call ${this.#callId}] start · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
+        `[call ${this.#callId}] start ${new Date().toISOString()} · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
       );
 
       this.#shared.store.write({
@@ -251,7 +253,10 @@ export class CallSession {
       .findPatient({ phone })
       .then((matches) => {
         // Two people on one landline is a household, not an identification.
-        if (matches.length === 1 && !state.matched) recordMatch(state, matches[0]!);
+        if (matches.length === 1 && !state.matched) {
+          recordMatch(state, matches[0]!);
+          attachBrief(state, this.#shared.catalogue, new Date());
+        }
       })
       .catch((err: unknown) => this.#errors.push(`phone lookup: ${String(err)}`));
   }
@@ -333,6 +338,28 @@ export class CallSession {
     // and the decider reads the notes. Give it a slice of the window, not the window.
     this.#flushTurns();
     await this.#extractor?.settle(Math.max(0, Math.min(EXTRACT_SETTLE_MS, budget - 2_000)));
+    if (this.#state?.request.intent === 'register' && this.#extractor) {
+      const missingBefore = missingForRegistration(this.#state);
+      if (missingBefore.length > 0 && budget > 2_000) {
+        const filled = new Promise<void>((resolve) => {
+          void this.#extractor!.finalPass(
+            this.#transcript.filter(
+              (turn): turn is { role: 'user' | 'assistant'; text: string } =>
+                turn.role === 'user' || turn.role === 'assistant',
+            ),
+          ).then(() => resolve(), () => resolve());
+        });
+        await Promise.race([
+          filled,
+          new Promise<void>((resolve) => setTimeout(resolve, Math.min(DEFAULT_EXTRACT_TIMEOUT_MS, budget - 2_000))),
+        ]);
+        const missingAfter = missingForRegistration(this.#state);
+        const added = missingBefore.filter((field) => !missingAfter.includes(field));
+        clog.info(added.length > 0
+          ? `[extract] final pass: filled ${added.join(', ')}`
+          : '[extract] final pass: filled nothing');
+      }
+    }
 
     // A slot the caller chose but the model never held: the ids are all in the quote.
     if (this.#state) {
@@ -381,7 +408,7 @@ export class CallSession {
 
     const verdict = submissions.map((s) => `${s.action}=${s.status}`).join(' ') || 'none';
     console.log(
-      `[call ${this.#callId}] end (${this.#endedBy}) · turns=${this.#transcript.length} · ${verdict}`,
+      `[call ${this.#callId}] end ${new Date().toISOString()} (${this.#endedBy}) · turns=${this.#transcript.length} · ${verdict}`,
     );
   }
 
