@@ -3,12 +3,15 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
 import { OutcomeBadge } from '@/components/calls/outcome-badge';
 import { RecordCard } from '@/components/calls/record-card';
 import { AlertsPanel, flaggedSeqs } from '@/components/calls/alerts';
+import { ClinicTrace } from '@/components/clinic/clinic-trace';
 import { TimelineEvent, Transcript } from '@/components/calls/transcript';
 import { Badge, BadgeDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { type Call, callStatus } from '@/lib/agent/model';
 import { formatClock, formatDuration, formatPhone, shortId } from '@/lib/format';
 import { elapsedMs } from '@/lib/live';
+import { recordingUrl } from '@/lib/agent/client';
+import { ListenButton } from './listen-button';
 
 interface LiveCallPanelProps {
   call: Call;
@@ -68,6 +71,11 @@ export function LiveCallPanel({ call, now, onClose, onOpenFinished }: LiveCallPa
             <span className="font-mono text-xs">{shortId(call.id)}</span>
           </p>
         </div>
+        <div className="flex items-center gap-2">
+          {live ? <ListenButton id={call.id} live={live} /> : call.recording.available ? (
+            <audio controls preload="none" src={recordingUrl(call.id)} className="h-8 w-full max-w-xs" />
+          ) : null}
+        </div>
         <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close" className="-mr-1 text-muted-foreground">
           <X />
         </Button>
@@ -76,6 +84,7 @@ export function LiveCallPanel({ call, now, onClose, onOpenFinished }: LiveCallPa
       <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto bg-muted/40">
         <div className="space-y-5 px-4 py-5">
           <AlertsPanel alerts={call.alerts} />
+          <ClinicTrace callId={call.id} now={now} />
           <TimelineEvent>
             <PhoneIncoming className="size-3.5" />
             Call connected · {formatClock(call.startedAt, true)}

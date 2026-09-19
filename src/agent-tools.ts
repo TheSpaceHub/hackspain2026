@@ -52,6 +52,11 @@ export interface ToolDeps {
   lastCallerText?: () => string | undefined;
   /** Per-tool wall clock. Past it the agent is told to move on, mid-flight or not. */
   timeoutMs?: number;
+  /**
+   * Reserve a slot the caller accepted, before it is confirmed to them. A string is a
+   * refusal to say why. Only the local sim provides one (see sim-holds.ts).
+   */
+  hold?: (slot: QuotedSlot) => Promise<string | null>;
 }
 
 /**
@@ -384,6 +389,14 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
             const spokenText = spoken.map(formatClock).join(', ');
             clog.warn(`[accept_slot] refused: caller said ${spokenText}, choice ${args.choice} is ambiguous`);
             return `The caller said ${spokenText} but that was ambiguous. The diary has only: ${state.quoted.map((quoted) => speakTime(quoted.start_time)).join('; ')}. Read them the real times and ask again.`;
+          }
+        }
+        if (deps.hold) {
+          const refused = await deps.hold(slot);
+          if (refused) {
+            clog.warn(`[accept_slot] hold refused: ${refused}`);
+            state.quoted = state.quoted.filter((quoted) => quoted !== slot);
+            return `${speakTime(slot.start_time)} was just taken by another caller. Apologise, then call find_slots again and offer what it returns.`;
           }
         }
         recordAccepted(state, slot);

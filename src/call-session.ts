@@ -1,5 +1,6 @@
 import { voice } from '@livekit/agents';
 import { AudioFrame } from '@livekit/rtc-node';
+import { join } from 'node:path';
 import type { WebSocket } from 'ws';
 import { GREETING, ReceptionistAgent } from './agent.js';
 import { siteName, speakTime } from './agent-tools.js';
@@ -15,6 +16,7 @@ import {
   saidTimes,
   sameClock,
   type CallState,
+  type QuotedSlot,
 } from './call-state.js';
 import { createExtractor, DEFAULT_EXTRACT_TIMEOUT_MS, type Extractor } from './extract.js';
 import type { Availability, Catalogue, ClinicApi } from './clinic-api.js';
@@ -27,9 +29,12 @@ import {
   overrideFlooredBooking,
 } from './guards.js';
 import { mulawToPcm16 } from './mulaw.js';
+import { CallRecorder, type RecordingSummary } from './recorder.js';
 import { callContext, clog } from './log.js';
 import { normalizeNationalId } from './normalize.js';
 import { attachBrief } from './patient-brief.js';
+import { holdSlot, releaseHolds } from './sim-holds.js';
+import { clinicTarget, type ClinicMode, type ClinicTarget } from './clinic-target.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
 import { submitActions, type SubmitResult } from './submit.js';
@@ -43,16 +48,21 @@ import { SAMPLE_RATE, type InboundMessage, type StartMessage } from './twilio.js
  */
 const EXTRACT_SETTLE_MS = 4_000;
 
+function sanitizeCallId(callId: string): string {
+  return callId.replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
 /** Everything deliberately shared across sockets, and nothing else. */
 export interface Shared {
   vad: SharedVad;
   keyterms: string[];
   clinicBriefing: string;
   store: Store;
-  /** Read-only lookups. One client, so the catalogue is fetched once for the process. */
-  api: ClinicApi;
+  /** Read-only lookups, one client per clinic so the catalogue is fetched once for the process. */
+  api: Readonly<Record<ClinicMode, ClinicApi>>;
   /** Doctors, sites, plans and closures, parsed at boot. Null only if /clinic was down. */
   catalogue: Catalogue | null;
+  recorders: Map<string, CallRecorder>;
 }
 
 /**
@@ -62,6 +72,8 @@ export interface Shared {
 export class CallSession {
   readonly #ws: WebSocket;
   readonly #shared: Shared;
+  /** The clinic this call books into, fixed when the socket opens: a mode switch never moves a call mid-way. */
+  readonly #clinic: ClinicTarget;
 
   #callId = '';
   #streamSid = '';
@@ -70,6 +82,8 @@ export class CallSession {
   #session: voice.AgentSession | null = null;
   #input: MediaStreamAudioInput | null = null;
   #output: MediaStreamAudioOutput | null = null;
+  #recorder: CallRecorder | null = null;
+  #recording: RecordingSummary | undefined;
 
   #startedAt = Date.now();
   #sessionStartMs: number | undefined;
@@ -103,6 +117,7 @@ export class CallSession {
   constructor(ws: WebSocket, shared: Shared) {
     this.#ws = ws;
     this.#shared = shared;
+    this.#clinic = clinicTarget();
 
     ws.on('message', (data) => this.#onMessage(data));
     ws.on('close', () => {
@@ -177,6 +192,11 @@ export class CallSession {
         from_number: this.#fromNumber,
         started_at: new Date(this.#startedAt).toISOString(),
       });
+      this.#recorder = new CallRecorder({
+        path: join(config.logDir, 'recordings', sanitizeCallId(this.#callId) + '.wav'),
+        startedAt: this.#startedAt,
+      });
+      this.#shared.recorders.set(this.#callId, this.#recorder);
 
       // Never run past three minutes.
       this.#wallClock = setTimeout(() => {
@@ -190,9 +210,11 @@ export class CallSession {
 
   #onMedia(msg: { media?: { payload?: string } }): void {
     const payload = msg.media?.payload;
-    if (!payload || !this.#input) return;
+    if (!payload) return;
 
     const mulaw = Buffer.from(payload, 'base64');
+    this.#recorder?.caller(mulaw);
+    if (!this.#input) return;
     const pcm = mulawToPcm16(mulaw);
     this.#input.push(new AudioFrame(pcm, SAMPLE_RATE, 1, pcm.length));
     this.#framesIn++;
@@ -210,7 +232,11 @@ export class CallSession {
     const t0 = Date.now();
     try {
       this.#input = new MediaStreamAudioInput();
-      this.#output = new MediaStreamAudioOutput(this.#streamSid, this.#send);
+      this.#output = new MediaStreamAudioOutput(
+        this.#streamSid,
+        this.#send,
+        (mulaw) => this.#recorder?.agent(mulaw),
+      );
 
       const session = new voice.AgentSession({
         vad: this.#shared.vad,
@@ -234,10 +260,19 @@ export class CallSession {
       session.output.audio = this.#output;
 
       // No room: the voice loop runs against our own transport.
+      const state = this.#state ?? createCallState(this.#callId, this.#fromNumber);
       const agent = new ReceptionistAgent({
-        state: this.#state ?? createCallState(this.#callId, this.#fromNumber),
-        api: this.#shared.api,
+        state,
+        api: this.#shared.api[this.#clinic.mode],
         catalogue: this.#shared.catalogue,
+        ...(this.#clinic.mode === 'simulation'
+          ? {
+              hold: async (slot: QuotedSlot) => {
+                const refused = await holdSlot(this.#clinic.baseUrl, this.#callId, slot, state.matched?.patient_id);
+                return refused?.detail ?? null;
+              },
+            }
+          : {}),
         lastCallerText: () => {
           const turns = this.#session ? buildCallTranscript(this.#session.history) : [];
           return [...turns].reverse().find((turn) => turn.role === 'user')?.text;
@@ -370,7 +405,7 @@ export class CallSession {
 
   /** Best-effort: a caller the directory knows by their own number needs no questions. */
   #identifyByPhone(state: CallState, phone: string): void {
-    void this.#shared.api
+    void this.#shared.api[this.#clinic.mode]
       .findPatient({ phone })
       .then((matches) => {
         // Two people on one landline is a household, not an identification.
@@ -444,6 +479,12 @@ export class CallSession {
 
     this.#input?.end();
     this.#output?.close();
+    try {
+      this.#recording = await this.#recorder?.close();
+    } catch (err) {
+      this.#errors.push(`recording: ${String(err)}`);
+    }
+    if (this.#callId) this.#shared.recorders.delete(this.#callId);
 
     try {
       this.#transcript = this.#session ? buildCallTranscript(this.#session.history) : [];
@@ -531,7 +572,7 @@ export class CallSession {
     const submitStartedAt = Date.now();
     let submissions: SubmitResult[] = [];
     if (this.#callId) {
-      submissions = await submitActions(this.#callId, actions);
+      submissions = await submitActions(this.#callId, actions, this.#clinic.baseUrl);
 
       // A 422 records nothing at all, so a rejected body leaves the call with no record —
       // which scores exactly like never answering. Only 422 is worth retrying: 404 is the
@@ -543,8 +584,9 @@ export class CallSession {
         this.#errors.push(
           `submission rejected (${submissions.map((s) => `${s.action}=${s.status}`).join(' ')}); falling back to no_action`,
         );
-        submissions = submissions.concat(await submitActions(this.#callId, [FLOOR_ACTION]));
+        submissions = submissions.concat(await submitActions(this.#callId, [FLOOR_ACTION], this.#clinic.baseUrl));
       }
+      if (this.#clinic.mode === 'simulation') await releaseHolds(this.#clinic.baseUrl, this.#callId);
     } else {
       this.#errors.push('no call_id: never received a start message, nothing to submit against');
     }
@@ -641,6 +683,8 @@ export class CallSession {
       decider_conf: decided.output.confidence,
       used_floor: decided.usedFloor,
       errors: this.#errors,
+      recording_path: this.#recording?.path,
+      recording_ms: this.#recording?.duration_ms,
     });
     for (const [i, s] of submissions.entries()) {
       this.#shared.store.write({
@@ -699,6 +743,7 @@ export class CallSession {
       submissions,
       errors: this.#errors,
       ended_by: this.#endedBy,
+      recording: this.#recording,
     };
     await writeCallLog(entry);
   }
