@@ -1,5 +1,5 @@
-import { ArrowLeftRight, FlaskConical, Globe, Hospital, Phone, Unplug } from 'lucide-react';
-import { useEffect, type ReactNode } from 'react';
+import { Check, ChevronDown, FlaskConical, Globe, Hospital, Phone, Unplug } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNow } from '@/hooks/use-now';
 import { formatClock, formatDay } from '@/lib/format';
 import type { AgentMode } from '@/lib/agent/stats';
@@ -97,10 +97,15 @@ const MODE_PILL: Record<ConsoleMode, string> = {
   unknown: 'border-border bg-muted text-muted-foreground',
 };
 
+const MODE_HINT: Record<AgentMode, string> = {
+  live: 'New calls book into the real clinic',
+  simulation: 'Nothing reaches Prosper',
+};
+
 /**
  * Which world the agent submits to. Worth having in sight at all times: a test run
- * against the real board leaves real records. Click to switch: new calls go to the
- * other clinic, calls already open finish where they started.
+ * against the real board leaves real records. The pill opens a menu of the two
+ * clinics; picking one moves new calls there, calls already open finish where they started.
  */
 function ModePill({
   mode,
@@ -116,12 +121,28 @@ function ModePill({
   switchError?: string | null;
 }) {
   const Icon = MODE_ICON[mode];
-  const next: AgentMode | null = mode === 'simulation' ? 'live' : mode === 'live' ? 'simulation' : null;
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [open]);
   const classes = cn(
     'flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide',
     MODE_PILL[mode],
   );
-  if (!onMode || !next) {
+  if (!onMode || (mode !== 'live' && mode !== 'simulation')) {
     return (
       <span className={classes} title={url ? `Clinic API · ${url}` : 'The agent did not answer /health'}>
         <Icon className="size-3.5" />
@@ -129,8 +150,9 @@ function ModePill({
       </span>
     );
   }
+  const options: AgentMode[] = ['live', 'simulation'];
   return (
-    <span className="flex items-center gap-2">
+    <span ref={root} className="relative flex items-center gap-2">
       {switchError && (
         <span className="text-xs text-destructive" title={switchError}>
           Switch failed
@@ -138,15 +160,54 @@ function ModePill({
       )}
       <button
         type="button"
-        onClick={() => onMode(next)}
+        onClick={() => setOpen((o) => !o)}
         disabled={switching}
-        className={cn(classes, 'group cursor-pointer transition-opacity hover:opacity-80 disabled:cursor-wait disabled:opacity-60')}
-        title={`New calls book into ${url}${mode === 'simulation' ? ' — nothing reaches Prosper' : ' — the real clinic'}.\nClick to switch to ${MODE_LABEL[next]}; calls already open finish where they started.`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={cn(classes, 'cursor-pointer transition-opacity hover:opacity-80 disabled:cursor-wait disabled:opacity-60')}
+        title={url ? `Clinic API · ${url}` : undefined}
       >
         <Icon className="size-3.5" />
         {switching ? 'Switching…' : MODE_LABEL[mode]}
-        <ArrowLeftRight className="size-3 opacity-50 group-hover:opacity-100" />
+        <ChevronDown className={cn('size-3 opacity-60 transition-transform', open && 'rotate-180')} />
       </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-50 mt-1.5 w-64 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+        >
+          {options.map((option) => {
+            const OptionIcon = MODE_ICON[option];
+            const selected = option === mode;
+            return (
+              <button
+                key={option}
+                type="button"
+                role="menuitemradio"
+                aria-checked={selected}
+                onClick={() => {
+                  setOpen(false);
+                  if (!selected) onMode(option);
+                }}
+                className={cn(
+                  'flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
+                  selected && 'font-medium',
+                )}
+              >
+                <OptionIcon className="mt-0.5 size-3.5 shrink-0" />
+                <span className="flex-1">
+                  {MODE_LABEL[option]}
+                  <span className="block text-xs font-normal text-muted-foreground">{MODE_HINT[option]}</span>
+                </span>
+                {selected && <Check className="mt-0.5 size-3.5 shrink-0" />}
+              </button>
+            );
+          })}
+          <p className="px-2 pb-1 pt-1.5 text-[11px] leading-snug text-muted-foreground">
+            Calls already open finish where they started.
+          </p>
+        </div>
+      )}
     </span>
   );
 }
