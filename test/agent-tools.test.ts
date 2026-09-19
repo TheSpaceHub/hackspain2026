@@ -214,7 +214,9 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
     llm.FunctionTool
   >;
   const t0 = Date.now();
-  const said = String(await tools.find_slots!.execute({ when_phrase: 'tomorrow' } as never, {} as never));
+  const said = String(
+    await tools.find_slots!.execute({ when_phrase: 'tomorrow', specialty_id: 'general practice' } as never, {} as never),
+  );
   check('a hanging lookup gives the agent a line to say', /taking too long/.test(said), true);
   check('and gives it quickly', Date.now() - t0 < 1000, true);
 
@@ -260,10 +262,17 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   check('and a site by the name the caller uses', asked?.query.location_id?.[0], 'loc_centro');
   check('so the caller gets times, not an apology', /Offer these/.test(said), true);
 
+  // The diary needs a department or a doctor: asking without either is a 422 the
+  // caller hears as "the system is playing up".
   const loose = harness();
-  await loose.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'wizardry' });
+  const wizardry = await loose.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'wizardry' });
   const wide = loose.clinic.requests.find((r) => r.path === '/api/v1/availability');
-  check('a specialty nobody has is dropped, not sent', wide?.query.specialty_id, undefined);
+  check('a specialty nobody has is dropped, not sent', wide, undefined);
+  check('and the agent is told to ask which one', /Ask which one/.test(wizardry), true);
+
+  const named = harness();
+  const byDoctor = await named.call('find_slots', { when_phrase: 'tomorrow', provider_name: 'Sáez' });
+  check('a named doctor is enough on its own', /Offer these/.test(byDoctor), true);
 
   // The burst sent "gynecology" and "sonita" straight through and got 404s and a 422.
   const misheard = harness();
@@ -285,7 +294,7 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
 
   const h = harness();
   await h.call('identify_patient', { national_id: '12345678Z' });
-  await h.call('find_slots', { when_phrase: 'tomorrow' });
+  await h.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'general practice' });
   const held = await h.call('accept_slot', { choice: 1 });
   check('the plan on the record bills the slot it can pay for', choosePolicy(h.state), 'sanitas');
   check('so the caller is not asked for a second policy', /other insurance/.test(held), false);
@@ -310,13 +319,13 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   const h = harness();
   await h.call('identify_patient', { national_id: '12345678Z' });
   recordRequest(h.state, { insurers: ['Adeslas'] });
-  await h.call('find_slots', { when_phrase: 'tomorrow' });
+  await h.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'general practice' });
   const held = await h.call('accept_slot', { choice: 1 });
   check('the plan the caller named on the call is the one billed', choosePolicy(h.state), 'adeslas');
   check('and the slot is still held', /Held/.test(held), true);
 
   const stranger = harness();
-  await stranger.call('find_slots', { when_phrase: 'tomorrow' });
+  await stranger.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'general practice' });
   stranger.state.quoted[0]!.payable_with = ['asisa'];
   const asked = await stranger.call('accept_slot', { choice: 1 });
   check('a slot no known plan pays for makes the agent ask for another policy', /other insurance/.test(asked), true);

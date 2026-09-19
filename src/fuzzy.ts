@@ -86,7 +86,10 @@ export function closest<T>(candidates: Candidate<T>[], spoken: string): Match<T>
     for (const alias of candidate.aliases) {
       const folded = fold(alias);
       if (folded === '') continue;
-      best = Math.min(best, folded === needle ? 0 : distance(needle, folded));
+      // "physio" is not a misspelling of physiotherapy, it is the start of it. Short
+      // needles are excluded: "der" would reach dermatology and little else usefully.
+      const prefix = needle.length >= 4 && folded.startsWith(needle);
+      best = Math.min(best, folded === needle || prefix ? 0 : distance(needle, folded));
       if (best === 0) break;
     }
     if (best !== Infinity) scored.push({ item: candidate.item, distance: best });

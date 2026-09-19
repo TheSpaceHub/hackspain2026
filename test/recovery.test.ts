@@ -67,6 +67,10 @@ check('the specialty as the caller says it', specialtyByName(catalogue, 'general
 check('and by its id, underscores and all', specialtyByName(catalogue, 'general_practice')?.id, 'spec_gp');
 check('misheard by a letter', specialtyByName(catalogue, 'dermatolagy')?.id, 'spec_derm');
 check('a specialty the clinic does not have is dropped', specialtyByName(catalogue, 'cardiology'), undefined);
+check('the abbreviation callers actually use', specialtyByName(catalogue, 'GP')?.id, 'spec_gp');
+check('a lay word for the department', specialtyByName(catalogue, 'family doctor')?.id, 'spec_gp');
+check('a shortened department name', specialtyByName(catalogue, 'physio')?.id, 'spec_physio');
+check('and the same in Spanish', specialtyByName(catalogue, 'fisioterapia')?.id, 'spec_physio');
 
 check('a misheard insurer resolves', planByName(catalogue, 'sonitas')?.id, 'sanitas');
 check('an insurer that is nobody is dropped', planByName(catalogue, 'blueshield'), undefined);

@@ -183,6 +183,16 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           }
         }
 
+        // The diary refuses a query with neither: "availability needs provider_id or
+        // specialty_id", a 422 the caller hears as "the system is playing up". Dropping
+        // an unresolvable specialty is right, but going on to ask anyway is not.
+        if (!providerId && !specialty) {
+          const names = catalogue?.specialties.map((s) => s.name).join(', ');
+          return saidSpecialty
+            ? `No department here goes by "${saidSpecialty}". Ask which one they need${names ? `: ${names}` : ''}.`
+            : `The diary needs a department or a doctor before it will answer. Ask what the appointment is for${names ? `; we have ${names}` : ''}.`;
+        }
+
         const plans = knownPlanIds(catalogue, request.insurers);
 
         const window = resolveWhen(args.when_phrase, now(), {

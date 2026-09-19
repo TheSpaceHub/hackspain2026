@@ -224,7 +224,9 @@ export class ReceptionistAgent extends voice.Agent {
     const stream = await voice.Agent.default.llmNode(this, chatCtx, toolCtx, settings);
     if (!stream) return stream;
 
-    const known = new Set(Object.keys(toolCtx));
+    // Both: the context handed to this node has been seen empty on live turns, and a
+    // printed call whose name we cannot confirm is thrown away.
+    const known = new Set([...Object.keys(toolCtx), ...Object.keys(this.toolCtx)]);
     let held = '';
     let holding = false;
 
@@ -280,7 +282,9 @@ export class ReceptionistAgent extends voice.Agent {
             controller.enqueue(held);
             return;
           }
-          console.warn(`[agent] unsalvageable printed call: ${held.trim().slice(0, 300)}`);
+          console.warn(
+            `[agent] unsalvageable printed call (tools: ${[...known].join(',')}): ${held.trim().slice(0, 300)}`,
+          );
           this.printedCalls++;
           if (retried) {
             controller.enqueue(RECOVER);

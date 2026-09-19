@@ -239,13 +239,61 @@ export function providerOnLeave(provider: Provider, isoDate: string): boolean {
 }
 
 /**
+ * What callers actually say for each specialty. Spelling distance cannot get from "GP"
+ * to `general_practice`, or from "skin doctor" to dermatology — those are abbreviations
+ * and lay words, not misspellings, and a caller asking for a GP is the commonest call
+ * the clinic takes.
+ */
+const SPOKEN_AS: Record<string, string[]> = {
+  general_practice: [
+    'gp',
+    'g p',
+    'general practitioner',
+    'family doctor',
+    'family medicine',
+    'medicina general',
+    'medico de cabecera',
+    'medico general',
+    'cabecera',
+  ],
+  paediatrics: ['pediatrics', 'paediatrician', 'pediatrician', 'childrens doctor', 'pediatria', 'pediatra'],
+  dermatology: ['dermatologist', 'skin', 'skin doctor', 'dermatologia', 'dermatologo', 'piel'],
+  orthopaedics: [
+    'orthopedics',
+    'orthopaedic',
+    'orthopedic',
+    'orthopaedist',
+    'orthopedist',
+    'bone doctor',
+    'traumatologia',
+    'traumatologo',
+  ],
+  gynaecology: ['gynecology', 'gynaecologist', 'gynecologist', 'obgyn', 'ob gyn', 'ginecologia', 'ginecologo'],
+  physiotherapy: ['physio', 'physical therapy', 'physiotherapist', 'fisioterapia', 'fisioterapeuta', 'fisio'],
+};
+
+/** "General Practice" answers to "GP". One-word names have no useful initials. */
+function initials(name: string): string[] {
+  const words = name.split(/[\s_]+/).filter((word) => word !== '');
+  return words.length < 2 ? [] : [words.map((word) => word[0]!).join('')];
+}
+
+/**
  * The API takes ids, the model says words: "general practice" is a 422, `general_practice`
- * is a diary. Match on the id, the name, or the id with its underscores said as spaces.
+ * is a diary. Match on the id, the name, the initials, or what callers call it.
  */
 export function specialtyByName(catalogue: Catalogue, spoken: string): { id: string; name: string } | undefined {
   // "gynecology" is one edit from `gynaecology`, and an unmatched specialty is a 404.
   return only(
-    catalogue.specialties.map((s) => ({ item: s, aliases: [s.id, s.name] })),
+    catalogue.specialties.map((s) => ({
+      item: s,
+      aliases: [
+        s.id,
+        s.name,
+        ...initials(s.name),
+        ...(SPOKEN_AS[s.id] ?? SPOKEN_AS[fold(s.name).replace(/ /g, '_')] ?? []),
+      ],
+    })),
     spoken,
   );
 }
