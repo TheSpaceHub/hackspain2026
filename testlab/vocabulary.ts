@@ -76,3 +76,19 @@ export const VOCAB_BY_ID = new Map(VOCABULARIES.map((v) => [v.id, v]));
 export function vocabularyOf(id: string | undefined): Vocabulary {
   return VOCAB_BY_ID.get(id ?? 'plain') ?? VOCAB_BY_ID.get('plain')!;
 }
+
+/** One way of talking made of several: vague *and* code-switching, in the same sentence. */
+export function blendVocabularies(ids: readonly string[]): Vocabulary {
+  const chosen = [...new Set(ids)].map(vocabularyOf).filter((v) => v.id !== 'plain');
+  if (chosen.length === 0) return vocabularyOf('plain');
+  if (chosen.length === 1) return chosen[0]!;
+  return {
+    id: chosen.map((v) => v.id).join('+'),
+    label: chosen.map((v) => v.label).join(' + '),
+    description: `All at once: ${chosen.map((v) => v.description.replace(/\.$/, '')).join('; ')}.`,
+    instructions: [
+      'Your way of speaking is all of these at the same time:',
+      ...chosen.map((v) => `- ${v.label}: ${v.instructions}`),
+    ].join('\n'),
+  };
+}

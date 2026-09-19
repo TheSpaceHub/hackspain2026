@@ -1,11 +1,12 @@
-import { Check, ChevronDown, ChevronRight, CircleAlert, Copy, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, CircleAlert, Copy, Wand2, X } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
-import type { Case, Run } from '@/lib/testlab/types';
+import { draftFix } from '@/lib/testlab/client';
+import type { Case, FixPlan, Run } from '@/lib/testlab/types';
 import { ResultDetail } from './result-detail';
 
 /** The run as it happens: a bar, then a line per call, then the issues those calls add up to. */
@@ -21,6 +22,21 @@ export function RunPanel({
 }) {
   const [tab, setTab] = useState<'calls' | 'issues'>('calls');
   const [open, setOpen] = useState<string | null>(null);
+  const [fixes, setFixes] = useState<Record<string, FixPlan | string>>({});
+  const [drafting, setDrafting] = useState<string | null>(null);
+
+  const askForFix = async (problemId: string): Promise<void> => {
+    setDrafting(problemId);
+    try {
+      const plan = await draftFix(run.id, problemId);
+      setFixes((prev) => ({ ...prev, [problemId]: plan }));
+    } catch (err) {
+      setFixes((prev) => ({ ...prev, [problemId]: String(err instanceof Error ? err.message : err) }));
+    } finally {
+      setDrafting(null);
+    }
+  };
+
   const pct = run.total === 0 ? 0 : Math.round((run.done / run.total) * 100);
   // Counted off the rows on screen, not off the progress stream: the stream is a call
   // ahead of the results, and a call that has finished but not arrived is neither.
@@ -36,7 +52,8 @@ export function RunPanel({
             {run.status}
           </Badge>
           <span className="text-xs font-normal text-muted-foreground">
-            {run.mode} caller · {run.behaviours.join(', ')} · {run.vocabularies.join(', ')} · {run.concurrency} at once
+            {run.mode} caller, all at once: {[...run.behaviours, ...run.vocabularies].join(' + ').replace(/_/g, ' ')} ·{' '}
+            {run.concurrency} calls at a time
           </span>
           <span className="ml-auto text-xs font-normal tabular-nums">
             <span className="text-emerald-600">{passed} passed</span>
@@ -44,14 +61,19 @@ export function RunPanel({
             <span className="text-muted-foreground"> · {run.done}/{run.total}</span>
           </span>
           {run.status === 'running' && (
-            <Button variant="outline" size="xs" onClick={() => onStop(run.id)}>
-              Stop
+            <Button variant="outline" size="xs" onClick={() => onStop(run.id)} disabled={run.stopping}>
+              {run.stopping ? 'Stopping…' : 'Stop'}
             </Button>
           )}
         </CardTitle>
         <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
           <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
         </div>
+        {run.stopping && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Dialling no more — the calls already on the line are being let finish.
+          </p>
+        )}
         {run.error && <p className="mt-1 text-xs text-destructive">{run.error}</p>}
       </CardHeader>
 
@@ -126,8 +148,50 @@ export function RunPanel({
                   >
                     <Copy />
                   </Button>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    title="Ask a model where in the code this lives and what to change"
+                    disabled={drafting !== null}
+                    onClick={() => void askForFix(issue.problem_id)}
+                  >
+                    <Wand2 /> {drafting === issue.problem_id ? 'Drafting…' : 'Draft a fix'}
+                  </Button>
                 </div>
                 <pre className={cn('overflow-x-auto px-3 py-2 text-xs whitespace-pre-wrap')}>{issue.body}</pre>
+                {fixes[issue.problem_id] !== undefined &&
+                  (typeof fixes[issue.problem_id] === 'string' ? (
+                    <p className="border-t border-border/60 px-3 py-2 text-xs text-destructive">
+                      {fixes[issue.problem_id] as string}
+                    </p>
+                  ) : (
+                    <div className="border-t border-border/60 bg-muted/30">
+                      <div className="flex items-center gap-2 px-3 py-2">
+                        <span className="text-xs font-medium">A fix, drafted</span>
+                        <code className="text-xs text-muted-foreground">
+                          {(fixes[issue.problem_id] as FixPlan).branch}
+                        </code>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          title="Copy the plan"
+                          className="ml-auto"
+                          onClick={() =>
+                            void navigator.clipboard.writeText((fixes[issue.problem_id] as FixPlan).plan)
+                          }
+                        >
+                          <Copy />
+                        </Button>
+                      </div>
+                      <pre className="overflow-x-auto px-3 pb-2 text-xs whitespace-pre-wrap">
+                        {(fixes[issue.problem_id] as FixPlan).plan}
+                      </pre>
+                      <p className="px-3 pb-2 text-xs text-muted-foreground">
+                        Hand this to a coding agent on {(fixes[issue.problem_id] as FixPlan).branch} to write the
+                        change and open the pull request.
+                      </p>
+                    </div>
+                  ))}
               </div>
             ))}
             {run.issues.length === 0 && (

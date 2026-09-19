@@ -24,6 +24,8 @@ export interface Case {
   problem: string;
   title: string;
   summary: string;
+  /** Where this case came from and how its expectation was arrived at. */
+  origin: string;
   language: string;
   from_number: string | null;
   persona: Persona;
@@ -39,6 +41,7 @@ export interface Behaviour {
   id: string;
   label: string;
   description: string;
+  instructions: string;
   wpm: number;
   lead_ms: number;
   barge_in: boolean;
@@ -105,6 +108,7 @@ export interface CaseResult {
     caller: 'script' | 'persona';
     behaviour: string;
     vocabulary: string;
+    caller_prompt: string | null;
     caller_turns: string[];
     transcript: Turn[];
     wav_path: string | null;
@@ -132,7 +136,14 @@ export interface RunSummary {
   total: number;
   done: number;
   passed: number;
+  stopping: boolean;
   error: string | null;
+}
+
+export interface FixPlan {
+  problem_id: string;
+  branch: string;
+  plan: string;
 }
 
 export interface Run extends RunSummary {

@@ -19,6 +19,7 @@ function HowTested({ kase }: { kase: Case }) {
     <div className="rounded-md border border-border/60 bg-background px-3 py-2">
       <p className="mb-1 text-xs font-medium text-muted-foreground">How this is tested</p>
       <p>{kase.summary}</p>
+      {kase.origin && <p className="mt-1 text-xs text-muted-foreground">{kase.origin}</p>}
       <dl className="mt-2 grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-muted-foreground">Problem</dt>
         <dd>{kase.problem}</dd>
@@ -143,6 +144,17 @@ export function ResultDetail({ result, kase }: { result: CaseResult; kase?: Case
             {JSON.stringify(result.actions, null, 2)}
           </pre>
         </div>
+      )}
+
+      {call.caller_prompt && (
+        <details>
+          <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+            What the caller agent was told to be
+          </summary>
+          <pre className="mt-1 overflow-x-auto rounded-md bg-background px-3 py-2 text-xs whitespace-pre-wrap">
+            {call.caller_prompt}
+          </pre>
+        </details>
       )}
     </div>
   );

@@ -3,7 +3,7 @@
  * the agent, because that is the process holding the world the cases were built
  * against; in dev Vite proxies /__testlab there.
  */
-import type { Run, RunRequest, RunSummary, SuiteResponse } from './types';
+import type { FixPlan, Run, RunRequest, RunSummary, SuiteResponse } from './types';
 
 const ORIGIN = import.meta.env.PROD ? (import.meta.env.VITE_TESTLAB_ORIGIN ?? '') : '';
 
@@ -53,6 +53,19 @@ export async function stopRun(id: string): Promise<Run> {
   const res = await fetch(`${ORIGIN}${path}`, { method: 'POST' });
   if (!res.ok) throw new Error(`POST ${path} → ${res.status}`);
   return (await res.json()) as Run;
+}
+
+/** Ask a model where in the code this problem lives and what to write instead. */
+export async function draftFix(runId: string, problemId: string): Promise<FixPlan> {
+  const path = `/__testlab/runs/${encodeURIComponent(runId)}/fix`;
+  const res = await fetch(`${ORIGIN}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ problem_id: problemId }),
+  });
+  const body = (await res.json()) as FixPlan & { detail?: string };
+  if (!res.ok) throw new Error(body.detail ?? `POST ${path} → ${res.status}`);
+  return body;
 }
 
 export interface RunHandlers {

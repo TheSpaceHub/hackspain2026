@@ -13,19 +13,19 @@ import { join } from 'node:path';
 import type { Case, Grade } from '../mock/world/suite/types.js';
 import { gradeRecord, leaks } from '../mock/world/suite/types.js';
 import type { Suite } from '../mock/world/suite/index.js';
-import { type Behaviour, behaviourOf } from './behaviour.js';
+import { type Behaviour, blendBehaviours } from './behaviour.js';
 import { dial } from './dial.js';
 import { AgentFeed } from './feed.js';
 import { type CaseResult, insightsFor, issueDrafts, type IssueDraft, summarise } from './insights.js';
-import { type Vocabulary, vocabularyOf } from './vocabulary.js';
+import { blendVocabularies, type Vocabulary } from './vocabulary.js';
 
 export interface RunRequest {
   case_ids?: string[];
   problem_ids?: string[];
   mode?: 'script' | 'persona';
-  /** Difficult callers: every chosen case is run once per behaviour named here. */
+  /** Difficult callers, blended into one person: talks over *and* will not listen. */
   behaviours?: string[];
-  /** And once more per way of talking: vague, code-switching, off-topic. */
+  /** And one way of talking, likewise blended: vague *and* code-switching. */
   vocabularies?: string[];
   /** Calls in flight at once. The platform's Run All is ten. */
   concurrency?: number;
@@ -45,6 +45,8 @@ export interface Run {
   total: number;
   done: number;
   passed: number;
+  /** Asked to stop, still letting the calls in flight finish. */
+  stopping: boolean;
   error: string | null;
   cases: { case_id: string; problem_id: string; title: string; copies: number; behaviour: string; vocabulary: string }[];
   results: CaseResult[];
@@ -102,6 +104,7 @@ export class Runner extends EventEmitter {
         // A run that was in flight when the process died did not finish, and never will.
         if (run.status === 'running') run.status = 'stopped';
         run.vocabularies ??= ['plain'];
+        run.stopping = false;
         this.#runs.set(run.id, run);
         const n = Number(run.id.replace(/\D/g, ''));
         if (Number.isFinite(n) && n >= this.#next) this.#next = n + 1;
@@ -131,7 +134,11 @@ export class Runner extends EventEmitter {
   /** Lets the calls in flight finish and dials no more. */
   stop(id: string): Run | undefined {
     const run = this.#runs.get(id);
-    if (run?.status === 'running') this.#stopping.add(id);
+    if (run?.status === 'running') {
+      this.#stopping.add(id);
+      run.stopping = true;
+      this.#emit(run, 'run_stopping', { run_id: id, in_flight: Math.min(run.concurrency, run.total - run.done) });
+    }
     return run;
   }
 
@@ -139,19 +146,17 @@ export class Runner extends EventEmitter {
   start(req: RunRequest): Run {
     const cases = this.#choose(req);
     if (cases.length === 0) throw new Error('no cases matched');
-    const behaviours = (req.behaviours?.length ? req.behaviours : ['cooperative']).map(behaviourOf);
-    const vocabularies = (req.vocabularies?.length ? req.vocabularies : ['plain']).map(vocabularyOf);
-    // Every case against every caller: the same want, a different person asking it
-    // a different way.
-    const chosen = behaviours.flatMap((behaviour) =>
-      vocabularies.flatMap((vocabulary) => cases.map((kase) => ({ kase, behaviour, vocabulary }))),
-    );
+    // The traits make one caller rather than one run each: picking "talks over" and
+    // "won't listen" asks for the person who does both, not two calls.
+    const behaviour = blendBehaviours(req.behaviours ?? []);
+    const vocabulary = blendVocabularies(req.vocabularies ?? []);
+    const chosen = cases.map((kase) => ({ kase, behaviour, vocabulary }));
     const run: Run = {
       id: `run-${String(this.#next++).padStart(4, '0')}`,
       status: 'running',
       mode: req.mode === 'persona' ? 'persona' : 'script',
-      behaviours: behaviours.map((b) => b.id),
-      vocabularies: vocabularies.map((v) => v.id),
+      behaviours: req.behaviours?.length ? [...new Set(req.behaviours)] : ['cooperative'],
+      vocabularies: req.vocabularies?.length ? [...new Set(req.vocabularies)] : ['plain'],
       concurrency: Math.min(Math.max(1, req.concurrency ?? 4), 20),
       started_at: new Date().toISOString(),
       finished_at: null,
@@ -159,6 +164,7 @@ export class Runner extends EventEmitter {
       total: chosen.reduce((n, c) => n + Math.max(1, c.kase.burst), 0),
       done: 0,
       passed: 0,
+      stopping: false,
       error: null,
       cases: chosen.map(({ kase, behaviour, vocabulary }) => ({
         case_id: kase.id,
@@ -228,16 +234,18 @@ export class Runner extends EventEmitter {
       // The verdicts are in; the reading of them costs a model call each, so it
       // happens once at the end and only for what failed.
       for (const result of run.results) {
-        if (result.pass) continue;
-        result.summary = await summarise(this.suite.byId.get(result.case_id)!, result);
+        const kase = this.suite.byId.get(result.case_id);
+        if (result.pass || !kase) continue;
+        result.summary = await summarise(kase, result);
       }
-      run.issues = issueDrafts(run.results);
+      run.issues = issueDrafts(run.results, this.suite.byId);
       run.status = this.#stopping.has(run.id) ? 'stopped' : 'done';
     } catch (err) {
       run.status = 'failed';
       run.error = String(err);
     } finally {
       this.#stopping.delete(run.id);
+      run.stopping = false;
       feed.stop();
       run.finished_at = new Date().toISOString();
       this.#save(run);

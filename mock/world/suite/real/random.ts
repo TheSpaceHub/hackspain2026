@@ -139,6 +139,13 @@ export async function randomCases(w: RealWorld, seed: number, count: number): Pr
         problem: '',
         title: `Random: ${ask.said} for ${fullName(ask.patient)}${ask.day ? ` on ${ask.day}` : ''}`,
         summary: `${line} Whatever the platform answers to that is what the agent has to arrive at.`,
+        origin: [
+          `Generated from seed ${seed}, ask ${n} of ${count}: a real patient of the clinic,`,
+          `${ask.said}${ask.provider ? ` with ${ask.provider.name}` : ''}${ask.location ? ` at ${ask.location.name}` : ''},`,
+          ask.day ? `on ${ask.day}` : 'as soon as possible',
+          `— none of it chosen to fit. The expectation is the live availability call's own answer:`,
+          `${expectation.note}. The same seed gives this ask back.`,
+        ].join(' '),
         from_number: e164(ask.patient),
         persona: {
           name: fullName(ask.patient),

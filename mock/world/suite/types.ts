@@ -53,6 +53,8 @@ export interface Case {
   problem: string;
   title: string;
   summary: string;
+  /** Where this case came from and how its expectation was arrived at. */
+  origin: string;
   language: 'en' | 'es' | 'ca';
   /** E.164, or null for a withheld number. */
   from_number: string | null;

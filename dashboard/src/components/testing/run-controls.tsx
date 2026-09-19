@@ -17,8 +17,9 @@ interface RunControlsProps {
 
 /**
  * What to run, and who rings. A problem is the unit people think in, so the
- * picker is a list of the eighteen; the behaviours multiply whatever is picked,
- * which is how "all of problem 6, from someone who will not listen" is expressed.
+ * picker is a list of the eighteen; the traits picked below make one caller
+ * between them, which is how "all of problem 6, from someone who talks over you
+ * and will not listen" is expressed — one call each, not one call per trait.
  */
 export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsProps) {
   const [problems, setProblems] = useState<ReadonlySet<string>>(() => new Set());
@@ -39,7 +40,10 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
   const chosenCases = suite.problems
     .filter((p) => problems.size === 0 || problems.has(p.id))
     .reduce((n, p) => n + p.cases, 0);
-  const calls = chosenCases * Math.max(1, behaviours.size) * Math.max(1, vocabularies.size);
+  // The traits blend into one person, so the count is the cases themselves.
+  const calls = chosenCases;
+  const traits = suite.behaviours.filter((b) => behaviours.has(b.id));
+  const voices = suite.vocabularies.filter((v) => vocabularies.has(v.id));
 
   // A big run costs minutes of real calls, and the default selection is every problem —
   // so anything past a couple of dozen asks first rather than starting on one click.
@@ -64,8 +68,7 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
         <CardTitle>New run</CardTitle>
         <CardDescription>
           {problems.size === 0 ? 'Every problem' : `${problems.size} problem${problems.size === 1 ? '' : 's'}`} ·{' '}
-          {chosenCases} cases · {behaviours.size} caller{behaviours.size === 1 ? '' : 's'} · {vocabularies.size} voice
-          {vocabularies.size === 1 ? '' : 's'} ·{' '}
+          {chosenCases} cases · one caller of {behaviours.size} trait{behaviours.size === 1 ? '' : 's'} ·{' '}
           <span className="text-foreground">{calls} calls</span>
         </CardDescription>
       </CardHeader>
@@ -106,7 +109,11 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
         <Separator />
 
         <div>
-          <p className="mb-2 text-xs font-medium text-muted-foreground">Who is ringing</p>
+          <p className="text-xs font-medium text-muted-foreground">Who is ringing</p>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Everything picked here is the same person: talks over <em>and</em> will not listen is one caller who does
+            both, on every call — not a call each.
+          </p>
           <div className="flex flex-wrap gap-1.5">
             {suite.behaviours.map((b) => {
               const on = behaviours.has(b.id);
@@ -133,7 +140,10 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
         <Separator />
 
         <div>
-          <p className="mb-2 text-xs font-medium text-muted-foreground">How they talk</p>
+          <p className="text-xs font-medium text-muted-foreground">How they talk</p>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Also blended into that one caller: vague <em>and</em> code-switching is one person doing both.
+          </p>
           <div className="flex flex-wrap gap-1.5">
             {suite.vocabularies.map((v) => {
               const on = vocabularies.has(v.id);
@@ -155,6 +165,11 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
               );
             })}
           </div>
+          {traits.length + voices.length > 0 && (
+            <p className="mt-2 rounded-md bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
+              This run's caller: {[...traits, ...voices].map((t) => t.label.toLowerCase()).join(', ')}.
+            </p>
+          )}
           {mode === 'script' && vocabularies.size > 0 && (
             <p className="mt-2 text-xs text-muted-foreground">
               Scripts say the same words whoever is talking — how they talk only bites in persona mode.
@@ -196,14 +211,21 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
                 </Button>
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                Arbitrary asks over the real patients — a doctor they have never seen, a day that may be closed. Most
-                are impossible on purpose. The same seed gives the same asks back.
+                Four or five hand-written cases per problem, built on the clinic this mock is serving: the ask is
+                fixed, the record they are graded against is computed from the diary as it stands, so they stay right
+                as it moves.
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                The random asks on top are arbitrary over the real patients — a doctor they have never seen, a day that
+                may be closed. Most are impossible on purpose, and what is graded is whatever the live availability
+                call answers. The same seed gives the same asks back; each case says which seed it came out of.
               </p>
             </>
           ) : (
             <p className="text-xs text-muted-foreground">
-              Cases are written against the generated world. Start the mock with MOCK_MIRROR=1 to build them from the
-              real clinic and generate random asks.
+              Four or five cases per problem, hand-written against the generated world: the ask is fixed, and the
+              record each is graded against is computed from that world's own diary, so nothing is hard-coded. Start
+              the mock with MOCK_MIRROR=1 to build them from the real clinic and add random asks on top.
             </p>
           )}
         </div>

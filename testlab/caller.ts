@@ -14,12 +14,15 @@ import type { Vocabulary } from './vocabulary.js';
 
 export interface Caller {
   readonly kind: 'script' | 'persona';
+  /** What the caller was told to be, verbatim, or null when there is no model. */
+  readonly prompt: string | null;
   /** The next thing they say, or null when they are done talking. */
   next(heard: string[]): Promise<string | null>;
 }
 
 class ScriptCaller implements Caller {
   readonly kind = 'script';
+  readonly prompt = null;
   #i = 0;
   constructor(private readonly lines: string[]) {}
   next(): Promise<string | null> {
@@ -35,6 +38,7 @@ const LANGUAGE: Record<string, string> = {
 
 class PersonaCaller implements Caller {
   readonly kind = 'persona';
+  readonly prompt: string;
   #history: Message[] = [];
   #turns = 0;
 
@@ -43,7 +47,9 @@ class PersonaCaller implements Caller {
     private readonly behaviour: Behaviour,
     private readonly vocabulary: Vocabulary,
     private readonly fallback: Caller,
-  ) {}
+  ) {
+    this.prompt = this.#system();
+  }
 
   async next(heard: string[]): Promise<string | null> {
     if (this.#turns >= this.kase.persona.turn_cap) return null;
@@ -54,7 +60,7 @@ class PersonaCaller implements Caller {
     });
     let line: string;
     try {
-      line = await chat([{ role: 'system', content: this.#system() }, ...this.#history], { maxTokens: 120 });
+      line = await chat([{ role: 'system', content: this.prompt }, ...this.#history], { maxTokens: 120 });
     } catch (err) {
       console.warn(`[testlab] persona fell back to the script: ${String(err)}`);
       return this.fallback.next(heard);

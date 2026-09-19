@@ -10,12 +10,14 @@
  *   GET  /__testlab/runs            every run, newest first
  *   GET  /__testlab/runs/:id        one run, with every result and the issue drafts
  *   POST /__testlab/runs/:id/stop   dial no more calls; the ones in flight still finish
+ *   POST /__testlab/runs/:id/fix    {problem_id} a model's plan for the code that would fix it
  *   GET  /__testlab/runs/:id/events one line per call as it settles (SSE)
  */
 import { fail, ok, type Router, STREAMING } from '../http.js';
 import type { Suite } from '../world/suite/index.js';
 import type { Generation } from '../world/suite/real/index.js';
 import { BEHAVIOURS } from '../../testlab/behaviour.js';
+import { fixPlan } from '../../testlab/fix.js';
 import { llmAvailable, llmName } from '../../testlab/llm.js';
 import type { RunRequest, Runner } from '../../testlab/runner.js';
 import { VOCABULARIES } from '../../testlab/vocabulary.js';
@@ -65,6 +67,19 @@ export function testlabRoutes(router: Router, lab: Lab, runner: Runner): void {
     .get('/__testlab/runs/:id', ({ params }) => {
       const run = runner.get(params.id!);
       return run ? ok(run) : fail(404, `no run ${params.id}`);
+    }, { public: true })
+    .post('/__testlab/runs/:id/fix', async ({ params, body }) => {
+      const run = runner.get(params.id!);
+      if (!run) return fail(404, `no run ${params.id}`);
+      const parsed = await body();
+      const req = (parsed.ok ? (parsed.value ?? {}) : {}) as { problem_id?: string };
+      const issue = run.issues.find((i) => i.problem_id === req.problem_id);
+      if (!issue) return fail(404, `run ${run.id} has no issue for '${req.problem_id}'`);
+      try {
+        return ok(await fixPlan(issue, process.cwd()));
+      } catch (err) {
+        return fail(502, String(err instanceof Error ? err.message : err));
+      }
     }, { public: true })
     .post('/__testlab/runs/:id/stop', ({ params }) => {
       const run = runner.stop(params.id!);

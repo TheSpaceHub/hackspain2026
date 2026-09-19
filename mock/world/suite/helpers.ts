@@ -195,6 +195,7 @@ export interface Draft {
   problem: string;
   title: string;
   summary: string;
+  origin?: string;
   persona: Omit<Persona, 'turn_cap'> & { turn_cap?: number };
   script: string[];
   expected: Case['expected'];
@@ -249,6 +250,10 @@ export function makeCase(problemId: string, d: Draft): Case {
     problem: `${problem.number} · ${problem.title}`,
     title: d.title,
     summary: d.summary,
+    origin:
+      d.origin ??
+      'Hand-written for this problem. The ask is fixed; the record it is graded against is computed ' +
+        'from the clinic this mock is serving, so it stays right as the diary moves.',
     language,
     from_number: d.from_number === undefined ? null : d.from_number,
     persona,

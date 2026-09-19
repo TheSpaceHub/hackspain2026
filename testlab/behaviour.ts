@@ -201,3 +201,34 @@ export const BEHAVIOUR_BY_ID = new Map(BEHAVIOURS.map((b) => [b.id, b]));
 export function behaviourOf(id: string | undefined): Behaviour {
   return BEHAVIOUR_BY_ID.get(id ?? 'cooperative') ?? BEHAVIOUR_BY_ID.get('cooperative')!;
 }
+
+/**
+ * Several traits in one person, not several calls.
+ *
+ * Picking "talks over" and "won't listen" asks for one caller who does both at
+ * once — so the instructions stack, the silences take the longest of them, the
+ * noisiest room wins, and the speed is what the traits average out at.
+ */
+export function blendBehaviours(ids: readonly string[]): Behaviour {
+  const chosen = [...new Set(ids)].map(behaviourOf).filter((b) => b.id !== 'cooperative');
+  if (chosen.length === 0) return behaviourOf('cooperative');
+  if (chosen.length === 1) return chosen[0]!;
+
+  const beds = chosen.map((b) => b.audio).filter((a): a is AudioBed => a !== null);
+  return {
+    id: chosen.map((b) => b.id).join('+'),
+    label: chosen.map((b) => b.label).join(' + '),
+    description: `All at once: ${chosen.map((b) => b.description.replace(/\.$/, '')).join('; ')}.`,
+    instructions: [
+      'You are all of the following at the same time, not one after the other:',
+      ...chosen.map((b) => `- ${b.label}: ${b.instructions || 'nothing in particular.'}`),
+    ].join('\n'),
+    wpm: Math.round(chosen.reduce((n, b) => n + b.wpm, 0) / chosen.length),
+    lead_ms: Math.max(...chosen.map((b) => b.lead_ms)),
+    tail_ms: Math.max(...chosen.map((b) => b.tail_ms)),
+    barge_in: chosen.some((b) => b.barge_in),
+    gain: chosen.reduce((g, b) => Math.min(g, b.gain), 1.15),
+    // The worst line of the lot: the loudest room at the lowest signal-to-noise.
+    audio: beds.length === 0 ? null : beds.reduce((a, b) => ((b.signal_to_noise_db ?? 99) < (a.signal_to_noise_db ?? 99) ? b : a)),
+  };
+}

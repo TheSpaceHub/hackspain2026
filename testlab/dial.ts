@@ -44,6 +44,8 @@ export interface CallOutcome {
   caller: 'script' | 'persona';
   behaviour: string;
   vocabulary: string;
+  /** What the caller agent was told to be, kept so a strange call can be read back. */
+  caller_prompt: string | null;
   caller_turns: string[];
   transcript: Turn[];
   wav_path: string | null;
@@ -92,11 +94,18 @@ export async function dial(opts: DialOptions): Promise<CallOutcome> {
     caller: caller.kind,
     behaviour: behaviour.id,
     vocabulary: opts.vocabulary.id,
+    caller_prompt: caller.prompt,
     caller_turns: [],
     transcript: [],
     wav_path: null,
     call_ms: 0,
   };
+
+  if (caller.prompt !== null) {
+    console.log(
+      `[testlab] ${kase.id} ${callId} caller ${behaviour.id} / ${opts.vocabulary.id}\n${caller.prompt}\n`,
+    );
+  }
 
   const received: number[] = [];
   let lastInboundAt = 0;
