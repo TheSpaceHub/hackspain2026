@@ -1,0 +1,2357 @@
+{
+  "clinic_name": "Clínica Arenal",
+  "calendar": {
+    "starts": "2026-09-07",
+    "ends": "2026-10-16",
+    "max_span_days": 14,
+    "slot_minutes": 15,
+    "closure_days": [
+      "2026-10-12"
+    ]
+  },
+  "restrictions": [
+    {
+      "id": "not_eligible_age",
+      "title": "Not eligible by age",
+      "explanation": "The patient is outside the specialty's age window: paediatrics up to the 14th birthday, general practice and gynaecology from it."
+    },
+    {
+      "id": "referral_required",
+      "title": "Referral required",
+      "explanation": "Dermatology and physiotherapy need a GP referral on file, and this patient has none for that specialty."
+    },
+    {
+      "id": "provider_not_in_network",
+      "title": "Provider not in network",
+      "explanation": "The provider does not take this plan. Another provider in the same specialty may."
+    },
+    {
+      "id": "specialty_not_covered",
+      "title": "Specialty not covered",
+      "explanation": "The plan covers nothing in this specialty, at any site."
+    },
+    {
+      "id": "location_not_covered",
+      "title": "Location not covered",
+      "explanation": "The plan covers the specialty, but not at this site."
+    },
+    {
+      "id": "insurer_referral_required",
+      "title": "Insurer referral required",
+      "explanation": "The insurer demands a referral for this specialty even where the clinic does not, so the same appointment is bookable for one patient and not another."
+    },
+    {
+      "id": "allowance_exhausted",
+      "title": "Allowance exhausted",
+      "explanation": "The plan covers this specialty, but the patient has spent their visits for the year."
+    },
+    {
+      "id": "provider_on_leave",
+      "title": "Provider on leave",
+      "explanation": "The provider is away for the requested day."
+    },
+    {
+      "id": "location_hours",
+      "title": "Location hours",
+      "explanation": "The provider is not at that site at the requested time."
+    },
+    {
+      "id": "type_not_offered",
+      "title": "Type not offered",
+      "explanation": "The provider does not perform that appointment type."
+    },
+    {
+      "id": "patient_history",
+      "title": "Patient history",
+      "explanation": "The type follows the record: a first visit is only for a patient the clinic has never seen, a review only for one it has."
+    }
+  ],
+  "providers": [
+    {
+      "id": "PR01",
+      "name": "Dra. Carmen Ortiz Vidal",
+      "specialty_id": "general_practice",
+      "specialty_name": "General Practice",
+      "languages": [
+        "ca",
+        "en",
+        "es"
+      ],
+      "appointment_type_names": [
+        "First Visit",
+        "Review"
+      ],
+      "location_names": [
+        "Arenal Centro"
+      ],
+      "schedules": [
+        {
+          "location_id": "centro",
+          "location_name": "Arenal Centro",
+          "days": [
+            {
+              "weekday": "monday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "tuesday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "wednesday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "thursday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "friday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "saturday",
+              "intervals": [
+                "09:00–13:00"
+              ]
+            }
+          ]
+        }
+      ],
+      "accepted_insurers": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "refused_insurers": [],
+      "leave": null
+    },
+    {
+      "id": "PR02",
+      "name": "Dr. Pablo Requena",
+      "specialty_id": "general_practice",
+      "specialty_name": "General Practice",
+      "languages": [
+        "en",
+        "es"
+      ],
+      "appointment_type_names": [
+        "First Visit",
+        "Review"
+      ],
+      "location_names": [
+        "Arenal Norte"
+      ],
+      "schedules": [
+        {
+          "location_id": "norte",
+          "location_name": "Arenal Norte",
+          "days": [
+            {
+              "weekday": "monday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "tuesday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "wednesday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "thursday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "friday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            }
+          ]
+        }
+      ],
+      "accepted_insurers": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "refused_insurers": [],
+      "leave": {
+        "start": "2026-09-14",
+        "end": "2026-09-30",
+        "reason": "sick leave"
+      }
+    },
+    {
+      "id": "PR03",
+      "name": "Dr. Martín Sáez",
+      "specialty_id": "general_practice",
+      "specialty_name": "General Practice",
+      "languages": [
+        "en",
+        "es"
+      ],
+      "appointment_type_names": [
+        "First Visit",
+        "Review"
+      ],
+      "location_names": [
+        "Arenal Centro",
+        "Arenal Sur"
+      ],
+      "schedules": [
+        {
+          "location_id": "centro",
+          "location_name": "Arenal Centro",
+          "days": [
+            {
+              "weekday": "friday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            }
+          ]
+        },
+        {
+          "location_id": "sur",
+          "location_name": "Arenal Sur",
+          "days": [
+            {
+              "weekday": "monday",
+              "intervals": [
+                "09:00–13:00"
+              ]
+            },
+            {
+              "weekday": "tuesday",
+              "intervals": [
+                "09:00–13:00"
+              ]
+            },
+            {
+              "weekday": "wednesday",
+              "intervals": [
+                "09:00–13:00"
+              ]
+            },
+            {
+              "weekday": "thursday",
+              "intervals": [
+                "09:00–13:00"
+              ]
+            }
+          ]
+        }
+      ],
+      "accepted_insurers": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "refused_insurers": [],
+      "leave": null
+    },
+    {
+      "id": "PR04",
+      "name": "Dra. Marta Sáenz",
+      "specialty_id": "paediatrics",
+      "specialty_name": "Paediatrics",
+      "languages": [
+        "en",
+        "es"
+      ],
+      "appointment_type_names": [
+        "Paediatric First Visit",
+        "Paediatric Review"
+      ],
+      "location_names": [
+        "Arenal Centro"
+      ],
+      "schedules": [
+        {
+          "location_id": "centro",
+          "location_name": "Arenal Centro",
+          "days": [
+            {
+              "weekday": "monday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "tuesday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "wednesday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "thursday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "friday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            }
+          ]
+        }
+      ],
+      "accepted_insurers": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "refused_insurers": [],
+      "leave": null
+    },
+    {
+      "id": "PR05",
+      "name": "Dra. Elena Iglesias",
+      "specialty_id": "dermatology",
+      "specialty_name": "Dermatology",
+      "languages": [
+        "en",
+        "es"
+      ],
+      "appointment_type_names": [
+        "Dermatology First Visit",
+        "Dermatology Review"
+      ],
+      "location_names": [
+        "Arenal Centro",
+        "Arenal Sur"
+      ],
+      "schedules": [
+        {
+          "location_id": "centro",
+          "location_name": "Arenal Centro",
+          "days": [
+            {
+              "weekday": "monday",
+              "intervals": [
+                "16:00–20:00"
+              ]
+            },
+            {
+              "weekday": "wednesday",
+              "intervals": [
+                "16:00–20:00"
+              ]
+            }
+          ]
+        },
+        {
+          "location_id": "sur",
+          "location_name": "Arenal Sur",
+          "days": [
+            {
+              "weekday": "tuesday",
+              "intervals": [
+                "09:00–13:00"
+              ]
+            },
+            {
+              "weekday": "thursday",
+              "intervals": [
+                "09:00–13:00"
+              ]
+            }
+          ]
+        }
+      ],
+      "accepted_insurers": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "refused_insurers": [
+        {
+          "id": "dkv",
+          "name": "DKV"
+        }
+      ],
+      "leave": null
+    },
+    {
+      "id": "PR06",
+      "name": "Dr. Emilio Iglesia",
+      "specialty_id": "orthopaedics",
+      "specialty_name": "Orthopaedics",
+      "languages": [
+        "en",
+        "es"
+      ],
+      "appointment_type_names": [
+        "Orthopaedic First Visit",
+        "Orthopaedic Review"
+      ],
+      "location_names": [
+        "Arenal Centro"
+      ],
+      "schedules": [
+        {
+          "location_id": "centro",
+          "location_name": "Arenal Centro",
+          "days": [
+            {
+              "weekday": "tuesday",
+              "intervals": [
+                "08:00–13:00"
+              ]
+            },
+            {
+              "weekday": "thursday",
+              "intervals": [
+                "08:00–13:00"
+              ]
+            },
+            {
+              "weekday": "friday",
+              "intervals": [
+                "08:00–13:00"
+              ]
+            }
+          ]
+        }
+      ],
+      "accepted_insurers": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "refused_insurers": [],
+      "leave": null
+    },
+    {
+      "id": "PR07",
+      "name": "Dra. Laura Benítez Roca",
+      "specialty_id": "general_practice",
+      "specialty_name": "General Practice",
+      "languages": [
+        "es"
+      ],
+      "appointment_type_names": [
+        "First Visit",
+        "Review"
+      ],
+      "location_names": [
+        "Arenal Centro",
+        "Arenal Norte"
+      ],
+      "schedules": [
+        {
+          "location_id": "centro",
+          "location_name": "Arenal Centro",
+          "days": [
+            {
+              "weekday": "monday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "wednesday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "friday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            }
+          ]
+        },
+        {
+          "location_id": "norte",
+          "location_name": "Arenal Norte",
+          "days": [
+            {
+              "weekday": "tuesday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "thursday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            }
+          ]
+        }
+      ],
+      "accepted_insurers": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "refused_insurers": [],
+      "leave": null
+    },
+    {
+      "id": "PR08",
+      "name": "Dr. Javier Ocaña",
+      "specialty_id": "paediatrics",
+      "specialty_name": "Paediatrics",
+      "languages": [
+        "ca",
+        "es"
+      ],
+      "appointment_type_names": [
+        "Paediatric First Visit",
+        "Paediatric Review"
+      ],
+      "location_names": [
+        "Arenal Norte",
+        "Arenal Sur"
+      ],
+      "schedules": [
+        {
+          "location_id": "norte",
+          "location_name": "Arenal Norte",
+          "days": [
+            {
+              "weekday": "monday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "wednesday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            }
+          ]
+        },
+        {
+          "location_id": "sur",
+          "location_name": "Arenal Sur",
+          "days": [
+            {
+              "weekday": "tuesday",
+              "intervals": [
+                "09:00–13:00"
+              ]
+            },
+            {
+              "weekday": "thursday",
+              "intervals": [
+                "09:00–13:00"
+              ]
+            }
+          ]
+        }
+      ],
+      "accepted_insurers": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "refused_insurers": [],
+      "leave": null
+    },
+    {
+      "id": "PR09",
+      "name": "D. Álvaro Cid",
+      "specialty_id": "physiotherapy",
+      "specialty_name": "Physiotherapy",
+      "languages": [
+        "es"
+      ],
+      "appointment_type_names": [
+        "Physiotherapy Assessment",
+        "Physiotherapy Session"
+      ],
+      "location_names": [
+        "Arenal Sur"
+      ],
+      "schedules": [
+        {
+          "location_id": "sur",
+          "location_name": "Arenal Sur",
+          "days": [
+            {
+              "weekday": "monday",
+              "intervals": [
+                "09:00–17:00"
+              ]
+            },
+            {
+              "weekday": "tuesday",
+              "intervals": [
+                "09:00–17:00"
+              ]
+            },
+            {
+              "weekday": "wednesday",
+              "intervals": [
+                "09:00–17:00"
+              ]
+            },
+            {
+              "weekday": "thursday",
+              "intervals": [
+                "09:00–17:00"
+              ]
+            },
+            {
+              "weekday": "friday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            }
+          ]
+        }
+      ],
+      "accepted_insurers": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "refused_insurers": [],
+      "leave": null
+    },
+    {
+      "id": "PR10",
+      "name": "Dra. Nuria Peral",
+      "specialty_id": "orthopaedics",
+      "specialty_name": "Orthopaedics",
+      "languages": [
+        "ca",
+        "es"
+      ],
+      "appointment_type_names": [
+        "Orthopaedic First Visit",
+        "Orthopaedic Review"
+      ],
+      "location_names": [
+        "Arenal Norte",
+        "Arenal Sur"
+      ],
+      "schedules": [
+        {
+          "location_id": "norte",
+          "location_name": "Arenal Norte",
+          "days": [
+            {
+              "weekday": "friday",
+              "intervals": [
+                "10:00–18:00"
+              ]
+            }
+          ]
+        },
+        {
+          "location_id": "sur",
+          "location_name": "Arenal Sur",
+          "days": [
+            {
+              "weekday": "monday",
+              "intervals": [
+                "09:00–13:00"
+              ]
+            },
+            {
+              "weekday": "wednesday",
+              "intervals": [
+                "09:00–13:00"
+              ]
+            }
+          ]
+        }
+      ],
+      "accepted_insurers": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "refused_insurers": [],
+      "leave": null
+    },
+    {
+      "id": "PR11",
+      "name": "Dra. Isabel Montoro",
+      "specialty_id": "gynaecology",
+      "specialty_name": "Gynaecology",
+      "languages": [
+        "en",
+        "es"
+      ],
+      "appointment_type_names": [
+        "First Visit",
+        "Gynaecology Review"
+      ],
+      "location_names": [
+        "Arenal Centro"
+      ],
+      "schedules": [
+        {
+          "location_id": "centro",
+          "location_name": "Arenal Centro",
+          "days": [
+            {
+              "weekday": "monday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "tuesday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "wednesday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            },
+            {
+              "weekday": "thursday",
+              "intervals": [
+                "09:00–14:00"
+              ]
+            }
+          ]
+        }
+      ],
+      "accepted_insurers": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "refused_insurers": [],
+      "leave": null
+    },
+    {
+      "id": "PR12",
+      "name": "Dr. Tomás Vilar",
+      "specialty_id": "dermatology",
+      "specialty_name": "Dermatology",
+      "languages": [
+        "ca",
+        "en",
+        "es"
+      ],
+      "appointment_type_names": [
+        "Dermatology First Visit",
+        "Dermatology Review"
+      ],
+      "location_names": [
+        "Arenal Norte"
+      ],
+      "schedules": [
+        {
+          "location_id": "norte",
+          "location_name": "Arenal Norte",
+          "days": [
+            {
+              "weekday": "monday",
+              "intervals": [
+                "10:00–14:00"
+              ]
+            },
+            {
+              "weekday": "tuesday",
+              "intervals": [
+                "10:00–14:00"
+              ]
+            },
+            {
+              "weekday": "wednesday",
+              "intervals": [
+                "10:00–14:00"
+              ]
+            }
+          ]
+        }
+      ],
+      "accepted_insurers": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "refused_insurers": [],
+      "leave": null
+    }
+  ],
+  "specialties": [
+    {
+      "id": "general_practice",
+      "name": "General Practice",
+      "min_age_months": 168,
+      "max_age_months": null,
+      "referral_required": false,
+      "provider_names": [
+        "Dr. Martín Sáez",
+        "Dr. Pablo Requena",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Laura Benítez Roca"
+      ],
+      "covered_by": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "not_covered_by": []
+    },
+    {
+      "id": "paediatrics",
+      "name": "Paediatrics",
+      "min_age_months": 0,
+      "max_age_months": 167,
+      "referral_required": false,
+      "provider_names": [
+        "Dr. Javier Ocaña",
+        "Dra. Marta Sáenz"
+      ],
+      "covered_by": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "not_covered_by": []
+    },
+    {
+      "id": "dermatology",
+      "name": "Dermatology",
+      "min_age_months": 0,
+      "max_age_months": null,
+      "referral_required": true,
+      "provider_names": [
+        "Dr. Tomás Vilar",
+        "Dra. Elena Iglesias"
+      ],
+      "covered_by": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "not_covered_by": [
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        }
+      ]
+    },
+    {
+      "id": "orthopaedics",
+      "name": "Orthopaedics",
+      "min_age_months": 0,
+      "max_age_months": null,
+      "referral_required": false,
+      "provider_names": [
+        "Dr. Emilio Iglesia",
+        "Dra. Nuria Peral"
+      ],
+      "covered_by": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "not_covered_by": [
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        }
+      ]
+    },
+    {
+      "id": "gynaecology",
+      "name": "Gynaecology",
+      "min_age_months": 168,
+      "max_age_months": null,
+      "referral_required": false,
+      "provider_names": [
+        "Dra. Isabel Montoro"
+      ],
+      "covered_by": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "not_covered_by": [
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        }
+      ]
+    },
+    {
+      "id": "physiotherapy",
+      "name": "Physiotherapy",
+      "min_age_months": 0,
+      "max_age_months": null,
+      "referral_required": true,
+      "provider_names": [
+        "D. Álvaro Cid"
+      ],
+      "covered_by": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "not_covered_by": [
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        }
+      ]
+    }
+  ],
+  "appointment_types": [
+    {
+      "id": "first_visit",
+      "name": "First Visit",
+      "duration_minutes": 30,
+      "new_patient_requirement": "new_only",
+      "guidance": "Any specialty with no first visit of its own — general practice, and gynaecology, which carries only its own review. Correct when the record says the clinic has never seen this patient, whatever they ask for on the call.",
+      "provider_names": [
+        "Dr. Martín Sáez",
+        "Dr. Pablo Requena",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Isabel Montoro",
+        "Dra. Laura Benítez Roca"
+      ],
+      "specialty_id": null,
+      "specialty_name": null
+    },
+    {
+      "id": "review",
+      "name": "Review",
+      "duration_minutes": 15,
+      "new_patient_requirement": "existing_only",
+      "guidance": "The follow-up for general practice, and for any specialty with no review of its own. Correct when the record says the patient has been seen before. Not interchangeable with `dermatology_review` or `orthopaedic_review`, which run the same length under a different id.",
+      "provider_names": [
+        "Dr. Martín Sáez",
+        "Dr. Pablo Requena",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Laura Benítez Roca"
+      ],
+      "specialty_id": null,
+      "specialty_name": null
+    },
+    {
+      "id": "paediatric_first_visit",
+      "name": "Paediatric First Visit",
+      "duration_minutes": 30,
+      "new_patient_requirement": "new_only",
+      "guidance": "A patient under 14 the clinic has never seen. Paediatrics carries its own pair, so `first_visit` is never right here.",
+      "provider_names": [
+        "Dr. Javier Ocaña",
+        "Dra. Marta Sáenz"
+      ],
+      "specialty_id": "paediatrics",
+      "specialty_name": "Paediatrics"
+    },
+    {
+      "id": "paediatric_review",
+      "name": "Paediatric Review",
+      "duration_minutes": 30,
+      "new_patient_requirement": "existing_only",
+      "guidance": "A patient under 14 who has been seen before. Half an hour, not the quarter a general review takes — a child's follow-up is longer.",
+      "provider_names": [
+        "Dr. Javier Ocaña",
+        "Dra. Marta Sáenz"
+      ],
+      "specialty_id": "paediatrics",
+      "specialty_name": "Paediatrics"
+    },
+    {
+      "id": "gynaecology_review",
+      "name": "Gynaecology Review",
+      "duration_minutes": 30,
+      "new_patient_requirement": "existing_only",
+      "guidance": "A gynaecology follow-up. The one specialty with a review of its own and no first visit of its own, so a new gynaecology patient books the universal `first_visit` instead.",
+      "provider_names": [
+        "Dra. Isabel Montoro"
+      ],
+      "specialty_id": "gynaecology",
+      "specialty_name": "Gynaecology"
+    },
+    {
+      "id": "physiotherapy_assessment",
+      "name": "Physiotherapy Assessment",
+      "duration_minutes": 45,
+      "new_patient_requirement": "new_only",
+      "guidance": "A new physiotherapy patient. Forty-five minutes, because the plan of treatment is set in the same appointment.",
+      "provider_names": [
+        "D. Álvaro Cid"
+      ],
+      "specialty_id": "physiotherapy",
+      "specialty_name": "Physiotherapy"
+    },
+    {
+      "id": "physiotherapy_session",
+      "name": "Physiotherapy Session",
+      "duration_minutes": 30,
+      "new_patient_requirement": "existing_only",
+      "guidance": "A physiotherapy patient already under treatment. Half an hour of treatment rather than a short check.",
+      "provider_names": [
+        "D. Álvaro Cid"
+      ],
+      "specialty_id": "physiotherapy",
+      "specialty_name": "Physiotherapy"
+    },
+    {
+      "id": "dermatology_first_visit",
+      "name": "Dermatology First Visit",
+      "duration_minutes": 30,
+      "new_patient_requirement": "new_only",
+      "guidance": "A dermatology patient the clinic has never seen. The referral is a separate rule — this is the type, not the permission.",
+      "provider_names": [
+        "Dr. Tomás Vilar",
+        "Dra. Elena Iglesias"
+      ],
+      "specialty_id": "dermatology",
+      "specialty_name": "Dermatology"
+    },
+    {
+      "id": "dermatology_review",
+      "name": "Dermatology Review",
+      "duration_minutes": 15,
+      "new_patient_requirement": "existing_only",
+      "guidance": "A dermatology follow-up. Same fifteen minutes as `review`, different id: the specialty does not offer `review`, so booking it here fails the case on a slot that was otherwise right.",
+      "provider_names": [
+        "Dr. Tomás Vilar",
+        "Dra. Elena Iglesias"
+      ],
+      "specialty_id": "dermatology",
+      "specialty_name": "Dermatology"
+    },
+    {
+      "id": "orthopaedic_first_visit",
+      "name": "Orthopaedic First Visit",
+      "duration_minutes": 45,
+      "new_patient_requirement": "new_only",
+      "guidance": "A new orthopaedics patient. The longest in the catalog: imaging is reviewed in the same appointment, so it needs three consecutive cells and often will not fit a gap a review would have.",
+      "provider_names": [
+        "Dr. Emilio Iglesia",
+        "Dra. Nuria Peral"
+      ],
+      "specialty_id": "orthopaedics",
+      "specialty_name": "Orthopaedics"
+    },
+    {
+      "id": "orthopaedic_review",
+      "name": "Orthopaedic Review",
+      "duration_minutes": 15,
+      "new_patient_requirement": "existing_only",
+      "guidance": "An orthopaedics follow-up. Fifteen minutes like `review`, and again a different id — the specialty offers this one only.",
+      "provider_names": [
+        "Dr. Emilio Iglesia",
+        "Dra. Nuria Peral"
+      ],
+      "specialty_id": "orthopaedics",
+      "specialty_name": "Orthopaedics"
+    }
+  ],
+  "locations": [
+    {
+      "id": "centro",
+      "name": "Arenal Centro",
+      "address": "Calle del Arenal 12, 28013 Madrid",
+      "latitude": 40.4178,
+      "longitude": -3.7075,
+      "hours": [
+        {
+          "weekday": "monday",
+          "intervals": [
+            "08:00–20:00"
+          ]
+        },
+        {
+          "weekday": "tuesday",
+          "intervals": [
+            "08:00–20:00"
+          ]
+        },
+        {
+          "weekday": "wednesday",
+          "intervals": [
+            "08:00–20:00"
+          ]
+        },
+        {
+          "weekday": "thursday",
+          "intervals": [
+            "08:00–20:00"
+          ]
+        },
+        {
+          "weekday": "friday",
+          "intervals": [
+            "08:00–20:00"
+          ]
+        },
+        {
+          "weekday": "saturday",
+          "intervals": [
+            "09:00–14:00"
+          ]
+        }
+      ],
+      "provider_names": [
+        "Dr. Emilio Iglesia",
+        "Dr. Martín Sáez",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Elena Iglesias",
+        "Dra. Isabel Montoro",
+        "Dra. Laura Benítez Roca",
+        "Dra. Marta Sáenz"
+      ],
+      "covered_by": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "not_covered_by": []
+    },
+    {
+      "id": "norte",
+      "name": "Arenal Norte",
+      "address": "Calle de Alberto Alcocer 24, 28036 Madrid",
+      "latitude": 40.4645,
+      "longitude": -3.6836,
+      "hours": [
+        {
+          "weekday": "monday",
+          "intervals": [
+            "09:00–19:00"
+          ]
+        },
+        {
+          "weekday": "tuesday",
+          "intervals": [
+            "09:00–19:00"
+          ]
+        },
+        {
+          "weekday": "wednesday",
+          "intervals": [
+            "09:00–19:00"
+          ]
+        },
+        {
+          "weekday": "thursday",
+          "intervals": [
+            "09:00–19:00"
+          ]
+        },
+        {
+          "weekday": "friday",
+          "intervals": [
+            "09:00–19:00"
+          ]
+        }
+      ],
+      "provider_names": [
+        "Dr. Javier Ocaña",
+        "Dr. Pablo Requena",
+        "Dr. Tomás Vilar",
+        "Dra. Laura Benítez Roca",
+        "Dra. Nuria Peral"
+      ],
+      "covered_by": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "not_covered_by": [
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        }
+      ]
+    },
+    {
+      "id": "sur",
+      "name": "Arenal Sur",
+      "address": "Avenida de las Ciudades 8, 28903 Getafe",
+      "latitude": 40.305,
+      "longitude": -3.7327,
+      "hours": [
+        {
+          "weekday": "monday",
+          "intervals": [
+            "08:00–18:00"
+          ]
+        },
+        {
+          "weekday": "tuesday",
+          "intervals": [
+            "08:00–18:00"
+          ]
+        },
+        {
+          "weekday": "wednesday",
+          "intervals": [
+            "08:00–18:00"
+          ]
+        },
+        {
+          "weekday": "thursday",
+          "intervals": [
+            "08:00–18:00"
+          ]
+        },
+        {
+          "weekday": "friday",
+          "intervals": [
+            "08:00–14:00"
+          ]
+        }
+      ],
+      "provider_names": [
+        "D. Álvaro Cid",
+        "Dr. Javier Ocaña",
+        "Dr. Martín Sáez",
+        "Dra. Elena Iglesias",
+        "Dra. Nuria Peral"
+      ],
+      "covered_by": [
+        {
+          "id": "sanitas",
+          "name": "Sanitas"
+        },
+        {
+          "id": "adeslas",
+          "name": "Adeslas"
+        },
+        {
+          "id": "dkv",
+          "name": "DKV"
+        },
+        {
+          "id": "mapfre",
+          "name": "Mapfre Salud"
+        },
+        {
+          "id": "caser",
+          "name": "Caser Salud"
+        },
+        {
+          "id": "cigna",
+          "name": "Cigna"
+        },
+        {
+          "id": "axa",
+          "name": "AXA"
+        },
+        {
+          "id": "nueva_mutua",
+          "name": "Nueva Mutua Sanitaria"
+        },
+        {
+          "id": "privado",
+          "name": "Privado"
+        }
+      ],
+      "not_covered_by": [
+        {
+          "id": "asisa",
+          "name": "ASISA"
+        }
+      ]
+    }
+  ],
+  "plans": [
+    {
+      "id": "sanitas",
+      "name": "Sanitas",
+      "covered_specialty_names": [
+        "Dermatology",
+        "General Practice",
+        "Gynaecology",
+        "Orthopaedics",
+        "Paediatrics",
+        "Physiotherapy"
+      ],
+      "uncovered_specialty_names": [],
+      "covered_location_names": [
+        "Arenal Centro",
+        "Arenal Norte",
+        "Arenal Sur"
+      ],
+      "uncovered_location_names": [],
+      "accepted_by": [
+        "D. Álvaro Cid",
+        "Dr. Emilio Iglesia",
+        "Dr. Javier Ocaña",
+        "Dr. Martín Sáez",
+        "Dr. Pablo Requena",
+        "Dr. Tomás Vilar",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Elena Iglesias",
+        "Dra. Isabel Montoro",
+        "Dra. Laura Benítez Roca",
+        "Dra. Marta Sáenz",
+        "Dra. Nuria Peral"
+      ],
+      "refused_by": []
+    },
+    {
+      "id": "adeslas",
+      "name": "Adeslas",
+      "covered_specialty_names": [
+        "Dermatology",
+        "General Practice",
+        "Orthopaedics",
+        "Paediatrics",
+        "Physiotherapy"
+      ],
+      "uncovered_specialty_names": [
+        "Gynaecology"
+      ],
+      "covered_location_names": [
+        "Arenal Centro",
+        "Arenal Norte",
+        "Arenal Sur"
+      ],
+      "uncovered_location_names": [],
+      "accepted_by": [
+        "D. Álvaro Cid",
+        "Dr. Emilio Iglesia",
+        "Dr. Javier Ocaña",
+        "Dr. Martín Sáez",
+        "Dr. Pablo Requena",
+        "Dr. Tomás Vilar",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Elena Iglesias",
+        "Dra. Isabel Montoro",
+        "Dra. Laura Benítez Roca",
+        "Dra. Marta Sáenz",
+        "Dra. Nuria Peral"
+      ],
+      "refused_by": []
+    },
+    {
+      "id": "dkv",
+      "name": "DKV",
+      "covered_specialty_names": [
+        "Dermatology",
+        "General Practice",
+        "Gynaecology",
+        "Orthopaedics",
+        "Paediatrics"
+      ],
+      "uncovered_specialty_names": [
+        "Physiotherapy"
+      ],
+      "covered_location_names": [
+        "Arenal Centro",
+        "Arenal Norte",
+        "Arenal Sur"
+      ],
+      "uncovered_location_names": [],
+      "accepted_by": [
+        "D. Álvaro Cid",
+        "Dr. Emilio Iglesia",
+        "Dr. Javier Ocaña",
+        "Dr. Martín Sáez",
+        "Dr. Pablo Requena",
+        "Dr. Tomás Vilar",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Isabel Montoro",
+        "Dra. Laura Benítez Roca",
+        "Dra. Marta Sáenz",
+        "Dra. Nuria Peral"
+      ],
+      "refused_by": [
+        "Dra. Elena Iglesias"
+      ]
+    },
+    {
+      "id": "asisa",
+      "name": "ASISA",
+      "covered_specialty_names": [
+        "Dermatology",
+        "General Practice",
+        "Gynaecology",
+        "Orthopaedics",
+        "Paediatrics",
+        "Physiotherapy"
+      ],
+      "uncovered_specialty_names": [],
+      "covered_location_names": [
+        "Arenal Centro",
+        "Arenal Norte"
+      ],
+      "uncovered_location_names": [
+        "Arenal Sur"
+      ],
+      "accepted_by": [
+        "D. Álvaro Cid",
+        "Dr. Emilio Iglesia",
+        "Dr. Javier Ocaña",
+        "Dr. Martín Sáez",
+        "Dr. Pablo Requena",
+        "Dr. Tomás Vilar",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Elena Iglesias",
+        "Dra. Isabel Montoro",
+        "Dra. Laura Benítez Roca",
+        "Dra. Marta Sáenz",
+        "Dra. Nuria Peral"
+      ],
+      "refused_by": []
+    },
+    {
+      "id": "mapfre",
+      "name": "Mapfre Salud",
+      "covered_specialty_names": [
+        "General Practice",
+        "Gynaecology",
+        "Orthopaedics",
+        "Paediatrics",
+        "Physiotherapy"
+      ],
+      "uncovered_specialty_names": [
+        "Dermatology"
+      ],
+      "covered_location_names": [
+        "Arenal Centro",
+        "Arenal Norte",
+        "Arenal Sur"
+      ],
+      "uncovered_location_names": [],
+      "accepted_by": [
+        "D. Álvaro Cid",
+        "Dr. Emilio Iglesia",
+        "Dr. Javier Ocaña",
+        "Dr. Martín Sáez",
+        "Dr. Pablo Requena",
+        "Dr. Tomás Vilar",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Elena Iglesias",
+        "Dra. Isabel Montoro",
+        "Dra. Laura Benítez Roca",
+        "Dra. Marta Sáenz",
+        "Dra. Nuria Peral"
+      ],
+      "refused_by": []
+    },
+    {
+      "id": "caser",
+      "name": "Caser Salud",
+      "covered_specialty_names": [
+        "General Practice",
+        "Orthopaedics",
+        "Paediatrics"
+      ],
+      "uncovered_specialty_names": [
+        "Dermatology",
+        "Gynaecology",
+        "Physiotherapy"
+      ],
+      "covered_location_names": [
+        "Arenal Centro",
+        "Arenal Norte",
+        "Arenal Sur"
+      ],
+      "uncovered_location_names": [],
+      "accepted_by": [
+        "D. Álvaro Cid",
+        "Dr. Emilio Iglesia",
+        "Dr. Javier Ocaña",
+        "Dr. Martín Sáez",
+        "Dr. Pablo Requena",
+        "Dr. Tomás Vilar",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Elena Iglesias",
+        "Dra. Isabel Montoro",
+        "Dra. Laura Benítez Roca",
+        "Dra. Marta Sáenz",
+        "Dra. Nuria Peral"
+      ],
+      "refused_by": []
+    },
+    {
+      "id": "cigna",
+      "name": "Cigna",
+      "covered_specialty_names": [
+        "Dermatology",
+        "General Practice",
+        "Gynaecology",
+        "Orthopaedics",
+        "Paediatrics",
+        "Physiotherapy"
+      ],
+      "uncovered_specialty_names": [],
+      "covered_location_names": [
+        "Arenal Centro",
+        "Arenal Norte",
+        "Arenal Sur"
+      ],
+      "uncovered_location_names": [],
+      "accepted_by": [
+        "D. Álvaro Cid",
+        "Dr. Emilio Iglesia",
+        "Dr. Javier Ocaña",
+        "Dr. Martín Sáez",
+        "Dr. Pablo Requena",
+        "Dr. Tomás Vilar",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Elena Iglesias",
+        "Dra. Isabel Montoro",
+        "Dra. Laura Benítez Roca",
+        "Dra. Marta Sáenz",
+        "Dra. Nuria Peral"
+      ],
+      "refused_by": []
+    },
+    {
+      "id": "axa",
+      "name": "AXA",
+      "covered_specialty_names": [
+        "Dermatology",
+        "General Practice",
+        "Gynaecology",
+        "Orthopaedics",
+        "Paediatrics",
+        "Physiotherapy"
+      ],
+      "uncovered_specialty_names": [],
+      "covered_location_names": [
+        "Arenal Centro",
+        "Arenal Norte",
+        "Arenal Sur"
+      ],
+      "uncovered_location_names": [],
+      "accepted_by": [
+        "D. Álvaro Cid",
+        "Dr. Emilio Iglesia",
+        "Dr. Javier Ocaña",
+        "Dr. Martín Sáez",
+        "Dr. Pablo Requena",
+        "Dr. Tomás Vilar",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Elena Iglesias",
+        "Dra. Isabel Montoro",
+        "Dra. Laura Benítez Roca",
+        "Dra. Marta Sáenz",
+        "Dra. Nuria Peral"
+      ],
+      "refused_by": []
+    },
+    {
+      "id": "nueva_mutua",
+      "name": "Nueva Mutua Sanitaria",
+      "covered_specialty_names": [
+        "Dermatology",
+        "General Practice",
+        "Gynaecology",
+        "Paediatrics",
+        "Physiotherapy"
+      ],
+      "uncovered_specialty_names": [
+        "Orthopaedics"
+      ],
+      "covered_location_names": [
+        "Arenal Centro",
+        "Arenal Sur"
+      ],
+      "uncovered_location_names": [
+        "Arenal Norte"
+      ],
+      "accepted_by": [
+        "D. Álvaro Cid",
+        "Dr. Emilio Iglesia",
+        "Dr. Javier Ocaña",
+        "Dr. Martín Sáez",
+        "Dr. Pablo Requena",
+        "Dr. Tomás Vilar",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Elena Iglesias",
+        "Dra. Isabel Montoro",
+        "Dra. Laura Benítez Roca",
+        "Dra. Marta Sáenz",
+        "Dra. Nuria Peral"
+      ],
+      "refused_by": []
+    },
+    {
+      "id": "privado",
+      "name": "Privado",
+      "covered_specialty_names": [
+        "Dermatology",
+        "General Practice",
+        "Gynaecology",
+        "Orthopaedics",
+        "Paediatrics",
+        "Physiotherapy"
+      ],
+      "uncovered_specialty_names": [],
+      "covered_location_names": [
+        "Arenal Centro",
+        "Arenal Norte",
+        "Arenal Sur"
+      ],
+      "uncovered_location_names": [],
+      "accepted_by": [
+        "D. Álvaro Cid",
+        "Dr. Emilio Iglesia",
+        "Dr. Javier Ocaña",
+        "Dr. Martín Sáez",
+        "Dr. Pablo Requena",
+        "Dr. Tomás Vilar",
+        "Dra. Carmen Ortiz Vidal",
+        "Dra. Elena Iglesias",
+        "Dra. Isabel Montoro",
+        "Dra. Laura Benítez Roca",
+        "Dra. Marta Sáenz",
+        "Dra. Nuria Peral"
+      ],
+      "refused_by": []
+    }
+  ]
+}

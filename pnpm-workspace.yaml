@@ -1,3 +1,22 @@
+packages:
+  - dashboard
+
+allowBuilds:
+  '@livekit/local-inference': true
+  esbuild: true
+  onnxruntime-node: true
+
+# pnpm 10 reads overrides here, not from package.json's "pnpm" field.
+# The LiveKit anthropic plugin would otherwise pull its own, older SDK.
+overrides:
+  '@anthropic-ai/sdk': 0.127.0
+
+minimumReleaseAgeExclude:
+  - '@anthropic-ai/sdk@0.127.0'
+  - '@babel/parser@7.29.9'
+  - '@livekit/protocol@1.52.0'
+  - electron-to-chromium@1.5.433
+
 onlyBuiltDependencies:
   - onnxruntime-node
   - "@livekit/local-inference"

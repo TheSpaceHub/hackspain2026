@@ -53,9 +53,13 @@ export interface SubmissionRow {
 export interface Query {
   type: 'query';
   id: number;
-  name: 'recent' | 'call';
+  name: 'recent' | 'call' | 'stats';
   call_id?: string;
   limit?: number;
+  /** stats: only calls started at or after this ISO instant. */
+  since?: string;
+  /** stats: width of each bucket in the volume series. */
+  bucket_ms?: number;
 }
 
 export type StoreMessage = CallStarted | TurnRow | CallEnded | SubmissionRow | Query;

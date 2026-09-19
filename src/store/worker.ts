@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { parentPort, workerData } from 'node:worker_threads';
 import type { CallEnded, CallStarted, Query, StoreMessage, SubmissionRow, TurnRow } from './protocol.js';
+import { computeStats, type StatsRow } from './stats.js';
 
 /**
  * The central store, on its own thread. node:sqlite is synchronous, and the main thread
@@ -89,6 +90,14 @@ const recentCalls = db.prepare(
 const oneCall = db.prepare(`SELECT * FROM calls WHERE call_id = ?`);
 const callTurns = db.prepare(`SELECT seq, role, text, at FROM turns WHERE call_id = ? ORDER BY seq`);
 const callSubs = db.prepare(`SELECT * FROM submissions WHERE call_id = ? ORDER BY seq`);
+// One row per call for the overview; the aggregating happens in stats.ts.
+const statsRows = db.prepare(
+  `SELECT c.started_at, c.ended_at, c.call_ms, c.session_start_ms, c.decider_ms, c.close_to_submitted_ms, c.used_floor,
+          (SELECT s.action FROM submissions s WHERE s.call_id = c.call_id AND s.status IN (200, 409)
+            ORDER BY s.seq LIMIT 1) AS outcome,
+          (SELECT COUNT(*) FROM submissions s WHERE s.call_id = c.call_id) AS submissions
+   FROM calls c WHERE c.started_at >= ? ORDER BY c.started_at`,
+);
 
 /** A row the store cannot write must never take a call down with it. */
 function guard(run: () => void): void {
@@ -137,11 +146,18 @@ parentPort?.on('message', (msg: StoreMessage) => {
         const rows =
           m.name === 'recent'
             ? recentCalls.all(m.limit ?? 50)
-            : {
-                call: oneCall.get(m.call_id ?? ''),
-                turns: callTurns.all(m.call_id ?? ''),
-                submissions: callSubs.all(m.call_id ?? ''),
-              };
+            : m.name === 'stats'
+              ? computeStats(
+                  statsRows.all(m.since ?? '') as unknown as StatsRow[],
+                  m.since ?? null,
+                  m.bucket_ms ?? 3_600_000,
+                  Date.now(),
+                )
+              : {
+                  call: oneCall.get(m.call_id ?? ''),
+                  turns: callTurns.all(m.call_id ?? ''),
+                  submissions: callSubs.all(m.call_id ?? ''),
+                };
         parentPort?.postMessage({ type: 'query_result', id: m.id, rows });
       } catch (err) {
         parentPort?.postMessage({ type: 'query_result', id: m.id, rows: null, error: String(err) });

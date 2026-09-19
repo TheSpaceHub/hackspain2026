@@ -66,7 +66,10 @@ async function main(): Promise<void> {
       res.end(JSON.stringify(body, null, 2));
     };
 
-    if (url.pathname === '/health') return json({ ok: true, live: wss.clients.size });
+    // Which clinic API the agent submits to, so the console can say "local mock" vs the real board.
+    if (url.pathname === '/health') {
+      return json({ ok: true, live: wss.clients.size, clinic_api: config.prosper.baseUrl });
+    }
 
     // Realtime feed for a dashboard: one SSE event per row the store writes, as it is
     // written. EventSource in the browser, no dependency, and CORS-open so the dashboard
@@ -103,6 +106,18 @@ async function main(): Promise<void> {
       void store
         .query('recent', { limit: Number(url.searchParams.get('limit') ?? 50) })
         .then((rows) => json({ live: wss.clients.size, calls: rows }));
+      return;
+    }
+    // The overview's numbers, over a range: `since` an ISO instant, `bucket_ms` the series grain.
+    if (url.pathname === '/stats') {
+      // Rows hold UTC ISO strings and are compared as text, so `since` is normalised to the
+      // same form whatever offset it arrived with.
+      const raw = url.searchParams.get('since');
+      const since = raw && !Number.isNaN(Date.parse(raw)) ? new Date(raw).toISOString() : undefined;
+      const bucket = Number(url.searchParams.get('bucket_ms') ?? 3_600_000);
+      void store
+        .query('stats', { since, bucket_ms: Number.isFinite(bucket) ? bucket : 3_600_000 })
+        .then((stats) => json({ live: wss.clients.size, ...(stats as object) }, stats ? 200 : 503));
       return;
     }
     if (url.pathname.startsWith('/calls/')) {

@@ -7,11 +7,18 @@
  *   pnpm harness -- --n 20                    the Switchboard burst
  *   pnpm harness -- --barge-in                talk over the agent's greeting
  *   pnpm harness -- --wav caller.wav          play a real recording instead
- *   pnpm harness -- --say "hello" --say "..."  synthesise lines with macOS `say`
+ *   pnpm harness -- --say "hello" --say "..."  synthesise lines (`say` on macOS, `espeak-ng` on Linux)
+ *
+ * Against the local Prosper (pnpm mock), each call is announced to it the way the
+ * real harness knows about the calls it dials, and graded against a local case:
+ *
+ *   pnpm harness:local -- --scenario simple      one case, PASS/FAIL on the record
+ *   pnpm harness:local -- --scenario all         every case at once
+ *   pnpm harness -- --prosper http://127.0.0.1:8787 --scenario cancel
  */
 
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -42,6 +49,18 @@ interface Options {
   bargeIn: boolean;
   gapMs: number;
   outDir: string;
+  /** The local Prosper mock; unset means calls are not announced or graded. */
+  prosper?: string;
+  /** Local cases to play, by name; `all` for every one. Needs `prosper`. */
+  scenarios: string[];
+}
+
+/** One call's worth: what the caller says and who they appear to be. */
+interface CallPlan {
+  turns: Int16Array[];
+  /** E.164, or null for a withheld number. */
+  fromNumber: string | null;
+  scenario: string | null;
 }
 
 function parseArgs(argv: string[]): Options {
@@ -52,6 +71,8 @@ function parseArgs(argv: string[]): Options {
     bargeIn: false,
     gapMs: 900,
     outDir: './calls',
+    prosper: process.env.MOCK_PROSPER_URL,
+    scenarios: [],
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -62,30 +83,143 @@ function parseArgs(argv: string[]): Options {
     else if (arg === '--wav' && next) opts.wav = argv[++i]!;
     else if (arg === '--gap' && next) opts.gapMs = Number(argv[++i]);
     else if (arg === '--out' && next) opts.outDir = argv[++i]!;
+    else if (arg === '--prosper' && next) opts.prosper = argv[++i]!;
+    else if (arg === '--scenario' && next) opts.scenarios.push(argv[++i]!);
     else if (arg === '--barge-in') opts.bargeIn = true;
   }
   if (opts.script.length === 0) opts.script = DEFAULT_SCRIPT;
+  if (opts.scenarios.length > 0 && !opts.prosper) {
+    throw new Error('--scenario needs the local Prosper: pass --prosper <url> or set MOCK_PROSPER_URL');
+  }
+  if (opts.prosper) opts.prosper = opts.prosper.replace(/\/+$/, '');
   return opts;
 }
 
-/** macOS `say`; elsewhere, silence of a plausible length still exercises pacing. */
-async function synthesise(line: string, dir: string, index: number): Promise<Int16Array> {
-  if (process.platform !== 'darwin') {
+let warnedSilence = false;
+
+/**
+ * macOS `say`; on Linux `espeak-ng`, fully offline. Without either, silence of a
+ * plausible length still exercises pacing — but the agent hears no caller, so the
+ * store gets no user turns.
+ */
+async function synthesise(line: string, dir: string, name: string): Promise<Int16Array> {
+  const wav = join(dir, `${name}.wav`);
+  if (process.platform === 'darwin') {
+    // CoreAudio downsamples properly, giving real phone-line band-limiting.
+    await exec('say', ['-o', wav, '--file-format=WAVE', '--data-format=LEI16@8000', line]);
+    return toMono(await readWav(wav), SAMPLE_RATE);
+  }
+  const voice = ['-v', 'en-us', '-s', '150'];
+  try {
+    // 22.05 kHz out; toMono brings it down to the wire's 8 kHz.
+    await exec('espeak-ng', [...voice, '-w', wav, line]);
+    return toMono(await readWav(wav), SAMPLE_RATE);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+  try {
+    // Inside a flatpak (VS Code's terminal, say) the host's espeak-ng is out of sight,
+    // and so is its /tmp — so ask the host for the audio on stdout instead of a file.
+    if (!process.env.FLATPAK_ID) throw Object.assign(new Error('not in a flatpak'), { code: 'ENOENT' });
+    const { stdout } = await exec('flatpak-spawn', ['--host', 'espeak-ng', ...voice, '--stdout', line], {
+      encoding: 'buffer',
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    await writeFile(wav, stdout);
+    return toMono(await readWav(wav), SAMPLE_RATE);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    // flatpak-spawn exits non-zero when the host has no espeak-ng either.
+    if (code !== 'ENOENT' && typeof code !== 'number') throw err;
+    if (!warnedSilence) {
+      warnedSilence = true;
+      console.warn('[harness] espeak-ng not found — the caller will be silent (dnf install espeak-ng)');
+    }
     return new Int16Array(Math.round((SAMPLE_RATE * (1.5 + line.length / 15)) | 0));
   }
-  const wav = join(dir, `line-${index}.wav`);
-  // CoreAudio downsamples properly, giving real phone-line band-limiting.
-  await exec('say', ['-o', wav, '--file-format=WAVE', '--data-format=LEI16@8000', line]);
-  return toMono(await readWav(wav), SAMPLE_RATE);
 }
 
-async function buildTurns(opts: Options, dir: string): Promise<Int16Array[]> {
-  if (opts.wav) return [toMono(await readWav(opts.wav), SAMPLE_RATE)];
+async function synthesiseScript(lines: string[], dir: string, prefix: string): Promise<Int16Array[]> {
   const turns: Int16Array[] = [];
-  for (const [i, line] of opts.script.entries()) {
-    turns.push(await synthesise(line, dir, i));
-  }
+  for (const [i, line] of lines.entries()) turns.push(await synthesise(line, dir, `${prefix}-${i}`));
   return turns;
+}
+
+// --- the local Prosper --------------------------------------------------------
+
+interface MockScenario {
+  name: string;
+  problem: string;
+  summary: string;
+  from_number: string | null;
+  script: string[];
+}
+
+interface MockCall {
+  actions: { action: string }[];
+  last_received_at: string | null;
+  window_open: boolean;
+  verdict: { pass: boolean; misses: string[]; final: boolean } | null;
+}
+
+async function mockGet<T>(opts: Options, path: string): Promise<T> {
+  const res = await fetch(`${opts.prosper}${path}`);
+  if (!res.ok) throw new Error(`GET ${path} → ${res.status}: ${await res.text()}`);
+  return (await res.json()) as T;
+}
+
+/** Tell the mock a call exists — on the real platform, dialling it is what does this. */
+async function mockPost(opts: Options, path: string, body?: unknown): Promise<void> {
+  if (!opts.prosper) return;
+  try {
+    await fetch(`${opts.prosper}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (err) {
+    console.warn(`[harness] local Prosper unreachable at ${opts.prosper}: ${String(err)}`);
+  }
+}
+
+/**
+ * The record once it has settled: either the window has shut, or something arrived
+ * and nothing more has for a few seconds. A call that submits nothing waits the full
+ * window, because that silence is itself the verdict.
+ */
+async function awaitRecord(opts: Options, callId: string): Promise<MockCall | null> {
+  const deadline = Date.now() + 35_000;
+  while (Date.now() < deadline) {
+    const call = await mockGet<MockCall>(opts, `/__mock/calls/${callId}`).catch(() => null);
+    if (!call) return null;
+    const settled = call.last_received_at !== null && Date.now() - Date.parse(call.last_received_at) > 3_000;
+    if (!call.window_open || settled) return call;
+    await sleep(1_000);
+  }
+  return mockGet<MockCall>(opts, `/__mock/calls/${callId}`).catch(() => null);
+}
+
+async function buildPlans(opts: Options, dir: string): Promise<CallPlan[]> {
+  const byIndex = (i: number): string => `+3461234${String(5000 + i).slice(-4)}`;
+
+  if (opts.scenarios.length > 0) {
+    const all = opts.scenarios.includes('all');
+    const wanted = all
+      ? (await mockGet<{ scenarios: MockScenario[] }>(opts, '/__mock/scenarios')).scenarios
+      : await Promise.all(opts.scenarios.map((n) => mockGet<MockScenario>(opts, `/__mock/scenarios/${n}`)));
+    const plans: CallPlan[] = [];
+    for (const s of wanted) {
+      const turns = await synthesiseScript(s.script, dir, s.name);
+      console.log(`[harness] ${s.name.padEnd(12)} ${s.problem} — ${s.summary}`);
+      for (let i = 0; i < opts.count; i++) plans.push({ turns, fromNumber: s.from_number, scenario: s.name });
+    }
+    return plans;
+  }
+
+  const turns = opts.wav
+    ? [toMono(await readWav(opts.wav), SAMPLE_RATE)]
+    : await synthesiseScript(opts.script, dir, 'line');
+  return Array.from({ length: opts.count }, (_, i) => ({ turns, fromNumber: byIndex(i), scenario: null }));
 }
 
 interface CallReport {
@@ -99,16 +233,19 @@ interface CallReport {
   outPath?: string;
 }
 
-async function runCall(opts: Options, turns: Int16Array[], index: number): Promise<CallReport> {
+async function runCall(opts: Options, plan: CallPlan, index: number): Promise<CallReport> {
   const callId = randomUUID();
   const streamSid = `MZ${randomUUID().replace(/-/g, '')}`.slice(0, 34);
-  const fromNumber = `+3461234${String(5000 + index).slice(-4)}`;
+  const { fromNumber } = plan;
+  let turns = plan.turns;
   const report: CallReport = { callId, ok: false, framesSent: 0, framesReceived: 0, clears: 0 };
 
   const received: number[] = [];
   let lastInboundAt = 0;
   let openedAt = 0;
 
+  // Announced before dialling, so a submission can never beat its own call to the mock.
+  await mockPost(opts, '/__mock/calls', { call_id: callId, scenario: plan.scenario, from_number: fromNumber });
   const ws = new WebSocket(opts.url);
 
   await new Promise<void>((resolve, reject) => {
@@ -152,7 +289,8 @@ async function runCall(opts: Options, turns: Int16Array[], index: number): Promi
       accountSid: 'ACfake',
       callSid: callId,
       tracks: ['inbound'],
-      customParameters: { call_id: callId, from_number: fromNumber },
+      // Absent, not empty, when the caller id is withheld — as on the real wire.
+      customParameters: fromNumber ? { call_id: callId, from_number: fromNumber } : { call_id: callId },
       mediaFormat: { encoding: 'audio/x-mulaw', sampleRate: SAMPLE_RATE, channels: 1 },
     },
   });
@@ -257,6 +395,8 @@ async function runCall(opts: Options, turns: Int16Array[], index: number): Promi
   }
 
   await Promise.race([closed, sleep(5_000)]);
+  // The 30 s submission window starts now.
+  await mockPost(opts, `/__mock/calls/${callId}/close`);
 
   if (received.length > 0) {
     await mkdir(opts.outDir, { recursive: true });
@@ -275,14 +415,12 @@ async function main(): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), 'el-turno-harness-'));
 
   try {
-    console.log(`[harness] ${opts.count} call(s) to ${opts.url}`);
-    const turns = await buildTurns(opts, dir);
-    const totalMs = turns.reduce((n, t) => n + (t.length / SAMPLE_RATE) * 1000, 0);
-    console.log(`[harness] caller script: ${turns.length} turn(s), ${(totalMs / 1000).toFixed(1)}s of audio`);
+    const plans = await buildPlans(opts, dir);
+    console.log(`[harness] ${plans.length} call(s) to ${opts.url}${opts.prosper ? ` · local Prosper ${opts.prosper}` : ''}`);
+    const totalMs = plans[0]!.turns.reduce((n, t) => n + (t.length / SAMPLE_RATE) * 1000, 0);
+    console.log(`[harness] caller script: ${plans[0]!.turns.length} turn(s), ${(totalMs / 1000).toFixed(1)}s of audio`);
 
-    const reports = await Promise.all(
-      Array.from({ length: opts.count }, (_, i) => runCall(opts, turns, i)),
-    );
+    const reports = await Promise.all(plans.map((plan, i) => runCall(opts, plan, i)));
 
     console.log('\n--- results ---');
     for (const [i, r] of reports.entries()) {
@@ -293,6 +431,29 @@ async function main(): Promise<void> {
       );
     }
 
+    if (opts.prosper) {
+      console.log('\n--- records (local Prosper) ---');
+      const records = await Promise.all(reports.map((r) => awaitRecord(opts, r.callId)));
+      let graded = 0;
+      let passed = 0;
+      for (const [i, rec] of records.entries()) {
+        const plan = plans[i]!;
+        const actions = rec?.actions.map((a) => JSON.stringify(a)).join(' + ') || 'nothing submitted';
+        if (rec?.verdict) {
+          graded++;
+          if (rec.verdict.pass) passed++;
+          console.log(`[${i}] ${rec.verdict.pass ? 'PASS' : 'FAIL'} ${plan.scenario} · ${actions}`);
+          for (const miss of rec.verdict.misses) console.log(`      ${miss}`);
+        } else {
+          console.log(`[${i}] ${actions}`);
+        }
+      }
+      if (graded > 0) {
+        console.log(`\n${passed}/${graded} case(s) passed`);
+        if (passed < graded) process.exitCode = 1;
+      }
+    }
+
     const silent = reports.filter((r) => r.framesReceived === 0);
     if (silent.length > 0) {
       // The harness cuts a silent call and blames us, so this must be zero.
@@ -301,7 +462,7 @@ async function main(): Promise<void> {
     } else {
       console.log(`\nall ${reports.length} call(s) produced agent audio; WAVs in ${opts.outDir}/`);
     }
-    console.log('Check the submissions in the call log: jq . calls/calls-*.jsonl | tail -40');
+    if (!opts.prosper) console.log('Check the submissions in the call log: jq . calls/calls-*.jsonl | tail -40');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

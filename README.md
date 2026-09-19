@@ -101,7 +101,8 @@ but the slot.
 
 `test/fake-harness.ts` is a stand-in for the Prosper harness: it dials your own `/ws`
 speaking the same Twilio Media Streams messages, plays a scripted caller at 20 ms per
-frame (synthesised with macOS `say`), records what the agent says back to a WAV, and
+frame (synthesised with `say` on macOS, `espeak-ng` on Linux — `dnf install espeak-ng`;
+without either the caller is silent), records what the agent says back to a WAV, and
 reports the timings. Use it instead of practice calls, which are rate-limited.
 
 ```bash
@@ -120,6 +121,38 @@ attributes to us and cuts the call for.
 pnpm test:audio    # pacing and barge-in, no network needed
 pnpm typecheck
 ```
+
+### A local Prosper
+
+`mock/` is the Prosper platform API on your own machine: the same routes, bodies,
+errors and 30-second submission window, over an invented clinic. Point the agent at it
+and nothing leaves the machine but the agent's own model calls — no practice-call rate
+limit, no Run All, no records on the real board.
+
+```bash
+pnpm mock                                   # the API on :8787, control routes on /__mock
+pnpm start:local                            # the agent, submitting to the mock
+pnpm harness:local -- --scenario simple     # one local case, graded PASS/FAIL
+pnpm harness:local -- --scenario all        # every case at once
+```
+
+- **The catalogue is real, the people are not.** Sites, doctors, schedules, plans and
+  rules are a snapshot of the real `/api/v1/clinic` (`mock/world/catalogue.json`),
+  because the decider's prompt hard-codes facts about them. Patients, notes, visit
+  histories and diaries are invented from a seed — the same 800 patients on every
+  machine (`MOCK_SEED`, `MOCK_PATIENTS`).
+- **Two plan rules are invented**, since the catalogue names them without saying which
+  plan does what: which insurer demands its own referral, and which plans cap visits.
+  Both are in `mock/world/catalogue.ts`.
+- **Local cases** live in `mock/world/scenarios.ts`: a script, the caller id, and the
+  record that should come out — simple booking, new patient, cancel, a rule refusal,
+  a red flag, a privacy attempt, a parent booking for a child. `GET /__mock/scenarios`
+  lists them. The caller is a fixed script, not a persona: it does not listen, so these
+  test the pipeline and the record, not the conversation.
+- **Grading is binary**, as on the board: the record matches the expectation exactly or
+  the case fails, and a FAIL names the field that lost.
+- A call the harness never announced gets the real API's 404. `MOCK_ACCEPT_ANY_CALL=1`
+  accepts any `call_id`, for driving the agent from something other than the harness.
 
 ### Reading the call log
 

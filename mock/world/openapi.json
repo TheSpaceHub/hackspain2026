@@ -1,0 +1,2746 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Prosper — platform API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "summary": "Health",
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/submit/register": {
+      "post": {
+        "tags": [
+          "Submission"
+        ],
+        "summary": "Register Patient",
+        "description": "Put a caller who is not on file into the record.",
+        "operationId": "submit_register_api_v1_submit_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No call with this `call_id` is registered to your key."
+          },
+          "410": {
+            "description": "The submission window for this call has closed."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ]
+      }
+    },
+    "/api/v1/submit/book": {
+      "post": {
+        "tags": [
+          "Submission"
+        ],
+        "summary": "Book Appointment",
+        "description": "Book a slot for a patient already on file.",
+        "operationId": "submit_book_api_v1_submit_book_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No call with this `call_id` is registered to your key."
+          },
+          "410": {
+            "description": "The submission window for this call has closed."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ]
+      }
+    },
+    "/api/v1/submit/reschedule": {
+      "post": {
+        "tags": [
+          "Submission"
+        ],
+        "summary": "Reschedule Appointment",
+        "description": "Move an existing appointment to another slot.",
+        "operationId": "submit_reschedule_api_v1_submit_reschedule_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RescheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No call with this `call_id` is registered to your key."
+          },
+          "410": {
+            "description": "The submission window for this call has closed."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ]
+      }
+    },
+    "/api/v1/submit/cancel": {
+      "post": {
+        "tags": [
+          "Submission"
+        ],
+        "summary": "Cancel Appointment",
+        "description": "Cancel an existing appointment. Two cancellations are two requests.",
+        "operationId": "submit_cancel_api_v1_submit_cancel_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No call with this `call_id` is registered to your key."
+          },
+          "410": {
+            "description": "The submission window for this call has closed."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ]
+      }
+    },
+    "/api/v1/submit/no-action": {
+      "post": {
+        "tags": [
+          "Submission"
+        ],
+        "summary": "No Action",
+        "description": "End the call without a write, carrying the reason.",
+        "operationId": "submit_no_action_api_v1_submit_no_action_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No call with this `call_id` is registered to your key."
+          },
+          "410": {
+            "description": "The submission window for this call has closed."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ]
+      }
+    },
+    "/api/v1/submit/escalate": {
+      "post": {
+        "tags": [
+          "Submission"
+        ],
+        "summary": "Escalate to Human",
+        "description": "Hand the call to a human, carrying the reason.",
+        "operationId": "submit_escalate_api_v1_submit_escalate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EscalateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No call with this `call_id` is registered to your key."
+          },
+          "410": {
+            "description": "The submission window for this call has closed."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ]
+      }
+    },
+    "/api/v1/directory": {
+      "get": {
+        "tags": [
+          "Clinic"
+        ],
+        "summary": "Search Patient",
+        "operationId": "search_directory_api_v1_directory_get",
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Full or partial name, compared after normalization.",
+              "examples": [
+                "Marta Ruiz Gomez"
+              ],
+              "title": "Name"
+            },
+            "description": "Full or partial name, compared after normalization."
+          },
+          {
+            "name": "national_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "DNI or NIE, as dictated.",
+              "examples": [
+                "12345678Z"
+              ],
+              "title": "National Id"
+            },
+            "description": "DNI or NIE, as dictated."
+          },
+          {
+            "name": "phone",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "As dictated; the digits are what is compared.",
+              "examples": [
+                "612345678"
+              ],
+              "title": "Phone"
+            },
+            "description": "As dictated; the digits are what is compared."
+          },
+          {
+            "name": "date_of_birth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ISO date, used to tell namesakes apart.",
+              "examples": [
+                "1988-03-14"
+              ],
+              "title": "Date Of Birth"
+            },
+            "description": "ISO date, used to tell namesakes apart."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/patients/{patient_id}/appointments": {
+      "get": {
+        "tags": [
+          "Clinic"
+        ],
+        "summary": "List Patient Appointments",
+        "operationId": "patient_appointments_api_v1_patients__patient_id__appointments_get",
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "patient_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The patient's id from the directory lookup.",
+              "examples": [
+                "P00042"
+              ],
+              "title": "Patient Id"
+            },
+            "description": "The patient's id from the directory lookup."
+          },
+          {
+            "name": "when",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/AppointmentWindow",
+              "description": "Which half of the diary to return: what the patient still has ahead of them, the visits they have already been to, or both. Only an upcoming appointment can be cancelled or moved.",
+              "default": "upcoming"
+            },
+            "description": "Which half of the diary to return: what the patient still has ahead of them, the visits they have already been to, or both. Only an upcoming appointment can be cancelled or moved."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/availability": {
+      "get": {
+        "tags": [
+          "Clinic"
+        ],
+        "summary": "Search Availability",
+        "operationId": "search_availability_api_v1_availability_get",
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "First day of the window, inclusive.",
+              "examples": [
+                "2026-09-21"
+              ],
+              "title": "Date From"
+            },
+            "description": "First day of the window, inclusive."
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "Last day of the window, inclusive.",
+              "examples": [
+                "2026-09-25"
+              ],
+              "title": "Date To"
+            },
+            "description": "Last day of the window, inclusive."
+          },
+          {
+            "name": "provider_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this provider's slots.",
+              "examples": [
+                "PR05"
+              ],
+              "title": "Provider Id"
+            },
+            "description": "Only this provider's slots."
+          },
+          {
+            "name": "specialty_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only providers of this specialty.",
+              "examples": [
+                "dermatology"
+              ],
+              "title": "Specialty Id"
+            },
+            "description": "Only providers of this specialty."
+          },
+          {
+            "name": "location_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only slots at this site.",
+              "examples": [
+                "sur"
+              ],
+              "title": "Location Id"
+            },
+            "description": "Only slots at this site."
+          },
+          {
+            "name": "patient_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only what this patient is eligible for: their age, history and plans are applied, so a slot listed here is one they can take.",
+              "examples": [
+                "P00042"
+              ],
+              "title": "Patient Id"
+            },
+            "description": "Only what this patient is eligible for: their age, history and plans are applied, so a slot listed here is one they can take."
+          },
+          {
+            "name": "insurer",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Insurer"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only slots these plans cover. Repeat it for several.",
+              "examples": [
+                [
+                  "sanitas"
+                ]
+              ],
+              "title": "Insurer"
+            },
+            "description": "Only slots these plans cover. Repeat it for several."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AvailabilityResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clinic": {
+      "get": {
+        "tags": [
+          "Clinic"
+        ],
+        "summary": "Clinic Overview",
+        "description": "The whole catalogue in one call: the bookable window, the standing\nrestrictions and their decline reasons, and every provider, specialty,\nappointment type, location and insurance plan.",
+        "operationId": "clinic_api_v1_clinic_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClinicResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ]
+      }
+    },
+    "/api/v1/providers": {
+      "get": {
+        "tags": [
+          "Clinic"
+        ],
+        "summary": "List Providers",
+        "description": "Every provider, with their specialty, languages, the types they perform,\nwhere and when they sit, the plans they take, and any leave.",
+        "operationId": "providers_api_v1_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ]
+      }
+    },
+    "/api/v1/locations": {
+      "get": {
+        "tags": [
+          "Clinic"
+        ],
+        "summary": "List Locations",
+        "description": "Every site, its address and opening hours, who sits there, and which\nplans cover it.",
+        "operationId": "locations_api_v1_locations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationsResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ]
+      }
+    },
+    "/api/v1/specialties": {
+      "get": {
+        "tags": [
+          "Clinic"
+        ],
+        "summary": "List Specialties",
+        "description": "Every specialty, its age window, whether it needs a referral, and which\nplans cover it. The ids are what `/availability?specialty_id=` takes.",
+        "operationId": "specialties_api_v1_specialties_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpecialtiesResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ]
+      }
+    },
+    "/api/v1/appointment-types": {
+      "get": {
+        "tags": [
+          "Clinic"
+        ],
+        "summary": "List Appointment Types",
+        "description": "Every appointment type, its duration, and which patient it is for. The\ntype follows the patient's history and the specialty, never the request.",
+        "operationId": "appointment_types_api_v1_appointment_types_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentTypesResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ]
+      }
+    },
+    "/api/v1/insurance-plans": {
+      "get": {
+        "tags": [
+          "Clinic"
+        ],
+        "summary": "List Insurance Plans",
+        "description": "Every plan, what it covers and where, and which providers take it. A\npatient's plan on file comes back from `/directory`; a second one they may\nhold is nowhere in the data, and only the call reveals it.",
+        "operationId": "insurance_plans_api_v1_insurance_plans_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsurancePlansResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ]
+      }
+    },
+    "/api/v1/submissions": {
+      "get": {
+        "tags": [
+          "Submission"
+        ],
+        "summary": "List Submissions",
+        "operationId": "list_records_api_v1_submissions_get",
+        "security": [
+          {
+            "TeamApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "How many of your most recent records to return.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "How many of your most recent records to return."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AppointmentOut": {
+        "properties": {
+          "appointment_id": {
+            "type": "string",
+            "title": "Appointment Id"
+          },
+          "patient_id": {
+            "type": "string",
+            "title": "Patient Id"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "location_id": {
+            "type": "string",
+            "title": "Location Id"
+          },
+          "appointment_type_id": {
+            "type": "string",
+            "title": "Appointment Type Id"
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start Time"
+          },
+          "duration_minutes": {
+            "type": "integer",
+            "title": "Duration Minutes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "appointment_id",
+          "patient_id",
+          "provider_id",
+          "location_id",
+          "appointment_type_id",
+          "start_time",
+          "duration_minutes"
+        ],
+        "title": "AppointmentOut"
+      },
+      "AppointmentTypeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "duration_minutes": {
+            "type": "integer",
+            "title": "Duration Minutes"
+          },
+          "new_patient_requirement": {
+            "type": "string",
+            "title": "New Patient Requirement"
+          },
+          "guidance": {
+            "type": "string",
+            "title": "Guidance"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "duration_minutes",
+          "new_patient_requirement",
+          "guidance"
+        ],
+        "title": "AppointmentTypeOut"
+      },
+      "AppointmentTypesResponse": {
+        "properties": {
+          "appointment_types": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicAppointmentTypeResponse"
+            },
+            "type": "array",
+            "title": "Appointment Types"
+          }
+        },
+        "type": "object",
+        "required": [
+          "appointment_types"
+        ],
+        "title": "AppointmentTypesResponse"
+      },
+      "AppointmentWindow": {
+        "type": "string",
+        "enum": [
+          "upcoming",
+          "past",
+          "all"
+        ],
+        "title": "AppointmentWindow"
+      },
+      "AppointmentsResponse": {
+        "properties": {
+          "appointments": {
+            "items": {
+              "$ref": "#/components/schemas/AppointmentOut"
+            },
+            "type": "array",
+            "title": "Appointments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "appointments"
+        ],
+        "title": "AppointmentsResponse"
+      },
+      "AvailabilityResponse": {
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderOut"
+            },
+            "type": "array",
+            "title": "Providers"
+          },
+          "appointment_type": {
+            "$ref": "#/components/schemas/AppointmentTypeOut"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/SlotOut"
+            },
+            "type": "array",
+            "title": "Slots"
+          },
+          "blocked": {
+            "items": {
+              "$ref": "#/components/schemas/BlockedOut"
+            },
+            "type": "array",
+            "title": "Blocked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "providers",
+          "appointment_type",
+          "slots",
+          "blocked"
+        ],
+        "title": "AvailabilityResponse"
+      },
+      "BlockedOut": {
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "restriction": {
+            "type": "string",
+            "title": "Restriction"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_id",
+          "restriction"
+        ],
+        "title": "BlockedOut"
+      },
+      "BookAction": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "BOOK",
+            "title": "Action",
+            "default": "BOOK"
+          },
+          "patient_id": {
+            "type": "string",
+            "title": "Patient Id"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "location_id": {
+            "type": "string",
+            "title": "Location Id"
+          },
+          "appointment_type_id": {
+            "type": "string",
+            "title": "Appointment Type Id"
+          },
+          "slot": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Slot"
+          },
+          "policy_id": {
+            "$ref": "#/components/schemas/Insurer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "patient_id",
+          "provider_id",
+          "location_id",
+          "appointment_type_id",
+          "slot",
+          "policy_id"
+        ],
+        "title": "BookAction"
+      },
+      "BookRequest": {
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "title": "Call Id",
+            "description": "The `callSid` of the `start` message that opened the call. Never minted by the team.",
+            "examples": [
+              "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            ]
+          },
+          "patient_id": {
+            "type": "string",
+            "title": "Patient Id",
+            "description": "The patient's id from the directory lookup -- never from what the caller said.",
+            "examples": [
+              "P00042"
+            ]
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id",
+            "description": "The provider who will see the patient, from the directory.",
+            "examples": [
+              "PR05"
+            ]
+          },
+          "location_id": {
+            "type": "string",
+            "title": "Location Id",
+            "description": "The site the appointment is at, from availability.",
+            "examples": [
+              "sur"
+            ]
+          },
+          "appointment_type_id": {
+            "type": "string",
+            "title": "Appointment Type Id",
+            "description": "The kind of visit, from availability.",
+            "examples": [
+              "review"
+            ]
+          },
+          "slot": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Slot",
+            "description": "The appointment's start, with an explicit timezone offset. Compared in Europe/Madrid to the exact minute.",
+            "examples": [
+              "2026-09-24T16:30:00+02:00"
+            ]
+          },
+          "policy_id": {
+            "$ref": "#/components/schemas/Insurer",
+            "description": "Which of the patient's plans the appointment is billed against. A patient may hold two, and only one may cover what they asked for.",
+            "examples": [
+              "sanitas"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "call_id",
+          "patient_id",
+          "provider_id",
+          "location_id",
+          "appointment_type_id",
+          "slot",
+          "policy_id"
+        ],
+        "title": "BookRequest",
+        "description": "A slot for a patient already on file.",
+        "examples": [
+          {
+            "appointment_type_id": "review",
+            "call_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "location_id": "sur",
+            "patient_id": "P00042",
+            "policy_id": "sanitas",
+            "provider_id": "PR05",
+            "slot": "2026-09-24T16:30:00+02:00"
+          }
+        ]
+      },
+      "CancelAction": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "CANCEL",
+            "title": "Action",
+            "default": "CANCEL"
+          },
+          "appointment_id": {
+            "type": "string",
+            "title": "Appointment Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "appointment_id"
+        ],
+        "title": "CancelAction"
+      },
+      "CancelRequest": {
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "title": "Call Id",
+            "description": "The `callSid` of the `start` message that opened the call. Never minted by the team.",
+            "examples": [
+              "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            ]
+          },
+          "appointment_id": {
+            "type": "string",
+            "title": "Appointment Id",
+            "description": "An appointment already on file, from the patient's appointments lookup. There is no other source for one.",
+            "examples": [
+              "A000123"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "call_id",
+          "appointment_id"
+        ],
+        "title": "CancelRequest",
+        "description": "One existing appointment cancelled. Two cancellations are two requests.",
+        "examples": [
+          {
+            "appointment_id": "A000123",
+            "call_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+          }
+        ]
+      },
+      "ClinicAppointmentTypeResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "duration_minutes": {
+            "type": "integer",
+            "title": "Duration Minutes"
+          },
+          "new_patient_requirement": {
+            "type": "string",
+            "title": "New Patient Requirement"
+          },
+          "guidance": {
+            "type": "string",
+            "title": "Guidance"
+          },
+          "provider_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Provider Names"
+          },
+          "specialty_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Specialty Id"
+          },
+          "specialty_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Specialty Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "duration_minutes",
+          "new_patient_requirement",
+          "guidance",
+          "provider_names",
+          "specialty_id",
+          "specialty_name"
+        ],
+        "title": "ClinicAppointmentTypeResponse"
+      },
+      "ClinicCalendarResponse": {
+        "properties": {
+          "starts": {
+            "type": "string",
+            "format": "date",
+            "title": "Starts"
+          },
+          "ends": {
+            "type": "string",
+            "format": "date",
+            "title": "Ends"
+          },
+          "max_span_days": {
+            "type": "integer",
+            "title": "Max Span Days"
+          },
+          "slot_minutes": {
+            "type": "integer",
+            "title": "Slot Minutes"
+          },
+          "closure_days": {
+            "items": {
+              "type": "string",
+              "format": "date"
+            },
+            "type": "array",
+            "title": "Closure Days"
+          },
+          "appointment_count": {
+            "type": "integer",
+            "title": "Appointment Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "starts",
+          "ends",
+          "max_span_days",
+          "slot_minutes",
+          "closure_days",
+          "appointment_count"
+        ],
+        "title": "ClinicCalendarResponse",
+        "description": "The bookable window, as `/api/v1/availability` accepts it."
+      },
+      "ClinicDayResponse": {
+        "properties": {
+          "weekday": {
+            "type": "string",
+            "title": "Weekday"
+          },
+          "intervals": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Intervals"
+          }
+        },
+        "type": "object",
+        "required": [
+          "weekday",
+          "intervals"
+        ],
+        "title": "ClinicDayResponse"
+      },
+      "ClinicInsurerRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ClinicInsurerRef"
+      },
+      "ClinicLeaveResponse": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date",
+            "title": "End"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "reason"
+        ],
+        "title": "ClinicLeaveResponse"
+      },
+      "ClinicLocationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "address": {
+            "type": "string",
+            "title": "Address"
+          },
+          "latitude": {
+            "type": "number",
+            "title": "Latitude"
+          },
+          "longitude": {
+            "type": "number",
+            "title": "Longitude"
+          },
+          "hours": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicDayResponse"
+            },
+            "type": "array",
+            "title": "Hours"
+          },
+          "provider_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Provider Names"
+          },
+          "covered_by": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicInsurerRef"
+            },
+            "type": "array",
+            "title": "Covered By"
+          },
+          "not_covered_by": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicInsurerRef"
+            },
+            "type": "array",
+            "title": "Not Covered By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "address",
+          "latitude",
+          "longitude",
+          "hours",
+          "provider_names",
+          "covered_by",
+          "not_covered_by"
+        ],
+        "title": "ClinicLocationResponse"
+      },
+      "ClinicPlanResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "covered_specialty_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Covered Specialty Names"
+          },
+          "uncovered_specialty_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Uncovered Specialty Names"
+          },
+          "covered_location_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Covered Location Names"
+          },
+          "uncovered_location_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Uncovered Location Names"
+          },
+          "accepted_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Accepted By"
+          },
+          "refused_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Refused By"
+          },
+          "holders": {
+            "type": "integer",
+            "title": "Holders"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "covered_specialty_names",
+          "uncovered_specialty_names",
+          "covered_location_names",
+          "uncovered_location_names",
+          "accepted_by",
+          "refused_by",
+          "holders"
+        ],
+        "title": "ClinicPlanResponse"
+      },
+      "ClinicProviderResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "specialty_id": {
+            "type": "string",
+            "title": "Specialty Id"
+          },
+          "specialty_name": {
+            "type": "string",
+            "title": "Specialty Name"
+          },
+          "languages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Languages"
+          },
+          "appointment_type_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Appointment Type Names"
+          },
+          "location_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Location Names"
+          },
+          "schedules": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicScheduleResponse"
+            },
+            "type": "array",
+            "title": "Schedules"
+          },
+          "accepted_insurers": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicInsurerRef"
+            },
+            "type": "array",
+            "title": "Accepted Insurers"
+          },
+          "refused_insurers": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicInsurerRef"
+            },
+            "type": "array",
+            "title": "Refused Insurers"
+          },
+          "leave": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClinicLeaveResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "specialty_id",
+          "specialty_name",
+          "languages",
+          "appointment_type_names",
+          "location_names",
+          "schedules",
+          "accepted_insurers",
+          "refused_insurers",
+          "leave"
+        ],
+        "title": "ClinicProviderResponse"
+      },
+      "ClinicResponse": {
+        "properties": {
+          "clinic_name": {
+            "type": "string",
+            "title": "Clinic Name"
+          },
+          "patient_count": {
+            "type": "integer",
+            "title": "Patient Count"
+          },
+          "calendar": {
+            "$ref": "#/components/schemas/ClinicCalendarResponse"
+          },
+          "restrictions": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicRestrictionResponse"
+            },
+            "type": "array",
+            "title": "Restrictions"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicProviderResponse"
+            },
+            "type": "array",
+            "title": "Providers"
+          },
+          "specialties": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicSpecialtyResponse"
+            },
+            "type": "array",
+            "title": "Specialties"
+          },
+          "appointment_types": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicAppointmentTypeResponse"
+            },
+            "type": "array",
+            "title": "Appointment Types"
+          },
+          "locations": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicLocationResponse"
+            },
+            "type": "array",
+            "title": "Locations"
+          },
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicPlanResponse"
+            },
+            "type": "array",
+            "title": "Plans"
+          }
+        },
+        "type": "object",
+        "required": [
+          "clinic_name",
+          "patient_count",
+          "calendar",
+          "restrictions",
+          "providers",
+          "specialties",
+          "appointment_types",
+          "locations",
+          "plans"
+        ],
+        "title": "ClinicResponse",
+        "description": "The shape of the clinic, without a single patient in it: the patients\ncome a page at a time from their own endpoint."
+      },
+      "ClinicRestrictionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "explanation"
+        ],
+        "title": "ClinicRestrictionResponse"
+      },
+      "ClinicScheduleResponse": {
+        "properties": {
+          "location_id": {
+            "type": "string",
+            "title": "Location Id"
+          },
+          "location_name": {
+            "type": "string",
+            "title": "Location Name"
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicDayResponse"
+            },
+            "type": "array",
+            "title": "Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "location_id",
+          "location_name",
+          "days"
+        ],
+        "title": "ClinicScheduleResponse",
+        "description": "When one provider is open at one location — the `location_hours`\nrestriction, which is the one a slot request fails on."
+      },
+      "ClinicSpecialtyResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "min_age_months": {
+            "type": "integer",
+            "title": "Min Age Months"
+          },
+          "max_age_months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Age Months"
+          },
+          "referral_required": {
+            "type": "boolean",
+            "title": "Referral Required"
+          },
+          "provider_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Provider Names"
+          },
+          "covered_by": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicInsurerRef"
+            },
+            "type": "array",
+            "title": "Covered By"
+          },
+          "not_covered_by": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicInsurerRef"
+            },
+            "type": "array",
+            "title": "Not Covered By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "min_age_months",
+          "max_age_months",
+          "referral_required",
+          "provider_names",
+          "covered_by",
+          "not_covered_by"
+        ],
+        "title": "ClinicSpecialtyResponse"
+      },
+      "DirectoryResponse": {
+        "properties": {
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/PatientMatchOut"
+            },
+            "type": "array",
+            "title": "Matches"
+          }
+        },
+        "type": "object",
+        "required": [
+          "matches"
+        ],
+        "title": "DirectoryResponse"
+      },
+      "EscalateAction": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "ESCALATE",
+            "title": "Action",
+            "default": "ESCALATE"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/OutcomeReason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "EscalateAction"
+      },
+      "EscalateRequest": {
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "title": "Call Id",
+            "description": "The `callSid` of the `start` message that opened the call. Never minted by the team.",
+            "examples": [
+              "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            ]
+          },
+          "reason": {
+            "$ref": "#/components/schemas/OutcomeReason",
+            "description": "Why the call ended without a write, from the published closed vocabulary. The first eleven values mirror the clinic's own restrictions one-for-one."
+          }
+        },
+        "type": "object",
+        "required": [
+          "call_id",
+          "reason"
+        ],
+        "title": "EscalateRequest",
+        "description": "The call handed to a human, and the reason is the answer.",
+        "examples": [
+          {
+            "call_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "reason": "medical_emergency"
+          }
+        ]
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "InsurancePlansResponse": {
+        "properties": {
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicPlanResponse"
+            },
+            "type": "array",
+            "title": "Plans"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plans"
+        ],
+        "title": "InsurancePlansResponse"
+      },
+      "Insurer": {
+        "type": "string",
+        "enum": [
+          "sanitas",
+          "adeslas",
+          "dkv",
+          "asisa",
+          "mapfre",
+          "caser",
+          "cigna",
+          "axa",
+          "nueva_mutua",
+          "privado"
+        ],
+        "title": "Insurer"
+      },
+      "LocationsResponse": {
+        "properties": {
+          "locations": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicLocationResponse"
+            },
+            "type": "array",
+            "title": "Locations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "locations"
+        ],
+        "title": "LocationsResponse"
+      },
+      "NewPatient": {
+        "properties": {
+          "given_name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Given Name"
+          },
+          "first_surname": {
+            "type": "string",
+            "minLength": 1,
+            "title": "First Surname"
+          },
+          "second_surname": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Second Surname"
+          },
+          "national_id": {
+            "type": "string",
+            "title": "National Id"
+          },
+          "date_of_birth": {
+            "type": "string",
+            "format": "date",
+            "title": "Date Of Birth"
+          },
+          "phone": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Phone"
+          },
+          "email": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Email"
+          },
+          "insurer": {
+            "$ref": "#/components/schemas/Insurer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "given_name",
+          "first_surname",
+          "second_surname",
+          "national_id",
+          "date_of_birth",
+          "phone",
+          "email",
+          "insurer"
+        ],
+        "title": "NewPatient",
+        "description": "Demographics captured over the phone for someone not yet on file.\n\nScored field by field after normalization. ``national_id`` re-derives its\nown check letter, which is what separates a misheard digit from an\ninvented one. ``email`` is the one field with no check digit at all: a\nletter misheard in the local part is just a different address."
+      },
+      "NoAction": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "NO_ACTION",
+            "title": "Action",
+            "default": "NO_ACTION"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/OutcomeReason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "NoAction"
+      },
+      "NoActionRequest": {
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "title": "Call Id",
+            "description": "The `callSid` of the `start` message that opened the call. Never minted by the team.",
+            "examples": [
+              "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            ]
+          },
+          "reason": {
+            "$ref": "#/components/schemas/OutcomeReason",
+            "description": "Why the call ended without a write, from the published closed vocabulary. The first eleven values mirror the clinic's own restrictions one-for-one."
+          }
+        },
+        "type": "object",
+        "required": [
+          "call_id",
+          "reason"
+        ],
+        "title": "NoActionRequest",
+        "description": "The call ended with no write, and the reason is the answer.",
+        "examples": [
+          {
+            "call_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "reason": "no_availability"
+          }
+        ]
+      },
+      "OutcomeReason": {
+        "type": "string",
+        "enum": [
+          "not_eligible_age",
+          "referral_required",
+          "provider_not_in_network",
+          "specialty_not_covered",
+          "location_not_covered",
+          "insurer_referral_required",
+          "allowance_exhausted",
+          "provider_on_leave",
+          "location_hours",
+          "type_not_offered",
+          "patient_history",
+          "no_availability",
+          "clinic_closed",
+          "patient_not_found",
+          "provider_not_found",
+          "caller_not_authorised",
+          "out_of_scope",
+          "medical_emergency"
+        ],
+        "title": "OutcomeReason",
+        "description": "Every reason a call can end without a booking.\n\nClosed, and published in the rulebook. The first eleven mirror\n``core/clinic``'s ``RestrictionKind`` one-for-one -- a test asserts that,\nso a new clinic rule cannot appear without a reason a team can report it\nwith. The rest cover endings that are not about a clinic rule at all."
+      },
+      "PatientMatchOut": {
+        "properties": {
+          "patient_id": {
+            "type": "string",
+            "title": "Patient Id"
+          },
+          "given_name": {
+            "type": "string",
+            "title": "Given Name"
+          },
+          "first_surname": {
+            "type": "string",
+            "title": "First Surname"
+          },
+          "second_surname": {
+            "type": "string",
+            "title": "Second Surname"
+          },
+          "national_id": {
+            "type": "string",
+            "title": "National Id"
+          },
+          "date_of_birth": {
+            "type": "string",
+            "format": "date",
+            "title": "Date Of Birth"
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone"
+          },
+          "sex": {
+            "type": "string",
+            "title": "Sex"
+          },
+          "has_visited_before": {
+            "type": "boolean",
+            "title": "Has Visited Before"
+          },
+          "insurer": {
+            "type": "string",
+            "title": "Insurer"
+          },
+          "referrals": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Referrals"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "match_score": {
+            "type": "number",
+            "title": "Match Score"
+          },
+          "matched_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matched Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "patient_id",
+          "given_name",
+          "first_surname",
+          "second_surname",
+          "national_id",
+          "date_of_birth",
+          "phone",
+          "sex",
+          "has_visited_before",
+          "insurer",
+          "referrals",
+          "note",
+          "match_score",
+          "matched_fields"
+        ],
+        "title": "PatientMatchOut"
+      },
+      "ProviderOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "specialty_id": {
+            "type": "string",
+            "title": "Specialty Id"
+          },
+          "languages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Languages"
+          },
+          "accepted_insurers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Accepted Insurers"
+          },
+          "locations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Locations"
+          },
+          "on_leave_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Leave Until"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "specialty_id",
+          "languages",
+          "accepted_insurers",
+          "locations",
+          "on_leave_until"
+        ],
+        "title": "ProviderOut"
+      },
+      "ProvidersResponse": {
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicProviderResponse"
+            },
+            "type": "array",
+            "title": "Providers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "providers"
+        ],
+        "title": "ProvidersResponse"
+      },
+      "RecordResponse": {
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "title": "Call Id"
+          },
+          "record": {
+            "$ref": "#/components/schemas/SubmittedOutcome"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Received At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "call_id",
+          "record",
+          "received_at"
+        ],
+        "title": "RecordResponse"
+      },
+      "RecordsResponse": {
+        "properties": {
+          "submissions": {
+            "items": {
+              "$ref": "#/components/schemas/RecordResponse"
+            },
+            "type": "array",
+            "title": "Submissions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "submissions"
+        ],
+        "title": "RecordsResponse"
+      },
+      "RegisterAction": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "REGISTER",
+            "title": "Action",
+            "default": "REGISTER"
+          },
+          "new_patient": {
+            "$ref": "#/components/schemas/NewPatient"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_patient"
+        ],
+        "title": "RegisterAction",
+        "description": "Put a caller the directory does not know on file. Nothing is booked:\nthe record is the whole answer."
+      },
+      "RegisterRequest": {
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "title": "Call Id",
+            "description": "The `callSid` of the `start` message that opened the call. Never minted by the team.",
+            "examples": [
+              "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            ]
+          },
+          "given_name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Given Name",
+            "examples": [
+              "Ana"
+            ]
+          },
+          "first_surname": {
+            "type": "string",
+            "minLength": 1,
+            "title": "First Surname",
+            "examples": [
+              "García"
+            ]
+          },
+          "second_surname": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Second Surname",
+            "examples": [
+              "López"
+            ]
+          },
+          "national_id": {
+            "type": "string",
+            "title": "National Id",
+            "description": "DNI or NIE. The check letter is re-derived from the digits, so a letter that does not match them is a 422.",
+            "examples": [
+              "12345678Z"
+            ]
+          },
+          "date_of_birth": {
+            "type": "string",
+            "format": "date",
+            "title": "Date Of Birth",
+            "examples": [
+              "1988-03-14"
+            ]
+          },
+          "phone": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Phone",
+            "description": "As dictated; compared after normalization.",
+            "examples": [
+              "+34612345678"
+            ]
+          },
+          "email": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Email",
+            "description": "As dictated; compared after normalization.",
+            "examples": [
+              "ana.garcia@gmail.com"
+            ]
+          },
+          "insurer": {
+            "$ref": "#/components/schemas/Insurer",
+            "description": "The plan the new patient is registered under.",
+            "examples": [
+              "adeslas"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "call_id",
+          "given_name",
+          "first_surname",
+          "second_surname",
+          "national_id",
+          "date_of_birth",
+          "phone",
+          "email",
+          "insurer"
+        ],
+        "title": "RegisterRequest",
+        "description": "A caller the directory does not know. Nothing is booked: the\ndemographics are the answer, every field scored after normalization.",
+        "examples": [
+          {
+            "call_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "date_of_birth": "1988-03-14",
+            "email": "ana.garcia@gmail.com",
+            "first_surname": "García",
+            "given_name": "Ana",
+            "insurer": "adeslas",
+            "national_id": "12345678Z",
+            "phone": "+34612345678",
+            "second_surname": "López"
+          }
+        ]
+      },
+      "RescheduleAction": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "RESCHEDULE",
+            "title": "Action",
+            "default": "RESCHEDULE"
+          },
+          "appointment_id": {
+            "type": "string",
+            "title": "Appointment Id"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "location_id": {
+            "type": "string",
+            "title": "Location Id"
+          },
+          "slot": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Slot"
+          },
+          "policy_id": {
+            "$ref": "#/components/schemas/Insurer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "appointment_id",
+          "provider_id",
+          "location_id",
+          "slot",
+          "policy_id"
+        ],
+        "title": "RescheduleAction"
+      },
+      "RescheduleRequest": {
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "title": "Call Id",
+            "description": "The `callSid` of the `start` message that opened the call. Never minted by the team.",
+            "examples": [
+              "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            ]
+          },
+          "appointment_id": {
+            "type": "string",
+            "title": "Appointment Id",
+            "description": "An appointment already on file, from the patient's appointments lookup. There is no other source for one.",
+            "examples": [
+              "A000123"
+            ]
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id",
+            "description": "The provider who will see the patient, from the directory.",
+            "examples": [
+              "PR05"
+            ]
+          },
+          "location_id": {
+            "type": "string",
+            "title": "Location Id",
+            "description": "The site the appointment is at, from availability.",
+            "examples": [
+              "sur"
+            ]
+          },
+          "slot": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Slot",
+            "description": "The appointment's start, with an explicit timezone offset. Compared in Europe/Madrid to the exact minute.",
+            "examples": [
+              "2026-09-24T16:30:00+02:00"
+            ]
+          },
+          "policy_id": {
+            "$ref": "#/components/schemas/Insurer",
+            "description": "Which of the patient's plans the appointment is billed against. A patient may hold two, and only one may cover what they asked for.",
+            "examples": [
+              "sanitas"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "call_id",
+          "appointment_id",
+          "provider_id",
+          "location_id",
+          "slot",
+          "policy_id"
+        ],
+        "title": "RescheduleRequest",
+        "description": "An existing appointment moved to another slot.",
+        "examples": [
+          {
+            "appointment_id": "A000123",
+            "call_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "location_id": "sur",
+            "policy_id": "sanitas",
+            "provider_id": "PR05",
+            "slot": "2026-09-24T16:30:00+02:00"
+          }
+        ]
+      },
+      "SlotOut": {
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "provider_name": {
+            "type": "string",
+            "title": "Provider Name"
+          },
+          "specialty_id": {
+            "type": "string",
+            "title": "Specialty Id"
+          },
+          "location_id": {
+            "type": "string",
+            "title": "Location Id"
+          },
+          "appointment_type_id": {
+            "type": "string",
+            "title": "Appointment Type Id"
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start Time"
+          },
+          "duration_minutes": {
+            "type": "integer",
+            "title": "Duration Minutes"
+          },
+          "payable_with": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Payable With"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_id",
+          "provider_name",
+          "specialty_id",
+          "location_id",
+          "appointment_type_id",
+          "start_time",
+          "duration_minutes",
+          "payable_with"
+        ],
+        "title": "SlotOut"
+      },
+      "SpecialtiesResponse": {
+        "properties": {
+          "specialties": {
+            "items": {
+              "$ref": "#/components/schemas/ClinicSpecialtyResponse"
+            },
+            "type": "array",
+            "title": "Specialties"
+          }
+        },
+        "type": "object",
+        "required": [
+          "specialties"
+        ],
+        "title": "SpecialtiesResponse"
+      },
+      "SubmitResponse": {
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "title": "Call Id",
+            "description": "The call this record belongs to."
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Received At",
+            "description": "When this action was accepted, in UTC."
+          },
+          "record": {
+            "$ref": "#/components/schemas/SubmittedOutcome",
+            "description": "Every action accepted for this call so far, this one included, each under its verb. A `REGISTER` nests its fields under `new_patient` here."
+          }
+        },
+        "type": "object",
+        "required": [
+          "call_id",
+          "received_at",
+          "record"
+        ],
+        "title": "SubmitResponse",
+        "description": "The call's record so far, so a second action can see the first.",
+        "examples": [
+          {
+            "call_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "received_at": "2026-09-18T10:41:07.512Z",
+            "record": {
+              "actions": [
+                {
+                  "action": "BOOK",
+                  "appointment_type_id": "review",
+                  "location_id": "sur",
+                  "patient_id": "P00042",
+                  "policy_id": "sanitas",
+                  "provider_id": "PR05",
+                  "slot": "2026-09-24T16:30:00+02:00"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "SubmittedOutcome": {
+        "properties": {
+          "actions": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/RegisterAction"
+                },
+                {
+                  "$ref": "#/components/schemas/BookAction"
+                },
+                {
+                  "$ref": "#/components/schemas/RescheduleAction"
+                },
+                {
+                  "$ref": "#/components/schemas/CancelAction"
+                },
+                {
+                  "$ref": "#/components/schemas/NoAction"
+                },
+                {
+                  "$ref": "#/components/schemas/EscalateAction"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "action",
+                "mapping": {
+                  "BOOK": "#/components/schemas/BookAction",
+                  "CANCEL": "#/components/schemas/CancelAction",
+                  "ESCALATE": "#/components/schemas/EscalateAction",
+                  "NO_ACTION": "#/components/schemas/NoAction",
+                  "REGISTER": "#/components/schemas/RegisterAction",
+                  "RESCHEDULE": "#/components/schemas/RescheduleAction"
+                }
+              }
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Actions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "actions"
+        ],
+        "title": "SubmittedOutcome"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "TeamApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Api-Key"
+      }
+    }
+  }
+}
