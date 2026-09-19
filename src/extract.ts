@@ -13,7 +13,6 @@
 import { z } from 'zod';
 import {
   contradictsMatch,
-  callerNameMatchesPatient,
   recordPatientField,
   recordMatch,
   recordRequest,
@@ -100,7 +99,8 @@ function relationship(value: unknown): string | undefined {
   const valueReal = real(value);
   if (!valueReal) return undefined;
   const folded = valueReal.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
-  return RELATIONSHIPS.has(folded) ? valueReal : undefined;
+  // "her mother", "the patient's son": any kinship word in it counts.
+  return folded.split(/[^a-z]+/).some((word) => RELATIONSHIPS.has(word)) ? valueReal : undefined;
 }
 
 /** Injectable so the tests never touch the network. */
@@ -344,8 +344,8 @@ export function applyPatch(state: CallState, patch: ExtractedPatch, heard?: stri
       caller.name === undefined &&
       caller.relationship === undefined;
     if (!unchanged) {
-      if (patch.caller_is_patient === false && (caller.relationship === undefined || callerNameMatchesPatient(state, caller.name))) {
-        clog.warn('[extract] ignored caller_is_patient=false: no relationship / caller is the patient');
+      if (patch.caller_is_patient === false && caller.relationship === undefined) {
+        clog.warn(`[extract] ignored caller_is_patient=false: no kinship word (${String(patch.relationship)})`);
       } else {
         recordThirdParty(state, patch.caller_is_patient, caller);
       }

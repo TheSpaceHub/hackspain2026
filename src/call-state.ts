@@ -205,20 +205,6 @@ function namePartMatches(spoken: string, record: string | null | undefined, pref
   return distance(needle, haystack) <= tolerance(needle);
 }
 
-export function callerNameMatchesPatient(state: CallState, callerName?: string): boolean {
-  if (!callerName?.trim()) return false;
-  const words = callerName.trim().split(/\s+/);
-  const candidates = [
-    [state.matched?.given_name, state.matched?.first_surname],
-    [state.patient.given_name, state.patient.first_surname],
-  ];
-  return words.some((word) =>
-    candidates.some(([given, surname]) =>
-      namePartMatches(word, given, true) || namePartMatches(word, surname),
-    ),
-  );
-}
-
 /** Slots we actually said out loud, so the submitted `slot` is the quoted string exactly. */
 export function recordQuote(state: CallState, slots: QuotedSlot[]): void {
   state.quoted = slots;

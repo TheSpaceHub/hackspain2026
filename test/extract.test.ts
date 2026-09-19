@@ -100,14 +100,11 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
   });
   check('a related caller with a different name is a third party', different.caller_is_patient, false);
 
-  const sameName = createCallState('call-caller-self');
-  applyPatch(sameName, {
-    caller_is_patient: false,
-    caller_name: 'Beatriz',
-    relationship: 'mother',
-    patient: { given_name: 'Beatriz' },
-  });
-  check('a caller name matching the patient stays self', sameName.caller_is_patient, true);
+  // The number is on file for the mother; "it's for my child" must still demote her.
+  const phoneOwner = createCallState('call-caller-phone-owner');
+  recordMatch(phoneOwner, { patient_id: 'P9', given_name: 'Sara', first_surname: 'Ruiz' } as never, undefined, 'phone');
+  applyPatch(phoneOwner, { caller_is_patient: false, caller_name: 'Sara', relationship: 'mother' });
+  check('a kinship word demotes even the phone owner', phoneOwner.caller_is_patient, false);
 
   const phoneMatch = createCallState('call-caller-phone-match');
   recordMatch(phoneMatch, {
