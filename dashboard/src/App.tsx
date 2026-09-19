@@ -79,6 +79,7 @@ export function App() {
         ) : route.view === 'clinic' ? (
           <ClinicView
             sim={sim}
+            liveCalls={feed.calls.filter((c) => callStatus(c, now) === 'live')}
             date={route.callId}
             onDate={(date) => navigate({ view: 'clinic', callId: date })}
             onOpenCall={openCall}

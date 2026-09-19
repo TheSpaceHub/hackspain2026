@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useDiary } from '@/hooks/use-diary';
 import { useNow } from '@/hooks/use-now';
 import type { SimFeed } from '@/hooks/use-sim-feed';
+import type { Call } from '@/lib/agent/model';
 import { dayKey, formatClock, formatDay } from '@/lib/format';
 import { isSimUrl, releaseHold } from '@/lib/sim/client';
 import { liveHolds } from '@/lib/sim/model';
@@ -15,9 +16,12 @@ import type { Hold } from '@/lib/sim/wire';
 import { DiaryGrid } from './diary-grid';
 import { EventTicker } from './event-ticker';
 import { HoldsPanel } from './holds-panel';
+import { OnTheLine } from './on-the-line';
 
 interface ClinicViewProps {
   sim: SimFeed;
+  /** The agent's calls in progress, to listen in from here. */
+  liveCalls: Call[];
   /** The day open, YYYY-MM-DD; null for today. */
   date: string | null;
   onDate: (date: string) => void;
@@ -36,7 +40,7 @@ function shiftDay(date: string, days: number): string {
  * The shared clinic itself, not the calls: whose diary has what, which slots are on
  * hold by which call, what just happened, and a way back to the snapshot.
  */
-export function ClinicView({ sim, date: routeDate, onDate, onOpenCall, agentClinicApi }: ClinicViewProps) {
+export function ClinicView({ sim, liveCalls, date: routeDate, onDate, onOpenCall, agentClinicApi }: ClinicViewProps) {
   const now = useNow(1_000);
   const today = dayKey(new Date(now).toISOString());
   const date = routeDate ?? today;
@@ -192,6 +196,17 @@ export function ClinicView({ sim, date: routeDate, onDate, onOpenCall, agentClin
         </Card>
 
         <div className="flex min-h-0 flex-col gap-4">
+          <Card size="sm" className="gap-2">
+            <CardHeader>
+              <CardTitle>
+                On the line <span className="tabular font-normal text-muted-foreground">{liveCalls.length}</span>
+              </CardTitle>
+              <CardDescription>Calls the agent is taking right now. Listen plays both sides live.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <OnTheLine calls={liveCalls} holds={holds} now={now} onOpenCall={onOpenCall} />
+            </CardContent>
+          </Card>
           <Card size="sm" className="gap-2">
             <CardHeader>
               <CardTitle>
