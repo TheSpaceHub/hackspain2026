@@ -278,6 +278,12 @@ export class CallSession {
           const turns = this.#session ? buildCallTranscript(this.#session.history) : [];
           return [...turns].reverse().find((turn) => turn.role === 'user')?.text;
         },
+        lastAgentOffer: () => {
+          const turns = this.#session ? buildCallTranscript(this.#session.history) : [];
+          return [...turns]
+            .reverse()
+            .find((turn) => turn.role === 'assistant' && saidTimes(turn.text).length > 0)?.text;
+        },
         onAvailability: (availability) => {
           this.#availability = availability;
         },

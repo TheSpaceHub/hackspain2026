@@ -52,6 +52,7 @@ export interface ToolDeps {
   onAvailability?: (availability: Availability) => void;
   now?: () => Date;
   lastCallerText?: () => string | undefined;
+  lastAgentOffer?: () => string | undefined;
   /** Per-tool wall clock. Past it the agent is told to move on, mid-flight or not. */
   timeoutMs?: number;
   /**
@@ -347,7 +348,9 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
               recordRequest(state, { blocked_by: blocked });
               clog.warn(`[find_slots] blocked: ${blocked}`);
             }
-            return `Nothing bookable: ${blocked || providerRestriction.restriction}. Tell the caller plainly and do not offer a time.${specialtyNote}`;
+            const withdrew = state.quoted.length > 0 && !state.accepted;
+            if (withdrew) recordQuote(state, []);
+            return `Nothing bookable: ${blocked || providerRestriction.restriction}. Tell the caller plainly and do not offer a time.${withdrew ? ' The earlier offer is withdrawn — if they want it after all, call find_slots for that day again.' : ''}${specialtyNote}`;
           }
         }
 
@@ -357,9 +360,13 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
             recordRequest(state, { blocked_by: blocked });
             clog.warn(`[find_slots] blocked: ${blocked}`);
           }
+          const withdrew = state.quoted.length > 0 && !state.accepted;
+          if (withdrew) recordQuote(state, []);
           return (blocked
             ? `Nothing bookable: ${blocked}. Tell the caller plainly and do not offer a time.`
-            : 'Nothing free in that window. Offer to look at a different day.') + specialtyNote;
+            : 'Nothing free in that window. Offer to look at a different day.') +
+            (withdrew ? ' The earlier offer is withdrawn — if they want it after all, call find_slots for that day again.' : '') +
+            specialtyNote;
         }
 
         if (state.request.blocked_by) retract(state, 'blocked_by');
@@ -423,6 +430,15 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         if (!state.quoted_spoken) {
           clog.warn('[accept_slot] refused: the quoted time was not spoken');
           return 'You have not read that time to the caller yet — offer it first (day and time), then wait for their answer.';
+        }
+        const offerText = deps.lastAgentOffer?.();
+        const offered = offerText ? saidTimes(offerText) : [];
+        if (
+          offered.length > 0 &&
+          !offered.some((said) => state.quoted.some((quoted) => sameClock(quoted, said)))
+        ) {
+          clog.warn(`[accept_slot] refused: agent offered ${offered.map(formatClock).join(', ')}, which was never quoted`);
+          return `You told the caller ${offered.map(formatClock).join(', ')}, but no diary search returned that time — nothing is held. Call find_slots for the day they asked and offer only what it returns.`;
         }
         if (callerSilentSinceQuote(state)) {
           clog.warn(`[accept_slot] refused: caller has not spoken since the quote`);

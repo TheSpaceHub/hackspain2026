@@ -55,6 +55,7 @@ interface Harness {
 function harness(
   options: ConstructorParameters<typeof FakeClinic>[0] = {},
   lastCallerText?: string,
+  lastAgentOffer?: string,
 ): Harness {
   const clinic = new FakeClinic(options);
   const api = new ClinicApi({ baseUrl: 'https://fake.local', apiKey: 'k', fetch: clinic.fetch });
@@ -66,6 +67,7 @@ function harness(
     catalogue,
     now: () => NOW,
     lastCallerText: () => lastCallerText ?? state.last_caller_text,
+    lastAgentOffer: () => lastAgentOffer,
     onAvailability: (a) => {
       availability = a;
     },
@@ -284,6 +286,56 @@ function harness(
   check('which is the one it read out', /Offer that one and no other/.test(open), true);
   check('an ordinary earliest search keeps its original wording', /The soonest there is:/.test(open), true);
   check('spoken, not as ISO', /2026-10-09T/.test(open), false);
+}
+
+{
+  const h = harness({ fullDays: ['2026-10-08'] });
+  await h.call('find_slots', { when_phrase: 'Friday', specialty_id: 'spec_gp' });
+  const empty = await h.call('find_slots', { when_phrase: 'Thursday', specialty_id: 'spec_gp' });
+  check('an empty re-search withdraws the earlier offer', /withdrawn/.test(empty) && h.state.quoted.length, 0);
+  h.state.caller_turns++;
+  h.state.last_caller_text = 'Yes, that one';
+  check(
+    'a withdrawn offer cannot be accepted',
+    /not one of the times you offered/.test(await h.call('accept_slot', { choice: 1 })),
+    true,
+  );
+}
+
+{
+  const h = harness(
+    {},
+    'Yes. That is fine. Please book it.',
+    "So that's Thursday at 1:00 pm at Arenal Norte. Is that okay?",
+  );
+  recordQuote(h.state, [{
+    provider_id: 'prov_saez',
+    location_id: 'loc_centro',
+    appointment_type_id: 'apt_review',
+    start_time: '2026-10-08T09:30:00+02:00',
+  }]);
+  h.state.quoted_spoken = true;
+  h.state.caller_turns++;
+  const refused = await h.call('accept_slot', { choice: 1 });
+  check('an invented assistant offer is refused', /never quoted|no diary search/.test(refused) && h.state.accepted, null);
+}
+
+{
+  const h = harness(
+    {},
+    'Yes. That is fine. Please book it.',
+    'Monday at 9:30 am with Dra. Peral at Arenal Sur, would that suit?',
+  );
+  recordQuote(h.state, [{
+    provider_id: 'prov_peral',
+    location_id: 'loc_sur',
+    appointment_type_id: 'apt_review',
+    start_time: '2026-10-12T09:30:00+02:00',
+  }]);
+  h.state.quoted_spoken = true;
+  h.state.caller_turns++;
+  const held = await h.call('accept_slot', { choice: 1 });
+  check('a diary-quoted assistant offer remains acceptable', /Held/.test(held) && h.state.accepted?.start_time, '2026-10-12T09:30:00+02:00');
 }
 
 {
