@@ -17,6 +17,22 @@ export function fold(value: string): string {
     .trim();
 }
 
+/** Spanish-aware consonant skeleton for a cautious provider-name fallback. */
+export function phoneticKey(value: string): string {
+  const normal = fold(value)
+    .replace(/h/g, '')
+    .replace(/v/g, 'b')
+    .replace(/z/g, 's')
+    .replace(/qu/g, 'k')
+    .replace(/c(?=[ei])/g, 's')
+    .replace(/[ck]/g, 'k')
+    .replace(/ll/g, 'i')
+    .replace(/y/g, 'i')
+    .replace(/g(?=[ei])/g, 'j')
+    .replace(/(.)\1+/g, '$1');
+  return normal.slice(0, 1) + normal.slice(1).replace(/[aeiou]/g, '');
+}
+
 /**
  * Damerau–Levenshtein: insert, delete, substitute, and transpose two adjacent
  * characters — the four ways a name comes back wrong.
@@ -80,6 +96,7 @@ export function closest<T>(
   candidates: Candidate<T>[],
   spoken: string,
   toleranceFor?: (needle: string) => number,
+  phonetic = false,
 ): Match<T>[] {
   const needle = fold(spoken);
   if (needle === '') return [];
@@ -104,10 +121,34 @@ export function closest<T>(
 
   const limit = (toleranceFor ?? tolerance)(needle);
   const within = scored.filter((m) => m.distance <= limit).sort((a, b) => a.distance - b.distance);
-  if (within.length === 0) return [];
+  if (within.length > 0) {
+    const bestScore = within[0]!.distance;
+    return within.filter((m) => m.distance <= bestScore + 1);
+  }
+  if (!phonetic) return [];
 
-  const bestScore = within[0]!.distance;
-  return within.filter((m) => m.distance <= bestScore + 1);
+  const spokenKey = phoneticKey(needle);
+  const phoneticMatches = new Map<T, number>();
+  for (const candidate of candidates) {
+    for (const alias of candidate.aliases) {
+      const aliasKey = phoneticKey(alias);
+      if (
+        spokenKey !== '' &&
+        aliasKey[0] === spokenKey[0] &&
+        distance(spokenKey, aliasKey) <= 1
+      ) {
+        const best = phoneticMatches.get(candidate.item);
+        const score = distance(spokenKey, aliasKey);
+        if (best === undefined || score < best) phoneticMatches.set(candidate.item, score);
+      }
+    }
+  }
+  if (phoneticMatches.size === 0) return [];
+  const bestPhonetic = Math.min(...phoneticMatches.values());
+  const bestMatches = [...phoneticMatches].filter(([, score]) => score === bestPhonetic);
+  return bestMatches.length === 1
+    ? bestMatches.map(([item, distance]) => ({ item, distance }))
+    : [];
 }
 
 /** The single unambiguous match, or nothing. Use when there is no one to ask. */
@@ -115,7 +156,8 @@ export function only<T>(
   candidates: Candidate<T>[],
   spoken: string,
   toleranceFor?: (needle: string) => number,
+  phonetic = false,
 ): T | undefined {
-  const matches = closest(candidates, spoken, toleranceFor);
+  const matches = closest(candidates, spoken, toleranceFor, phonetic);
   return matches.length === 1 ? matches[0]!.item : undefined;
 }

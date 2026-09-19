@@ -143,7 +143,7 @@ export class ClinicApi {
     this.#baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.#apiKey = options.apiKey;
     this.#fetch = options.fetch ?? globalThis.fetch;
-    this.#timeoutMs = options.timeoutMs ?? 5_000;
+    this.#timeoutMs = options.timeoutMs ?? 8_000;
   }
 
   /**
@@ -241,6 +241,8 @@ export function providersByName(catalogue: Catalogue, spoken: string): Provider[
   return closest(
     catalogue.providers.map((p) => ({ item: p, aliases: [p.name, ...fold(p.name).split(' ')] })),
     needle,
+    undefined,
+    true,
   ).map((m) => m.item);
 }
 

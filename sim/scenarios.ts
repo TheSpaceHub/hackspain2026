@@ -15,10 +15,45 @@ function expected(action: ExpectedAction): ExpectedAction[] {
   return [action];
 }
 
+const STT_ROBUST_DNI_LETTERS = new Set('WMFXZSLHQJNRAK');
+const DIGIT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+
+interface RegistrationValues {
+  dni: string;
+  phone: string;
+}
+
+function registrationValues(
+  clinic: Clinic,
+  seedDigits: string,
+  seedPhone: string,
+  reserved: { dnis: Set<string>; phones: Set<string> },
+): RegistrationValues {
+  const patients = clinic.patients();
+  const occupiedDnis = new Set(patients.map((patient) => patient.national_id));
+  const occupiedPhones = new Set(patients.map((patient) => patient.phone));
+  for (let offset = 0; offset < 100_000; offset++) {
+    const digits = String(Number(seedDigits) + offset).padStart(8, '0');
+    const phone = String(Number(seedPhone) + offset).padStart(9, '0');
+    const dni = makeDni(digits);
+    if (!STT_ROBUST_DNI_LETTERS.has(dni.slice(-1))) continue;
+    if (occupiedDnis.has(dni) || occupiedPhones.has(phone) || reserved.dnis.has(dni) || reserved.phones.has(phone)) continue;
+    reserved.dnis.add(dni);
+    reserved.phones.add(phone);
+    return { dni, phone };
+  }
+  throw new Error(`could not find an unused registration identity from ${seedDigits}/${seedPhone}`);
+}
+
+function spokenDigits(value: string): string {
+  return value.split('').map((digit) => DIGIT_WORDS[Number(digit)]).join(' ');
+}
+
 export function simScenarios(clinic: Clinic): Scenario[] {
-  const newPatientId = makeDni('73418265');
-  const badDniId = makeDni('29581734');
-  const wrongPersonId = makeDni('64027193');
+  const reserved = { dnis: new Set<string>(), phones: new Set<string>() };
+  const newPatient = registrationValues(clinic, '73418265', '655123987', reserved);
+  const badDni = registrationValues(clinic, '29581734', '611222333', reserved);
+  const wrongPerson = registrationValues(clinic, '64027193', '622444555', reserved);
   const cancelAppointment = clinic.upcomingAppointment('P02410')?.appointment_id ?? '';
 
   return [
@@ -42,14 +77,14 @@ export function simScenarios(clinic: Clinic): Scenario[] {
       script: [
         "Hi, I'm new to the clinic and I'd like to register as a patient.",
         'My name is Lucía Fernández Moreno. Fernández with a z, then Moreno.',
-        `My D N I is ${spacedId(newPatientId)}.`,
+        `My D N I is ${spacedId(newPatient.dni)}.`,
         'I was born on the seventeenth of May, nineteen ninety four.',
-        'My phone is six five five, one two three, nine eight seven.',
+        `My phone is ${spokenDigits(newPatient.phone)}.`,
         'My email is lucia dot fernandez at gmail dot com.',
         'My insurance is Sanitas.',
         "No, I don't need an appointment right now, just the registration. Goodbye.",
       ],
-      expect: expected({ action: 'REGISTER', 'new_patient.national_id': newPatientId, 'new_patient.insurer': 'sanitas' }),
+      expect: expected({ action: 'REGISTER', 'new_patient.national_id': newPatient.dni, 'new_patient.insurer': 'sanitas' }),
     },
     {
       name: 'bad-dni',
@@ -59,16 +94,16 @@ export function simScenarios(clinic: Clinic): Scenario[] {
       script: [
         "Hi, I'm new to the clinic and I'd like to register as a patient.",
         'My name is Pablo Ortega Ruiz.',
-        `My D N I is ${badDniId.slice(0, -1).split('').join(' ')}, ${wrongCheckLetter(badDniId)}.`,
+        `My D N I is ${badDni.dni.slice(0, -1).split('').join(' ')}, ${wrongCheckLetter(badDni.dni)}.`,
         'Sorry, let me say that again slowly.',
-        `My D N I is ${spacedId(badDniId)}.`,
+        `My D N I is ${spacedId(badDni.dni)}.`,
         'I was born on the third of March, nineteen eighty eight.',
-        'My phone is six one one, two two two, three three three.',
+        `My phone is ${spokenDigits(badDni.phone)}.`,
         'My email is pablo dot ortega at gmail dot com.',
         'My insurance is Cigna.',
         "No, I don't need an appointment right now, just the registration. Goodbye.",
       ],
-      expect: expected({ action: 'REGISTER', 'new_patient.national_id': badDniId, 'new_patient.insurer': 'cigna' }),
+      expect: expected({ action: 'REGISTER', 'new_patient.national_id': badDni.dni, 'new_patient.insurer': 'cigna' }),
     },
     {
       name: 'network',
@@ -173,14 +208,14 @@ export function simScenarios(clinic: Clinic): Scenario[] {
       script: [
         "Hi, I'm new here and I'd like to register. No, I'm not Juan, this is his flatmate's phone.",
         'My name is Sara López Vidal.',
-        `My D N I is ${spacedId(wrongPersonId)}.`,
+        `My D N I is ${spacedId(wrongPerson.dni)}.`,
         'Born on the ninth of October, nineteen ninety one.',
-        'My phone is six two two, four four four, five five five.',
+        `My phone is ${spokenDigits(wrongPerson.phone)}.`,
         'Email sara dot lopez at gmail dot com.',
         'Insurance AXA.',
         "That's all, thank you, goodbye.",
       ],
-      expect: expected({ action: 'REGISTER', 'new_patient.national_id': wrongPersonId }),
+      expect: expected({ action: 'REGISTER', 'new_patient.national_id': wrongPerson.dni }),
     },
   ];
 }

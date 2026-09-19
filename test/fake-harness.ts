@@ -5,7 +5,7 @@
  *   pnpm harness                              scripted booking call, one socket
  *   pnpm harness -- --n 10                    ten concurrent calls, the Run All shape
  *   pnpm harness -- --n 20                    the Switchboard burst
- *   pnpm harness -- --scenario all --parallel 4  graded cases with four callers at once
+ *   pnpm harness -- --scenario all --parallel 3  graded cases with three callers at once
  *   pnpm harness -- --barge-in                talk over the agent's greeting
  *   pnpm harness -- --wav caller.wav          play a real recording instead
  *   pnpm harness -- --say "hello" --say "..."  synthesise lines (`say` on macOS, `espeak-ng` on Linux)
@@ -80,7 +80,7 @@ function parseArgs(argv: string[]): Options {
     outDir: './calls',
     prosper: process.env.MOCK_PROSPER_URL,
     scenarios: [],
-    parallel: 4,
+    parallel: 3,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];

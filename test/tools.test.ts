@@ -126,6 +126,14 @@ check('distance is straight-line km', Math.round(haversineKm({ latitude: 40.4168
 check('a near-miss surname returns both, to be asked about', providersByName(catalogue, 'Sáez').map((p) => p.id), ['PR1']);
 check('accent-blind', providersByName(catalogue, 'saez').map((p) => p.id), ['PR1']);
 check('partial surname returns every candidate', providersByName(catalogue, 'sáe').map((p) => p.id), ['PR1', 'PR2']);
+check('phonetic Sayas reaches Sáez', providersByName(catalogue, 'Sayas').map((p) => p.id), ['PR1']);
+check('phonetic Sai reaches Sáez', providersByName(catalogue, 'Sai').map((p) => p.id), ['PR1']);
+check('an exact Vilar stays Vilar', providersByName({
+  ...catalogue,
+  providers: [...catalogue.providers, { ...catalogue.providers[0]!, id: 'PR4', name: 'Dr. Tomás Vilar' }],
+} as Catalogue, 'Vilar').map((p) => p.id), ['PR4']);
+check('Molina does not become an ambiguous doctor', providersByName(catalogue, 'Molina'), []);
+check('unrelated Pérez stays unmatched', providersByName(catalogue, 'Pérez'), []);
 check('closure day has no hours anywhere', siteHours(catalogue, 'LOC_CENTRO', '2026-10-12'), []);
 check('Saturday hours at Centro', siteHours(catalogue, 'LOC_CENTRO', '2026-10-10'), ['09:00-14:00']);
 
