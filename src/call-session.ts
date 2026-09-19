@@ -5,13 +5,25 @@ import { GREETING, ReceptionistAgent } from './agent.js';
 import { MediaStreamAudioInput } from './audio-input.js';
 import { MediaStreamAudioOutput } from './audio-output.js';
 import { writeCallLog, type CallLog } from './call-log.js';
-import { createCallState, readCallState, recordMatch, type CallState } from './call-state.js';
+import {
+  acceptFromTranscript,
+  createCallState,
+  readCallState,
+  recordMatch,
+  type CallState,
+} from './call-state.js';
 import { createExtractor, type Extractor } from './extract.js';
 import type { Availability, Catalogue, ClinicApi } from './clinic-api.js';
 import { config } from './config.js';
 import { FLOOR_ACTION, decide, type DeciderResult } from './decider.js';
-import { applyEmergencyGuard, enforceAppointmentType, enforcePolicy } from './guards.js';
+import {
+  applyEmergencyGuard,
+  enforceAppointmentType,
+  enforcePolicy,
+  overrideFlooredBooking,
+} from './guards.js';
 import { mulawToPcm16 } from './mulaw.js';
+import { callContext } from './log.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
 import { submitActions, type SubmitResult } from './submit.js';
@@ -92,6 +104,7 @@ export class CallSession {
   // --- wire ---------------------------------------------------------------
 
   #onMessage(data: unknown): void {
+    if (this.#callId) callContext.enterWith(this.#callId);
     let msg: InboundMessage;
     try {
       msg = JSON.parse(String(data)) as InboundMessage;
@@ -125,38 +138,40 @@ export class CallSession {
 
     // start.callSid is the call_id; never mint one.
     this.#callId = msg.start?.callSid ?? msg.start?.streamSid ?? '';
-    this.#streamSid = msg.start?.streamSid ?? msg.streamSid ?? '';
-    this.#fromNumber = msg.start?.customParameters?.from_number;
-    this.#startedAt = Date.now();
-    this.#state = createCallState(this.#callId, this.#fromNumber);
-    this.#extractor = createExtractor({
-      state: this.#state,
-      onError: (message) => this.#errors.push(`extract: ${message}`),
+    callContext.run(this.#callId, () => {
+      this.#streamSid = msg.start?.streamSid ?? msg.streamSid ?? '';
+      this.#fromNumber = msg.start?.customParameters?.from_number;
+      this.#startedAt = Date.now();
+      this.#state = createCallState(this.#callId, this.#fromNumber);
+      this.#extractor = createExtractor({
+        state: this.#state,
+        onError: (message) => this.#errors.push(`extract: ${message}`),
+      });
+
+      // The line they rang from is a free directory query, and it resolves while the
+      // greeting is still playing — often before they finish their first sentence.
+      if (this.#state.from_number) this.#identifyByPhone(this.#state, this.#state.from_number);
+
+      console.log(
+        `[call ${this.#callId}] start · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
+      );
+
+      this.#shared.store.write({
+        type: 'call_started',
+        call_id: this.#callId,
+        stream_sid: this.#streamSid,
+        from_number: this.#fromNumber,
+        started_at: new Date(this.#startedAt).toISOString(),
+      });
+
+      // Never run past three minutes.
+      this.#wallClock = setTimeout(() => {
+        this.#endedBy = 'wall_clock';
+        void this.finish('wall_clock');
+      }, config.maxCallMs);
+
+      void this.#startSession();
     });
-
-    // The line they rang from is a free directory query, and it resolves while the
-    // greeting is still playing — often before they finish their first sentence.
-    if (this.#state.from_number) this.#identifyByPhone(this.#state, this.#state.from_number);
-
-    console.log(
-      `[call ${this.#callId}] start · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
-    );
-
-    this.#shared.store.write({
-      type: 'call_started',
-      call_id: this.#callId,
-      stream_sid: this.#streamSid,
-      from_number: this.#fromNumber,
-      started_at: new Date(this.#startedAt).toISOString(),
-    });
-
-    // Never run past three minutes.
-    this.#wallClock = setTimeout(() => {
-      this.#endedBy = 'wall_clock';
-      void this.finish('wall_clock');
-    }, config.maxCallMs);
-
-    void this.#startSession();
   }
 
   #onMedia(msg: { media?: { payload?: string } }): void {
@@ -319,6 +334,12 @@ export class CallSession {
     this.#flushTurns();
     await this.#extractor?.settle(Math.max(0, Math.min(EXTRACT_SETTLE_MS, budget - 2_000)));
 
+    // A slot the caller chose but the model never held: the ids are all in the quote.
+    if (this.#state) {
+      const inferred = acceptFromTranscript(this.#state, this.#transcript);
+      if (inferred) this.#errors.push(`accepted slot inferred from the caller: ${inferred.start_time}`);
+    }
+
     const decided = await decide(
       {
         callId: this.#callId,
@@ -366,9 +387,25 @@ export class CallSession {
 
   /** Always yields at least one action. */
   #actionsFor(decided: DeciderResult): Action[] {
-    if (decided.output.actions.length > 0) return decided.output.actions;
-    this.#errors.push('decider returned no actions');
-    return [FLOOR_ACTION];
+    if (decided.usedFloor) {
+      this.#errors.push(`floor: ${decided.error ?? decided.output.notes ?? 'unknown'}`);
+    }
+    let actions = decided.output.actions;
+    if (actions.length === 0) {
+      this.#errors.push('decider returned no actions');
+      actions = [FLOOR_ACTION];
+    }
+    if (this.#state) {
+      const overridden = overrideFlooredBooking(actions, this.#state);
+      if (overridden !== actions) {
+        const reason = actions.find((action) => action.action === 'no_action')?.reason ?? 'unknown';
+        this.#errors.push(
+          `decider said no_action/${reason} with an accepted slot on file; booked from state`,
+        );
+        actions = overridden;
+      }
+    }
+    return actions;
   }
 
   /**
@@ -490,4 +527,3 @@ export class CallSession {
     await writeCallLog(entry);
   }
 }
-

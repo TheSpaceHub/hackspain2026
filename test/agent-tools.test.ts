@@ -14,10 +14,12 @@ import {
   createCallState,
   planId,
   readCallState,
+  recordAccepted,
+  recordMatch,
   recordRequest,
   setPlanVocabulary,
 } from '../src/call-state.js';
-import { enforcePolicy } from '../src/guards.js';
+import { enforcePolicy, overrideFlooredBooking } from '../src/guards.js';
 import { applyPatch } from '../src/extract.js';
 import { ClinicApi, catalogueSchema } from '../src/clinic-api.js';
 import { FakeClinic, fakeCatalogue } from './fake-clinic.js';
@@ -65,7 +67,11 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
     call: async (name, args = {}) => {
       const tool = tools[name];
       if (!tool) throw new Error(`no tool ${name}`);
-      const result = await tool.execute(args as never, {} as never);
+      // Through the schema, as the live model's arguments go: a rejected call is a
+      // silent turn, and it is the coercions that decide whether one is rejected.
+      const schema = (tool as { parameters?: { parse(v: unknown): unknown } }).parameters;
+      const parsed = schema?.parse ? schema.parse(args) : args;
+      const result = await tool.execute(parsed as never, {} as never);
       return String(result);
     },
   };
@@ -110,6 +116,10 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
   check('and the type the diary chose', notes.includes('appointment_type_id=apt_review'), true);
 
   check('a choice that was never offered is refused', /not one of the times/.test(await h.call('accept_slot', { choice: 7 })), true);
+
+  // The model writes the number as a word of JSON as often as a number of it.
+  await h.call('accept_slot', { choice: '1' });
+  check('a choice sent as a string still lands', h.state.accepted?.start_time, h.state.quoted[0]!.start_time);
 }
 
 {
@@ -128,6 +138,8 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
   const blocked = await h.call('find_slots', { when_phrase: 'next week', specialty_id: 'spec_physio' });
   check('a refusing insurer is reported as the rule, not as a full diary', /does not accept asisa/.test(blocked), true);
   check('and nothing is quoted', h.state.quoted.length, 0);
+  check('and the restriction is kept in the call notes', h.state.request.blocked_by, 'D. Álvaro Cid does not accept asisa');
+  check('and the decider can see the restriction', /Rule that stopped the diary: D\. Álvaro Cid does not accept asisa/.test(readCallState(h.state)), true);
 }
 
 {
@@ -138,7 +150,8 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
 
   const open = await h.call('find_slots', { when_phrase: 'as soon as possible', specialty_id: 'spec_gp' });
   check('the soonest search skips the full day', h.state.quoted[0]!.start_time.slice(0, 10), '2026-10-09');
-  check('and offers three', h.state.quoted.length, 3);
+  check('and offers that one alone, not a menu they can pick a later time off', h.state.quoted.length, 1);
+  check('which is the one it read out', /Offer that one and no other/.test(open), true);
   check('spoken, not as ISO', /2026-10-09T/.test(open), false);
 }
 
@@ -214,7 +227,9 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
     llm.FunctionTool
   >;
   const t0 = Date.now();
-  const said = String(await tools.find_slots!.execute({ when_phrase: 'tomorrow' } as never, {} as never));
+  const said = String(
+    await tools.find_slots!.execute({ when_phrase: 'tomorrow', specialty_id: 'general practice' } as never, {} as never),
+  );
   check('a hanging lookup gives the agent a line to say', /taking too long/.test(said), true);
   check('and gives it quickly', Date.now() - t0 < 1000, true);
 
@@ -260,10 +275,25 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   check('and a site by the name the caller uses', asked?.query.location_id?.[0], 'loc_centro');
   check('so the caller gets times, not an apology', /Offer these/.test(said), true);
 
+  // The diary needs a department or a doctor: asking without either is a 422 the
+  // caller hears as "the system is playing up".
   const loose = harness();
-  await loose.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'wizardry' });
+  const wizardry = await loose.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'wizardry' });
   const wide = loose.clinic.requests.find((r) => r.path === '/api/v1/availability');
-  check('a specialty nobody has is dropped, not sent', wide?.query.specialty_id, undefined);
+  check('a specialty nobody has is dropped, not sent', wide, undefined);
+  check('and the agent is told to ask which one', /Ask which one/.test(wizardry), true);
+
+  const named = harness();
+  const byDoctor = await named.call('find_slots', { when_phrase: 'tomorrow', provider_name: 'Sáez' });
+  check('a named doctor is enough on its own', /Offer these/.test(byDoctor), true);
+
+  // The burst sent "gynecology" and "sonita" straight through and got 404s and a 422.
+  const misheard = harness();
+  recordRequest(misheard.state, { insurers: ['sonitas', 'not an insurer'] });
+  await misheard.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'dermatolagy' });
+  const near = misheard.clinic.requests.find((r) => r.path === '/api/v1/availability');
+  check('a specialty misheard by a letter still reaches the diary', near?.query.specialty_id?.[0], 'spec_derm');
+  check('a misheard insurer is billed as the real one', near?.query.insurer, ['sanitas']);
 }
 
 // --- which plan the visit is billed to ---------------------------------------
@@ -277,7 +307,7 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
 
   const h = harness();
   await h.call('identify_patient', { national_id: '12345678Z' });
-  await h.call('find_slots', { when_phrase: 'tomorrow' });
+  await h.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'general practice' });
   const held = await h.call('accept_slot', { choice: 1 });
   check('the plan on the record bills the slot it can pay for', choosePolicy(h.state), 'sanitas');
   check('so the caller is not asked for a second policy', /other insurance/.test(held), false);
@@ -298,17 +328,60 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
 }
 
 {
+  setPlanVocabulary(catalogue.plans);
+  const state = createCallState('call-fallback');
+  recordMatch(state, {
+    patient_id: 'pat_001',
+    given_name: 'Marta',
+    first_surname: 'Ruiz',
+    has_visited_before: true,
+    insurer: 'sanitas',
+  });
+  recordAccepted(state, {
+    provider_id: 'prov_saez',
+    location_id: 'loc_centro',
+    appointment_type_id: 'apt_review',
+    start_time: '2026-10-08T09:00:00+02:00',
+    payable_with: ['sanitas'],
+  });
+  const floored = overrideFlooredBooking(
+    [{ action: 'no_action', reason: 'referral_required' }],
+    state,
+  );
+  check('an accepted slot turns a floored no-action into a booking', floored, [{
+    action: 'book',
+    patient_id: 'pat_001',
+    provider_id: 'prov_saez',
+    location_id: 'loc_centro',
+    appointment_type_id: 'apt_review',
+    slot: '2026-10-08T09:00:00+02:00',
+    policy_id: 'sanitas',
+  }]);
+  check(
+    'caller authorisation still outranks the booking fallback',
+    overrideFlooredBooking([{ action: 'no_action', reason: 'caller_not_authorised' }], state),
+    [{ action: 'no_action', reason: 'caller_not_authorised' }],
+  );
+  state.accepted = null;
+  check(
+    'without an accepted slot the decider action is unchanged',
+    overrideFlooredBooking([{ action: 'no_action', reason: 'referral_required' }], state),
+    [{ action: 'no_action', reason: 'referral_required' }],
+  );
+}
+
+{
   // The second policy: the slot bills against a plan the patient's record does not carry.
   const h = harness();
   await h.call('identify_patient', { national_id: '12345678Z' });
   recordRequest(h.state, { insurers: ['Adeslas'] });
-  await h.call('find_slots', { when_phrase: 'tomorrow' });
+  await h.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'general practice' });
   const held = await h.call('accept_slot', { choice: 1 });
   check('the plan the caller named on the call is the one billed', choosePolicy(h.state), 'adeslas');
   check('and the slot is still held', /Held/.test(held), true);
 
   const stranger = harness();
-  await stranger.call('find_slots', { when_phrase: 'tomorrow' });
+  await stranger.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'general practice' });
   stranger.state.quoted[0]!.payable_with = ['asisa'];
   const asked = await stranger.call('accept_slot', { choice: 1 });
   check('a slot no known plan pays for makes the agent ask for another policy', /other insurance/.test(asked), true);

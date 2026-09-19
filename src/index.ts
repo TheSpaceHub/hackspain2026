@@ -9,11 +9,13 @@ import { setPlanVocabulary } from './call-state.js';
 import { config } from './config.js';
 import { loadVad } from './models.js';
 import { openStore } from './store/index.js';
+import { tagLiveKitLogger } from './log.js';
 
 /** One process, one WebSocket server, one headless AgentSession per socket. */
 async function main(): Promise<void> {
   // The CLI worker normally does this; without it every plugin throws on first use.
   initializeLogger({ pretty: true, level: process.env.LOG_LEVEL ?? 'info' });
+  tagLiveKitLogger(process.env.LOG_LEVEL ?? 'info');
 
   console.log('[boot] loading Silero VAD and the clinic catalogue');
 

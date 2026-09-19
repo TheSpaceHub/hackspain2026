@@ -10,6 +10,7 @@
  */
 
 import { z } from 'zod';
+import { closest, distance, fold, only, tolerance } from './fuzzy.js';
 import { patientSchema, type Patient } from './schema.js';
 
 export const appointmentSchema = z.object({
@@ -205,6 +206,10 @@ export class ClinicApi {
 /**
  * A spoken provider name. Two near-miss pairs — Sáez/Sáenz and Iglesias/Iglesia — sit in
  * different specialties, so several hits means ask which, not pick the best.
+ *
+ * Callers say the surname on its own and mishear it while they are at it: "Doctor
+ * Villar" is Tomás Vilar. Substring matching alone denied two real doctors, so a near
+ * miss counts as a hit and the ambiguity is passed up rather than resolved here.
  */
 export function providersByName(catalogue: Catalogue, spoken: string): Provider[] {
   const needle = fold(spoken).replace(/^(dr|dra|d|dna)\.?\s+/, '');
@@ -212,7 +217,13 @@ export function providersByName(catalogue: Catalogue, spoken: string): Provider[
   const folded = catalogue.providers.map((p) => ({ p, name: fold(p.name) }));
   const exact = folded.filter(({ name }) => name === needle || name.endsWith(` ${needle}`));
   if (exact.length > 0) return exact.map(({ p }) => p);
-  return folded.filter(({ name }) => name.includes(needle)).map(({ p }) => p);
+  const substring = folded.filter(({ name }) => name.includes(needle));
+  if (substring.length > 0) return substring.map(({ p }) => p);
+  // Each surname is an alias of its own: they say one word, the catalogue holds three.
+  return closest(
+    catalogue.providers.map((p) => ({ item: p, aliases: [p.name, ...fold(p.name).split(' ')] })),
+    needle,
+  ).map((m) => m.item);
 }
 
 export function providersSpeaking(catalogue: Catalogue, language: string): Provider[] {
@@ -228,19 +239,109 @@ export function providerOnLeave(provider: Provider, isoDate: string): boolean {
 }
 
 /**
+ * What callers actually say for each specialty. Spelling distance cannot get from "GP"
+ * to `general_practice`, or from "skin doctor" to dermatology — those are abbreviations
+ * and lay words, not misspellings, and a caller asking for a GP is the commonest call
+ * the clinic takes.
+ */
+const SPOKEN_AS: Record<string, string[]> = {
+  general_practice: [
+    'gp',
+    'g p',
+    'general practitioner',
+    'family doctor',
+    'family medicine',
+    'medicina general',
+    'medico de cabecera',
+    'medico general',
+    'cabecera',
+  ],
+  paediatrics: ['pediatrics', 'paediatrician', 'pediatrician', 'childrens doctor', 'pediatria', 'pediatra'],
+  dermatology: ['dermatologist', 'skin', 'skin doctor', 'dermatologia', 'dermatologo', 'piel'],
+  orthopaedics: [
+    'orthopedics',
+    'orthopaedic',
+    'orthopedic',
+    'orthopaedist',
+    'orthopedist',
+    'bone doctor',
+    'traumatologia',
+    'traumatologo',
+  ],
+  gynaecology: ['gynecology', 'gynaecologist', 'gynecologist', 'obgyn', 'ob gyn', 'ginecologia', 'ginecologo'],
+  physiotherapy: ['physio', 'physical therapy', 'physiotherapist', 'fisioterapia', 'fisioterapeuta', 'fisio'],
+};
+
+/** "General Practice" answers to "GP". One-word names have no useful initials. */
+function initials(name: string): string[] {
+  const words = name.split(/[\s_]+/).filter((word) => word !== '');
+  return words.length < 2 ? [] : [words.map((word) => word[0]!).join('')];
+}
+
+/**
  * The API takes ids, the model says words: "general practice" is a 422, `general_practice`
- * is a diary. Match on the id, the name, or the id with its underscores said as spaces.
+ * is a diary. Match on the id, the name, the initials, or what callers call it.
  */
 export function specialtyByName(catalogue: Catalogue, spoken: string): { id: string; name: string } | undefined {
-  const needle = fold(spoken).replace(/[_\s]+/g, ' ');
-  if (!needle) return undefined;
-  const same = (value: string): boolean => fold(value).replace(/[_\s]+/g, ' ') === needle;
-  return catalogue.specialties.find((s) => same(s.id) || same(s.name));
+  // "gynecology" is one edit from `gynaecology`, and an unmatched specialty is a 404.
+  return only(
+    catalogue.specialties.map((s) => ({
+      item: s,
+      aliases: [
+        s.id,
+        s.name,
+        ...initials(s.name),
+        ...(SPOKEN_AS[s.id] ?? SPOKEN_AS[fold(s.name).replace(/ /g, '_')] ?? []),
+      ],
+    })),
+    spoken,
+  );
+}
+
+/** The plan the caller named, or nothing: "sonita" for sanitas is a 422 on availability. */
+export function planByName(catalogue: Catalogue, spoken: string): { id: string; name: string } | undefined {
+  return only(
+    catalogue.plans.map((p) => ({ item: p, aliases: [p.id, p.name] })),
+    spoken,
+  );
+}
+
+/**
+ * The word that tells one site from another. Every site here is "Arenal <something>",
+ * and it is the something the caller means — so a mishearing of the shared half
+ * ("Reinaldo Centro", "RNL Centro") still resolves, while "Arenal" on its own does not
+ * resolve to anything, because it does not pick a site.
+ */
+function distinctiveWords(catalogue: Catalogue, site: Location): string[] {
+  const words = (l: Location) => new Set(fold(`${l.name} ${l.id}`).split(' ').filter((w) => w.length > 2));
+  const mine = words(site);
+  for (const other of catalogue.locations) {
+    if (other.id === site.id) continue;
+    for (const word of words(other)) mine.delete(word);
+  }
+  return [...mine];
 }
 
 export function locationById(catalogue: Catalogue, id: string): Location | undefined {
   const needle = fold(id);
-  return catalogue.locations.find((l) => fold(l.id) === needle || fold(l.name).includes(needle));
+  const byId = catalogue.locations.find((l) => fold(l.id) === needle || fold(l.name) === needle);
+  if (byId) return byId;
+
+  // "Arenal" is in all three names, so a substring only counts when it picks one.
+  const contained = catalogue.locations.filter((l) => fold(l.name).includes(needle));
+  if (contained.length === 1) return contained[0];
+
+  const whole = only(catalogue.locations.map((l) => ({ item: l, aliases: [l.id, l.name] })), needle);
+  if (whole) return whole;
+
+  // Word by word: the site half of what was said survives a mangled clinic half.
+  const said = needle.split(' ').filter((w) => w.length > 2);
+  const hit = catalogue.locations.filter((l) =>
+    distinctiveWords(catalogue, l).some((word) =>
+      said.some((spoken) => distance(spoken, word) <= tolerance(word)),
+    ),
+  );
+  return hit.length === 1 ? hit[0] : undefined;
 }
 
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -257,7 +358,4 @@ export function isClosureDay(catalogue: Catalogue, isoDate: string): boolean {
   return (catalogue.calendar?.closure_days ?? []).includes(isoDate);
 }
 
-/** Lower-case, accent-stripped: "Sáenz" and "saenz" are the same spoken name. */
-function fold(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-}
+

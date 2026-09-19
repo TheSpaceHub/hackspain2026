@@ -15,6 +15,7 @@ import { llm } from '@livekit/agents';
 import { z } from 'zod';
 import {
   locationById,
+  planByName,
   providersByName,
   siteHours,
   specialtyByName,
@@ -28,11 +29,13 @@ import {
   recordMatch,
   recordQuote,
   recordRequest,
+  retract,
   type CallState,
   type QuotedSlot,
 } from './call-state.js';
 import { geocodeMadrid, rankSites } from './nearest-site.js';
 import { resolveWhen } from './when.js';
+import { clog } from './log.js';
 
 export interface ToolDeps {
   state: CallState;
@@ -60,7 +63,7 @@ async function capped<T>(name: string, ms: number, work: Promise<T> | T): Promis
   try {
     return await Promise.race([
       Promise.resolve(work).catch((err: unknown) => {
-        console.error(`[tool ${name}] ${String(err)}`);
+        clog.error(`[tool ${name}] ${String(err)}`);
         return 'That lookup failed. Say the system is playing up, and offer to take their number.';
       }),
       new Promise<string>((resolve) => {
@@ -81,6 +84,27 @@ const PLACEHOLDERS = new Set(['unknown', 'n/a', 'na', 'none', 'null', 'undefined
 function real(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   return PLACEHOLDERS.has(value.trim().toLowerCase()) ? undefined : value;
+}
+
+/**
+ * A spoken filter as an id the clinic knows, or nothing at all. Without the catalogue
+ * there is nothing to check a guess against, so the guess does not travel.
+ */
+function resolve(
+  catalogue: Catalogue | null,
+  spoken: string | undefined,
+  lookup: (catalogue: Catalogue, spoken: string) => string | undefined,
+): string | undefined {
+  const said = real(spoken);
+  if (said === undefined || !catalogue) return undefined;
+  return lookup(catalogue, said);
+}
+
+/** Plans the clinic actually sells. A misheard insurer is dropped, not priced against. */
+function knownPlanIds(catalogue: Catalogue | null, spoken: string[]): string[] {
+  if (!catalogue) return [];
+  const ids = spoken.map((plan) => planByName(catalogue, plan)?.id).filter((id): id is string => id !== undefined);
+  return [...new Set(ids)];
 }
 
 export function buildTools(deps: ToolDeps): llm.ToolContextLike {
@@ -136,12 +160,11 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         // `general_practice` and `loc_centro`, and rejects the whole query otherwise. A
         // filter we cannot resolve is dropped rather than sent: a wider search still
         // answers the caller, a 422 does not.
-        const saidSpecialty = real(args.specialty_id);
-        const saidLocation = real(args.location_id);
-        const specialty =
-          saidSpecialty && catalogue ? specialtyByName(catalogue, saidSpecialty)?.id : saidSpecialty;
-        const location =
-          saidLocation && catalogue ? locationById(catalogue, saidLocation)?.id : saidLocation;
+        const request0 = state.request;
+        const saidSpecialty = real(args.specialty_id) ?? request0.specialty_id;
+        const saidLocation = real(args.location_id) ?? request0.location_id;
+        const specialty = resolve(catalogue, saidSpecialty, (c, v) => specialtyByName(c, v)?.id);
+        const location = resolve(catalogue, saidLocation, (c, v) => locationById(c, v)?.id);
 
         const request = recordRequest(state, {
           when_phrase: args.when_phrase,
@@ -162,8 +185,27 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           }
         }
 
+        // A site we cannot place is not a wider search: the caller asked to be seen
+        // somewhere, and quoting another site without saying so reads as a lie.
+        if (saidLocation && !location) {
+          const sites = catalogue?.locations.map((l) => l.name).join(', ');
+          return `No site here goes by "${saidLocation}". Ask which one they mean${sites ? `: ${sites}` : ''}.`;
+        }
+
+        // The diary refuses a query with neither: "availability needs provider_id or
+        // specialty_id", a 422 the caller hears as "the system is playing up". Dropping
+        // an unresolvable specialty is right, but going on to ask anyway is not.
+        if (!providerId && !specialty) {
+          const names = catalogue?.specialties.map((s) => s.name).join(', ');
+          return saidSpecialty
+            ? `No department here goes by "${saidSpecialty}". Ask which one they need${names ? `: ${names}` : ''}.`
+            : `The diary needs a department or a doctor before it will answer. Ask what the appointment is for${names ? `; we have ${names}` : ''}.`;
+        }
+
+        const plans = knownPlanIds(catalogue, request.insurers);
+
         const window = resolveWhen(args.when_phrase, now(), {
-          locationId: location ?? request.location_id,
+          locationId: location,
           closureDays: catalogue?.calendar?.closure_days,
           maxSpanDays: catalogue?.calendar?.max_span_days ?? undefined,
         });
@@ -173,25 +215,38 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           date_from: window.date_from,
           date_to: window.date_to,
           provider_id: providerId,
-          specialty_id: specialty ?? request.specialty_id,
-          location_id: location ?? request.location_id,
+          // Unresolved is dropped, never forwarded: "gynecology" for `gynaecology` is a
+          // 404 and "sonita" for sanitas a 422, and a wider search still answers them.
+          specialty_id: specialty,
+          location_id: location,
           patient_id: state.matched?.patient_id,
-          insurer: request.insurers.length > 0 ? request.insurers : undefined,
+          insurer: plans.length > 0 ? plans : undefined,
         });
         deps.onAvailability?.(availability);
 
         if (availability.slots.length === 0) {
-          const blocked = availability.blocked[0]?.restriction;
+          const blocked = availability.blocked.map((entry) => entry.restriction).join('; ');
+          if (blocked) {
+            recordRequest(state, { blocked_by: blocked });
+            clog.warn(`[find_slots] blocked: ${blocked}`);
+          }
           return blocked
             ? `Nothing bookable: ${blocked}. Tell the caller plainly and do not offer a time.`
             : 'Nothing free in that window. Offer to look at a different day.';
         }
 
+        if (state.request.blocked_by) retract(state, 'blocked_by');
         const wanted = window.part_of_day;
         const matching = wanted
           ? availability.slots.filter((s) => inPart(s.start_time, wanted))
           : availability.slots;
-        const shortlist = (matching.length > 0 ? matching : availability.slots).slice(0, 3);
+        const inOrder = [...(matching.length > 0 ? matching : availability.slots)].sort((a, b) =>
+          a.start_time.localeCompare(b.start_time),
+        );
+        // Someone who asked for the soonest gets the soonest, not a menu: read three out
+        // and they pick the one they heard last, which is a later appointment than the
+        // one they rang for. Alternatives come after they turn this one down.
+        const shortlist = inOrder.slice(0, window.earliest ? 1 : 3);
 
         const quoted: QuotedSlot[] = shortlist.map((s) => ({
           provider_id: s.provider_id,
@@ -208,13 +263,16 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           (s, i) =>
             `${i + 1}. ${speakTime(s.start_time)} with ${s.provider_name ?? s.provider_id} at ${siteName(catalogue, s.location_id)}`,
         );
-        return `${moved}Offer these, and nothing else: ${lines.join('; ')}. When they pick one, call accept_slot.`;
+        return window.earliest
+          ? `${moved}The soonest there is: ${lines[0]}. Offer that one and no other. When they say yes, call accept_slot. Only if they turn it down, ask which day would suit and look again.`
+          : `${moved}Offer these, and nothing else: ${lines.join('; ')}. When they pick one, call accept_slot.`;
       },
     }),
 
     accept_slot: llm.tool({
       description: 'The caller said yes to one of the times find_slots returned. Call it straight away, before anything else.',
-      parameters: z.object({ choice: z.number().int().describe('1, 2 or 3 as you read them out') }),
+      // The model sends "3" as often as 3, and a rejected call is a silent turn.
+      parameters: z.object({ choice: z.coerce.number().int().describe('1, 2 or 3 as you read them out') }),
       execute: async (args) => {
         const slot = state.quoted[args.choice - 1];
         if (!slot) return 'That is not one of the times you offered. Read the list again or call find_slots.';
@@ -260,7 +318,9 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         }
         const origin = await geocodeMadrid(address);
         if (!origin) return 'Could not place that address. Ask which part of Madrid they are in.';
-        const ranked = rankSites(catalogue, origin, { specialty_id: args.specialty_id });
+        const ranked = rankSites(catalogue, origin, {
+          specialty_id: resolve(catalogue, args.specialty_id, (c, v) => specialtyByName(c, v)?.id),
+        });
         if (ranked.length === 0) return 'No site offers that. Say so plainly.';
         const [first] = ranked;
         return `Nearest is ${first!.name}, about ${first!.km} kilometres away.`;
@@ -291,7 +351,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           const site = locationById(catalogue, args.location_id);
           if (!site) return 'No site by that name.';
           if (args.date) {
-            const hours = siteHours(catalogue, args.location_id, args.date);
+            const hours = siteHours(catalogue, site.id, args.date);
             return hours.length > 0
               ? `${site.name} is open ${hours.join(' and ')} that day.`
               : `${site.name} is closed that day.`;

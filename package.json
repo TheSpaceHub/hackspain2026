@@ -17,7 +17,8 @@
     "test:tools": "tsx test/tools.test.ts",
     "test:agent": "tsx test/agent-tools.test.ts",
     "test:extract": "tsx test/extract.test.ts",
-    "test": "tsx test/schema.test.ts && tsx test/tools.test.ts && tsx test/agent-tools.test.ts && tsx test/extract.test.ts && tsx test/audio-output.test.ts",
+    "test:recovery": "tsx test/recovery.test.ts",
+    "test": "tsx test/schema.test.ts && tsx test/tools.test.ts && tsx test/agent-tools.test.ts && tsx test/extract.test.ts && tsx test/log.test.ts && tsx test/recovery.test.ts && tsx test/stream.test.ts && tsx test/audio-output.test.ts",
     "restart": "bash scripts/restart.sh"
   },
   "dependencies": {
@@ -29,6 +30,8 @@
     "@livekit/agents-plugin-silero": "^1.9.0",
     "@livekit/rtc-node": "^1.0.0",
     "openai": "^6.49.0",
+    "pino": "8.21.0",
+    "pino-pretty": "11.3.0",
     "ws": "^8.21.3",
     "zod": "^4.6.5"
   },
