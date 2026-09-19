@@ -12,6 +12,7 @@ import {
   readCallState,
   recordMatch,
   type CallState,
+  type QuotedSlot,
 } from './call-state.js';
 import { createExtractor, DEFAULT_EXTRACT_TIMEOUT_MS, type Extractor } from './extract.js';
 import type { Availability, Catalogue, ClinicApi } from './clinic-api.js';
@@ -26,6 +27,7 @@ import {
 import { mulawToPcm16 } from './mulaw.js';
 import { callContext, clog } from './log.js';
 import { attachBrief } from './patient-brief.js';
+import { holdSlot, releaseHolds, simHoldsEnabled } from './sim-holds.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
 import { submitActions, type SubmitResult } from './submit.js';
@@ -229,10 +231,19 @@ export class CallSession {
       session.output.audio = this.#output;
 
       // No room: the voice loop runs against our own transport.
+      const state = this.#state ?? createCallState(this.#callId, this.#fromNumber);
       const agent = new ReceptionistAgent({
-        state: this.#state ?? createCallState(this.#callId, this.#fromNumber),
+        state,
         api: this.#shared.api,
         catalogue: this.#shared.catalogue,
+        ...(simHoldsEnabled
+          ? {
+              hold: async (slot: QuotedSlot) => {
+                const refused = await holdSlot(config.prosper.baseUrl, this.#callId, slot, state.matched?.patient_id);
+                return refused?.detail ?? null;
+              },
+            }
+          : {}),
         lastCallerText: () => {
           const turns = this.#session ? buildCallTranscript(this.#session.history) : [];
           return [...turns].reverse().find((turn) => turn.role === 'user')?.text;
@@ -506,6 +517,7 @@ export class CallSession {
         );
         submissions = submissions.concat(await submitActions(this.#callId, [FLOOR_ACTION]));
       }
+      if (simHoldsEnabled) await releaseHolds(config.prosper.baseUrl, this.#callId);
     } else {
       this.#errors.push('no call_id: never received a start message, nothing to submit against');
     }

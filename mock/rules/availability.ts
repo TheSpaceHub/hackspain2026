@@ -20,9 +20,22 @@ import {
   type Provider,
 } from '../world/catalogue.js';
 import { onLeave, workingCells } from '../world/diary.js';
+import type { Diary } from '../world/diary.js';
 import type { Patient } from '../world/people.js';
 import type { World } from '../world/world.js';
 import { ageInMonths, daysBetween, eachDay, madridIso, toInstant } from './time.js';
+
+/** What the rules actually read. The mock passes its World; the sim passes a persistent view. */
+export interface AvailabilityWorld {
+  catalogue: World['catalogue'];
+  patient: World['patient'];
+  diary: Pick<Diary, 'isFree'>;
+  /**
+   * The per-patient plan rules the API keeps hidden (referral, allowance). The mock's
+   * invented tables by default; the sim answers from what the live API let slip.
+   */
+  hiddenPlanRule?: (patient: Patient, plan: Insurer, specialtyId: string) => string | null;
+}
 
 export interface AvailabilityQuery {
   date_from: string;
@@ -78,12 +91,13 @@ function providerOut(p: Provider): ProviderOut {
 }
 
 /** The first plan rule that stops `plan` paying for this provider at this site, or null. */
-function planRule(world: World, plan: Insurer, provider: Provider, location: string, patient: Patient | undefined): string | null {
+function planRule(world: AvailabilityWorld, plan: Insurer, provider: Provider, location: string, patient: Patient | undefined): string | null {
   const cat = world.catalogue;
   const specialty = provider.specialty_id;
   if (!cat.planCoversSpecialty(plan, specialty)) return 'specialty_not_covered';
   if (!cat.planCoversLocation(plan, location)) return 'location_not_covered';
   if (!cat.providerTakes(provider, plan)) return 'provider_not_in_network';
+  if (patient && world.hiddenPlanRule) return world.hiddenPlanRule(patient, plan, specialty);
   if (patient) {
     if (INSURER_REFERRALS[plan]?.includes(specialty) && !patient.referrals.includes(specialty)) {
       return 'insurer_referral_required';
@@ -94,7 +108,7 @@ function planRule(world: World, plan: Insurer, provider: Provider, location: str
   return null;
 }
 
-export function availability(world: World, q: AvailabilityQuery, now: number): AvailabilityResponse {
+export function availability(world: AvailabilityWorld, q: AvailabilityQuery, now: number): AvailabilityResponse {
   const cat = world.catalogue;
   const { starts, ends, closure_days, max_span_days } = cat.calendar;
 

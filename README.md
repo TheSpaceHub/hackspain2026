@@ -154,6 +154,40 @@ pnpm harness:local -- --scenario all        # every case at once
 - A call the harness never announced gets the real API's 404. `MOCK_ACCEPT_ANY_CALL=1`
   accepts any `call_id`, for driving the agent from something other than the harness.
 
+### A shared clinic
+
+The mock gives every call a fresh, identical clinic. `sim/` is one clinic that all the
+calls share and change: a copy of the real Prosper clinic taken at first boot, kept in
+SQLite (`sim/data/clinic.db`) so it survives restarts, and mutated by what the calls
+submit — a BOOK takes the cells, a RESCHEDULE moves them, a CANCEL frees them, a
+REGISTER puts the patient in the directory — so the next call's `/availability` sees it.
+
+```bash
+pnpm sim                                    # the API on :8788, sim routes on /__sim
+pnpm start:sim                              # the agent, holding slots on the sim
+pnpm harness:sim -- --n 3                   # three concurrent callers on the one diary
+curl -X POST localhost:8788/__sim/reset     # back to the snapshot (?resnapshot=1 re-copies)
+curl -N localhost:8788/__sim/events?since=0 # every hold, release, booking… as SSE
+```
+
+- **The copy is what the API will show.** The catalogue verbatim; the calendar's
+  occupancy by sweeping every provider's availability (a cell they work but do not
+  offer is busy — nameless, but taken); patients only as `/directory` can find them,
+  copied in with their appointments the first time a call asks. Needs `PROSPER_API_KEY`
+  for the first boot and for live lookups; after that the file is enough.
+- **Holds are how the calls coordinate.** `POST /__sim/holds` reserves a slot for a
+  `call_id` (two minutes, `SIM_HOLD_TTL_MS`); other calls stop seeing it in
+  `/availability` and get a 409 booking it, while the holder still sees its own. A
+  submission decides the call's holds; the rest expire. Requests carry the call in
+  `X-Sim-Call-Id` (or `?call_id=`), which is what tells "another call" from "me".
+- **`SIM_HOLDS=1` is the agent's opt-in** (`src/sim-holds.ts`): `accept_slot` takes a
+  hold before confirming the time, and a refusal sends the model back to `find_slots`.
+  Unset, nothing in `src/` changes.
+- Bookings and holds are checked and written in one SQLite transaction, so two calls
+  landing on the same cell at the same instant cannot both win.
+- `test/sim.test.ts` covers the diary, the holds, the window, persistence and the SSE
+  stream against the bundled catalogue and a fixed clock; `pnpm test:sim`.
+
 ### Reading the call log
 
 One JSON line per call in `$LOG_DIR`. This is the v1 evaluation harness and the seed of
