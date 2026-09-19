@@ -329,7 +329,7 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
       geocode: async (address) => {
         await new Promise((done) => setTimeout(done, 30));
         placedAt = Date.now();
-        return { latitude: 40.4195, longitude: -3.6921, address: `${address}, Madrid`, exact: true };
+        return { latitude: 40.4195, longitude: -3.6921, address: `${address}, Madrid`, exact: true, partial: false };
       },
     }) as unknown as Record<string, llm.FunctionTool>;
 
@@ -352,6 +352,62 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
       /Arenal Centro about .*Arenal Sur about .*Arenal Norte about/.test(three),
       true,
     );
+
+    // A geocoder that half-recognises a street answers with a real address somewhere
+    // else in the city, and confidently ranking from it sends the caller across town.
+    const halfTools = buildTools({
+      state: createCallState('call-half'),
+      api: new ClinicApi({ baseUrl: 'https://fake.local', apiKey: 'k', fetch: new FakeClinic().fetch }),
+      catalogue,
+      now: () => NOW,
+      geocode: async () => ({
+        latitude: 40.4266,
+        longitude: -3.7086,
+        address: 'Cl. de las Pozas, 4, Madrid',
+        exact: true,
+        partial: true,
+      }),
+    }) as unknown as Record<string, llm.FunctionTool>;
+    const half = String(
+      await halfTools.nearest_site!.execute({ address: 'calle Ciskiskoops 999' } as never, {} as never),
+    );
+    check('a half-matched address is read back, not ranked from', /half-matched/.test(half), true);
+    check('and no distances are given for it', /km/.test(half), false);
+
+    // A diary that timed out is not an empty diary: "nothing free on Thursday" would be
+    // a fact the tool never learned.
+    const deadTools = buildTools({
+      state: createCallState('call-dead-diary'),
+      api: new ClinicApi({
+        baseUrl: 'https://fake.local',
+        apiKey: 'k',
+        fetch: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+          String(input).includes('/availability')
+            ? Promise.reject(new Error('timeout'))
+            : new FakeClinic().fetch(input, init)) as typeof fetch,
+      }),
+      catalogue,
+      now: () => NOW,
+      geocode: async () => ({ latitude: 40.4195, longitude: -3.6921, address: 'Alcalá 54, Madrid', exact: true, partial: false }),
+    }) as unknown as Record<string, llm.FunctionTool>;
+    const dead = String(
+      await deadTools.nearest_site!.execute(
+        { address: 'Calle de Alcalá 54', specialty_id: 'general practice', when_phrase: 'tomorrow' } as never,
+        {} as never,
+      ),
+    );
+    check('a diary that never answered is not reported as a full diary', /did not answer/.test(dead), true);
+    check('but the distances still stand', /Arenal Centro about/.test(dead), true);
+
+    // "Thursday afternoon" is not answered with nine in the morning.
+    const afternoon = String(
+      await geoTools.nearest_site!.execute(
+        { address: 'Calle de Alcalá 54', specialty_id: 'general practice', when_phrase: 'tomorrow afternoon' } as never,
+        {} as never,
+      ),
+    );
+    const hour = /(\d{1,2}):\d{2} (am|pm)/.exec(afternoon);
+    check('an afternoon request is never filled with a morning slot', hour === null || hour[2] === 'pm', true);
   }
 
   const identified = String(

@@ -87,6 +87,18 @@ check('Sunday moves to Monday', resolveWhen('Sunday morning', call).date_from, '
 check('Saturday at Sur moves on — only Centro opens', resolveWhen('Saturday', call, { locationId: 'LOC_SUR' }).date_from, '2026-10-13');
 check('Saturday at Centro stands', resolveWhen('Saturday', call, { locationId: 'LOC_CENTRO' }).date_from, '2026-10-10');
 check('Friday afternoon at Sur moves on', resolveWhen('Friday afternoon', call, { locationId: 'LOC_SUR' }).date_from, '2026-10-13');
+// Spanish, because half of them say it that way and a day the parser misses silently
+// becomes "the earliest".
+check('jueves is Thursday, not the earliest', resolveWhen('el jueves', call).date_from, '2026-10-08');
+check('jueves is a single day, not a window', resolveWhen('el jueves', call).earliest, false);
+check('miércoles with the accent', resolveWhen('el miércoles', call).date_from, '2026-10-14');
+check('pasado mañana', resolveWhen('pasado mañana', call).date_from, '2026-10-09');
+check('mañana is tomorrow', resolveWhen('mañana a ser posible', call).date_from, '2026-10-08');
+check('por la mañana is a time of day, not tomorrow', resolveWhen('el viernes por la mañana', call).date_from, '2026-10-09');
+check('and it is the morning', resolveWhen('el viernes por la mañana', call).part_of_day, 'morning');
+check('por la tarde', resolveWhen('el jueves por la tarde', call).part_of_day, 'afternoon');
+check('a Spanish month and day', resolveWhen('el 14 de octubre', call).date_from, '2026-10-14');
+
 const soonest = resolveWhen('as soon as possible', call);
 check('no day named searches a window', [soonest.earliest, soonest.date_from, soonest.date_to], [true, '2026-10-08', '2026-10-21']);
 check('the window never exceeds the 14-day cap', addDays(soonest.date_from, 13), soonest.date_to);
@@ -167,6 +179,35 @@ check('the three nearest, and no more, are what the caller is read', rankSites(c
     fetch: googled({ status: 'ZERO_RESULTS', results: [] }),
   });
   check('an address nobody can place is nothing, not a guess', nowhere, null);
+
+  const halfMatched = await geocodeMadrid('calle Ciskiskoops 999', {
+    apiKey: 'test',
+    fetch: googled({
+      status: 'OK',
+      results: [
+        {
+          formatted_address: 'Cl. de las Pozas, 4, Madrid',
+          partial_match: true,
+          geometry: { location: { lat: 40.4266, lng: -3.7086 }, location_type: 'ROOFTOP' },
+        },
+      ],
+    }),
+  });
+  check('a street the geocoder only half-knew is marked as such', halfMatched?.partial, true);
+
+  let fellBackTo = '';
+  const seen: string[] = [];
+  await geocodeMadrid('Gran Vía 1', {
+    apiKey: 'test',
+    fetch: (async (url: URL) => {
+      seen.push(String(url));
+      fellBackTo = String(url);
+      return String(url).includes('googleapis')
+        ? new Response('{"error_message":"invalid","status":"REQUEST_DENIED"}', { status: 200 })
+        : new Response('[]', { status: 200 });
+    }) as unknown as typeof globalThis.fetch,
+  });
+  check('a refused key falls back to the open geocoder', [seen.length, fellBackTo.includes('nominatim')], [2, true]);
 
   let asked = '';
   await geocodeMadrid('Gran Vía 1', {

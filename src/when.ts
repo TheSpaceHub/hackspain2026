@@ -35,11 +35,28 @@ export interface ResolveOptions {
   maxSpanDays?: number;
 }
 
-const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-const MONTHS = [
-  'january', 'february', 'march', 'april', 'may', 'june',
-  'july', 'august', 'september', 'october', 'november', 'december',
+// Half the callers say it in Spanish, and a weekday the parser does not know falls
+// through to "the earliest" — which is how a Thursday caller is offered Monday.
+const WEEKDAYS = [
+  ['sunday', 'domingo'],
+  ['monday', 'lunes'],
+  ['tuesday', 'martes'],
+  ['wednesday', 'mi[eé]rcoles'],
+  ['thursday', 'jueves'],
+  ['friday', 'viernes'],
+  ['saturday', 's[aá]bado'],
 ];
+const MONTHS = [
+  ['january', 'enero'], ['february', 'febrero'], ['march', 'marzo'], ['april', 'abril'],
+  ['may', 'mayo'], ['june', 'junio'], ['july', 'julio'], ['august', 'agosto'],
+  ['september', 'septiembre|setiembre'], ['october', 'octubre'], ['november', 'noviembre'],
+  ['december', 'diciembre'],
+];
+
+function mentions(text: string, words: string[]): boolean {
+  return words.some((word) => new RegExp(`\\b(?:${word})\\b`).test(text));
+}
+
 const ORDINALS = [
   '', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth',
   'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth',
@@ -80,8 +97,8 @@ export function resolveWhen(phrase: string, now: Date, options: ResolveOptions =
 
 /** "morning" is before 14:00 and "afternoon" from 14:00; "first thing" is the morning. */
 function partOfDay(text: string): PartOfDay | undefined {
-  if (/\b(morning|first thing)\b/.test(text)) return 'morning';
-  if (/\b(afternoon|evening)\b/.test(text)) return 'afternoon';
+  if (/\b(morning|first thing|ma(ñ|n)ana temprano|por la ma(ñ|n)ana)\b/.test(text)) return 'morning';
+  if (/\b(afternoon|evening|por la tarde|la tarde|por la noche)\b/.test(text)) return 'afternoon';
   return undefined;
 }
 
@@ -89,7 +106,7 @@ function partOfDay(text: string): PartOfDay | undefined {
 function namedDate(rawText: string, today: string): string | null {
   // "first thing on Monday the twelfth" carries an ordinal that is not the day.
   const text = rawText.replace(/first thing/g, '');
-  const month = MONTHS.findIndex((m) => text.includes(m));
+  const month = MONTHS.findIndex((names) => mentions(text, names));
   if (month === -1) return null;
 
   const ordinal = ORDINALS.findIndex((o, i) => i > 0 && new RegExp(`\\b${o}\\b`).test(text));
@@ -103,18 +120,21 @@ function namedDate(rawText: string, today: string): string | null {
   return candidate >= today ? candidate : iso(year + 1, month + 1, day);
 }
 
-function relativeDate(text: string, today: string): string | null {
-  if (/\bday after tomorrow\b/.test(text)) return addDays(today, 2);
-  if (/\btomorrow\b/.test(text)) return addDays(today, 1);
-  if (/\b(a week from today|in a week|next week today)\b/.test(text)) return addDays(today, 7);
-  if (/\b(in a fortnight|two weeks from today)\b/.test(text)) return addDays(today, 14);
-  if (/\btoday\b/.test(text)) return addDays(today, 1); // never same-day
+function relativeDate(rawText: string, today: string): string | null {
+  // "el jueves por la mañana" is Thursday morning, not tomorrow: the part of day is
+  // read off first, and what is left of the word no longer names a day.
+  const text = rawText.replace(/\b(por|de|esta) la ma(ñ|n)ana\b/g, '');
+  if (/\b(day after tomorrow|pasado ma(ñ|n)ana)\b/.test(text)) return addDays(today, 2);
+  if (/\b(tomorrow|ma(ñ|n)ana)\b/.test(text)) return addDays(today, 1);
+  if (/\b(a week from today|in a week|next week today|en una semana|dentro de una semana)\b/.test(text)) return addDays(today, 7);
+  if (/\b(in a fortnight|two weeks from today|en dos semanas|en quince d(í|i)as)\b/.test(text)) return addDays(today, 14);
+  if (/\b(today|hoy)\b/.test(text)) return addDays(today, 1); // never same-day
   return null;
 }
 
 /** A weekday phrase means the first such weekday *strictly after* the day of the call. */
 function weekdayDate(text: string, today: string): string | null {
-  const weekday = WEEKDAYS.findIndex((d) => new RegExp(`\\b${d}\\b`).test(text));
+  const weekday = WEEKDAYS.findIndex((names) => mentions(text, names));
   if (weekday === -1) return null;
   const delta = (weekday - weekdayOf(today) + 7) % 7;
   return addDays(today, delta === 0 ? 7 : delta);

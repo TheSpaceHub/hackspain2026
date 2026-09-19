@@ -399,6 +399,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         // top of placing the address. A diary that fails still leaves the distances.
         const plans = knownPlanIds(catalogue, request.insurers);
         const geocode = deps.geocode ?? ((query: string) => geocodeMadrid(query));
+        let diaryFailed = false;
         const [origin, availability] = await Promise.all([
           geocode(address),
           window && (specialty || request.provider_id)
@@ -413,12 +414,18 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
                 })
                 .catch((err: unknown) => {
                   clog.warn(`[nearest_site] diary: ${String(err)}`);
+                  diaryFailed = true;
                   return null;
                 })
             : null,
         ]);
 
         if (!origin) return 'Could not place that address. Ask which street and number they are at.';
+        // The geocoder answers a street it half-recognised with a real address somewhere
+        // else in the city, and a confident wrong coordinate ranks the sites wrongly.
+        if (origin.partial) {
+          return `That address only half-matched: the closest thing to it is ${origin.address}. Read that back and ask whether it is right before you rank anything.`;
+        }
         const ranked = rankSites(catalogue, origin, { specialty_id: specialty });
         if (ranked.length === 0) return 'No site offers that. Say so plainly.';
         if (availability) deps.onAvailability?.(availability);
@@ -430,7 +437,9 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
 
         // The nearest site is the answer only if they can be seen there: one that has
         // nobody free on the day they asked for is a closer wrong answer.
-        const open = availability?.slots ?? [];
+        // A day they asked for the afternoon of is not answered with nine in the morning.
+        const wanted = window?.part_of_day;
+        const open = (availability?.slots ?? []).filter((s) => !wanted || inPart(s.start_time, wanted));
         const soonest = three
           .map((site) => ({
             site,
@@ -441,11 +450,23 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           .find((candidate) => candidate.slot !== undefined);
 
         if (!soonest?.slot) {
+          // Three states the caller hears differently: the diary never answered, the
+          // diary refused on a standing rule, and the diary is simply full.
+          if (diaryFailed) {
+            return `${distances} The diary did not answer, so nothing is known about that day — say you will check and call find_slots again.`;
+          }
+          const blocked = (availability?.blocked ?? []).map((entry) => entry.restriction).join('; ');
+          if (blocked) {
+            recordRequest(state, { blocked_by: blocked });
+            clog.warn(`[nearest_site] blocked: ${blocked}`);
+            return `${distances} Nothing bookable at any of them: ${blocked}. Tell the caller plainly and do not offer a time.`;
+          }
           const nothing = window
             ? ` Nothing free at any of them then — offer to look at another day.`
             : ` Ask which day suits and call find_slots.`;
           return `${distances}${nothing}`;
         }
+        if (state.request.blocked_by) retract(state, 'blocked_by');
 
         const slot = soonest.slot;
         recordRequest(state, { location_id: slot.location_id });

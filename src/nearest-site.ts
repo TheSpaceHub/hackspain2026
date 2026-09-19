@@ -105,17 +105,20 @@ export interface Placed extends Point {
   address: string;
   /** True when the door number itself was found, rather than the street or the district. */
   exact: boolean;
+  /** True when the geocoder answered a street it only half-recognised: a real place, elsewhere. */
+  partial: boolean;
 }
 
 /**
  * A spoken street address to a coordinate. The one network hop here: ranking itself is
  * offline, so a geocode failure costs the distance answer and nothing else. Google when
  * a key is configured — it is the one that places a door number — and OpenStreetMap
- * otherwise, so a checkout without a key still answers.
+ * otherwise or when Google refuses the key, so a checkout without one still answers.
  */
 export async function geocodeMadrid(address: string, options: GeocodeOptions = {}): Promise<Placed | null> {
   const key = options.apiKey ?? process.env.GOOGLE_MAPS_API_KEY ?? '';
-  return key === '' ? nominatim(address, options) : google(address, key, options);
+  if (key === '') return nominatim(address, options);
+  return (await google(address, key, options)) ?? nominatim(address, options);
 }
 
 /** Rooftop and interpolated are a door number; a street or a district centroid is not. */
@@ -137,6 +140,7 @@ async function google(address: string, key: string, options: GeocodeOptions): Pr
       status?: string;
       results?: {
         formatted_address?: string;
+        partial_match?: boolean;
         geometry?: { location?: { lat?: number; lng?: number }; location_type?: string };
       }[];
     };
@@ -148,6 +152,7 @@ async function google(address: string, key: string, options: GeocodeOptions): Pr
       longitude: at.lng,
       address: hit?.formatted_address ?? address,
       exact: EXACT.has(hit?.geometry?.location_type ?? ''),
+      partial: hit?.partial_match === true,
     };
   } catch {
     return null;
@@ -174,6 +179,7 @@ async function nominatim(address: string, options: GeocodeOptions): Promise<Plac
       longitude: Number(hit.lon),
       address: hit.display_name ?? address,
       exact: hit.type === 'house' || hit.type === 'building',
+      partial: false,
     };
   } catch {
     return null;
