@@ -134,6 +134,66 @@ export const BEHAVIOURS: Behaviour[] = [
       'correct yourself two turns later with "no, sorry, I said that wrong". What you say last is what you mean.',
     ].join(' '),
   },
+  {
+    ...base,
+    id: 'angry',
+    label: 'Angry',
+    description: 'Furious before the call began; wants a person, not a system.',
+    instructions: [
+      'You are angry before they pick up — you have been kept waiting before and you say so. You demand',
+      'to speak to a human being, you threaten to complain and to go elsewhere, and you take any question',
+      'about your details as an obstacle being put in your way. You do eventually answer, grudgingly.',
+    ].join(' '),
+    wpm: 185,
+    gain: 1.15,
+  },
+  {
+    ...base,
+    id: 'hard_of_hearing',
+    label: 'Hard of hearing',
+    description: 'Mishears numbers and asks for everything twice, television on.',
+    instructions: [
+      'You are hard of hearing. You ask them to repeat almost everything, you mishear digits and dates and',
+      'read them back wrong, and you answer the question you thought you heard rather than the one asked.',
+    ].join(' '),
+    wpm: 120,
+    lead_ms: 1_500,
+    audio: { background: 'television', signal_to_noise_db: 6 },
+  },
+  {
+    ...base,
+    id: 'in_a_hurry',
+    label: 'In a hurry',
+    description: 'Two minutes to spare and says so every turn.',
+    instructions: [
+      'You are about to walk into something and you have no time. You push for the first thing they can give',
+      'you, you cut short anything that sounds like a policy, and you say "just book whatever is soonest".',
+    ].join(' '),
+    wpm: 190,
+    barge_in: true,
+  },
+  {
+    ...base,
+    id: 'child',
+    label: 'A child ringing',
+    description: 'A young teenager ringing for a parent, unsure of the details.',
+    instructions: [
+      'You are thirteen and ringing for your mother, who told you to do it and then left the room. You are shy,',
+      'you are not sure of her details, you guess at some of them, and you have to go and ask for the rest.',
+    ].join(' '),
+    wpm: 165,
+    gain: 0.8,
+  },
+  {
+    ...base,
+    id: 'distrustful',
+    label: 'Distrustful',
+    description: 'Will not give identifiers until told why they are needed.',
+    instructions: [
+      'You do not trust telephone systems with your data. Every time they ask for an identifier you ask what',
+      'it is for, who will see it, and whether this call is recorded. You give it in the end, one field at a time.',
+    ].join(' '),
+  },
 ];
 
 export const BEHAVIOUR_BY_ID = new Map(BEHAVIOURS.map((b) => [b.id, b]));

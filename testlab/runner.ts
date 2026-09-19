@@ -8,6 +8,8 @@
  * of seventy calls arriving rather than a spinner.
  */
 import { EventEmitter } from 'node:events';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Case, Grade } from '../mock/world/suite/types.js';
 import { gradeRecord, leaks } from '../mock/world/suite/types.js';
 import type { Suite } from '../mock/world/suite/index.js';
@@ -15,6 +17,7 @@ import { type Behaviour, behaviourOf } from './behaviour.js';
 import { dial } from './dial.js';
 import { AgentFeed } from './feed.js';
 import { type CaseResult, insightsFor, issueDrafts, type IssueDraft, summarise } from './insights.js';
+import { type Vocabulary, vocabularyOf } from './vocabulary.js';
 
 export interface RunRequest {
   case_ids?: string[];
@@ -22,17 +25,20 @@ export interface RunRequest {
   mode?: 'script' | 'persona';
   /** Difficult callers: every chosen case is run once per behaviour named here. */
   behaviours?: string[];
+  /** And once more per way of talking: vague, code-switching, off-topic. */
+  vocabularies?: string[];
   /** Calls in flight at once. The platform's Run All is ten. */
   concurrency?: number;
 }
 
-export type RunStatus = 'running' | 'done' | 'failed';
+export type RunStatus = 'running' | 'done' | 'failed' | 'stopped';
 
 export interface Run {
   id: string;
   status: RunStatus;
   mode: 'script' | 'persona';
   behaviours: string[];
+  vocabularies: string[];
   concurrency: number;
   started_at: string;
   finished_at: string | null;
@@ -40,7 +46,7 @@ export interface Run {
   done: number;
   passed: number;
   error: string | null;
-  cases: { case_id: string; problem_id: string; title: string; copies: number; behaviour: string }[];
+  cases: { case_id: string; problem_id: string; title: string; copies: number; behaviour: string; vocabulary: string }[];
   results: CaseResult[];
   issues: IssueDraft[];
 }
@@ -50,6 +56,11 @@ export interface RunnerOptions {
   agentHttp: string;
   mockUrl: string;
   outDir: string;
+}
+
+/** Finished runs are written here, so history survives restarting the mock. */
+function historyDir(outDir: string): string {
+  return join(outDir, 'runs');
 }
 
 const SETTLE_MS = 3_000;
@@ -63,11 +74,50 @@ interface MockCall {
 
 export class Runner extends EventEmitter {
   readonly #runs = new Map<string, Run>();
+  readonly #stopping = new Set<string>();
   #next = 1;
 
-  constructor(private readonly suite: Suite, private readonly opts: RunnerOptions) {
+  constructor(private suite: Suite, private readonly opts: RunnerOptions) {
     super();
     this.setMaxListeners(0);
+    this.#load();
+  }
+
+  /** The suite changes when it is regenerated; runs already recorded do not. */
+  useSuite(suite: Suite): void {
+    this.suite = suite;
+  }
+
+  /** Earlier runs, off disk, newest id last so the counter carries on past them. */
+  #load(): void {
+    let files: string[];
+    try {
+      files = readdirSync(historyDir(this.opts.outDir)).filter((f) => f.endsWith('.json')).sort();
+    } catch {
+      return;
+    }
+    for (const file of files) {
+      try {
+        const run = JSON.parse(readFileSync(join(historyDir(this.opts.outDir), file), 'utf8')) as Run;
+        // A run that was in flight when the process died did not finish, and never will.
+        if (run.status === 'running') run.status = 'stopped';
+        run.vocabularies ??= ['plain'];
+        this.#runs.set(run.id, run);
+        const n = Number(run.id.replace(/\D/g, ''));
+        if (Number.isFinite(n) && n >= this.#next) this.#next = n + 1;
+      } catch {
+        /* a half-written run from a kill -9 is not worth refusing to boot over */
+      }
+    }
+  }
+
+  #save(run: Run): void {
+    try {
+      mkdirSync(historyDir(this.opts.outDir), { recursive: true });
+      writeFileSync(join(historyDir(this.opts.outDir), `${run.id}.json`), JSON.stringify(run));
+    } catch (err) {
+      console.warn(`[testlab] could not write ${run.id} to history: ${String(err)}`);
+    }
   }
 
   list(): Omit<Run, 'results' | 'issues' | 'cases'>[] {
@@ -78,18 +128,30 @@ export class Runner extends EventEmitter {
     return this.#runs.get(id);
   }
 
+  /** Lets the calls in flight finish and dials no more. */
+  stop(id: string): Run | undefined {
+    const run = this.#runs.get(id);
+    if (run?.status === 'running') this.#stopping.add(id);
+    return run;
+  }
+
   /** Picks the cases, opens the run, and returns before the first call is dialled. */
   start(req: RunRequest): Run {
     const cases = this.#choose(req);
     if (cases.length === 0) throw new Error('no cases matched');
     const behaviours = (req.behaviours?.length ? req.behaviours : ['cooperative']).map(behaviourOf);
-    // Every case against every behaviour: the same want, a different person asking.
-    const chosen = behaviours.flatMap((behaviour) => cases.map((kase) => ({ kase, behaviour })));
+    const vocabularies = (req.vocabularies?.length ? req.vocabularies : ['plain']).map(vocabularyOf);
+    // Every case against every caller: the same want, a different person asking it
+    // a different way.
+    const chosen = behaviours.flatMap((behaviour) =>
+      vocabularies.flatMap((vocabulary) => cases.map((kase) => ({ kase, behaviour, vocabulary }))),
+    );
     const run: Run = {
       id: `run-${String(this.#next++).padStart(4, '0')}`,
       status: 'running',
       mode: req.mode === 'persona' ? 'persona' : 'script',
       behaviours: behaviours.map((b) => b.id),
+      vocabularies: vocabularies.map((v) => v.id),
       concurrency: Math.min(Math.max(1, req.concurrency ?? 4), 20),
       started_at: new Date().toISOString(),
       finished_at: null,
@@ -98,12 +160,13 @@ export class Runner extends EventEmitter {
       done: 0,
       passed: 0,
       error: null,
-      cases: chosen.map(({ kase, behaviour }) => ({
+      cases: chosen.map(({ kase, behaviour, vocabulary }) => ({
         case_id: kase.id,
         problem_id: kase.problem_id,
         title: kase.title,
         copies: Math.max(1, kase.burst),
         behaviour: behaviour.id,
+        vocabulary: vocabulary.id,
       })),
       results: [],
       issues: [],
@@ -130,7 +193,7 @@ export class Runner extends EventEmitter {
     this.emit('event', { run_id: run.id, event, data });
   }
 
-  async #execute(run: Run, chosen: { kase: Case; behaviour: Behaviour }[]): Promise<void> {
+  async #execute(run: Run, chosen: { kase: Case; behaviour: Behaviour; vocabulary: Vocabulary }[]): Promise<void> {
     const feed = new AgentFeed(this.opts.agentHttp);
     try {
       await feed.start();
@@ -143,8 +206,8 @@ export class Runner extends EventEmitter {
     }
 
     // A burst case is its own little Run All: every copy goes out together.
-    const jobs = chosen.flatMap(({ kase, behaviour }) =>
-      Array.from({ length: Math.max(1, kase.burst) }, (_, copy) => ({ kase, behaviour, copy })),
+    const jobs = chosen.flatMap(({ kase, behaviour, vocabulary }) =>
+      Array.from({ length: Math.max(1, kase.burst) }, (_, copy) => ({ kase, behaviour, vocabulary, copy })),
     );
 
     try {
@@ -152,8 +215,8 @@ export class Runner extends EventEmitter {
       const workers = Array.from({ length: Math.min(run.concurrency, jobs.length) }, async () => {
         for (;;) {
           const job = jobs[cursor++];
-          if (!job) return;
-          const result = await this.#one(run, job.kase, job.behaviour, job.copy, feed);
+          if (!job || this.#stopping.has(run.id)) return;
+          const result = await this.#one(run, job, feed);
           run.results.push(result);
           run.done++;
           if (result.pass) run.passed++;
@@ -169,13 +232,15 @@ export class Runner extends EventEmitter {
         result.summary = await summarise(this.suite.byId.get(result.case_id)!, result);
       }
       run.issues = issueDrafts(run.results);
-      run.status = 'done';
+      run.status = this.#stopping.has(run.id) ? 'stopped' : 'done';
     } catch (err) {
       run.status = 'failed';
       run.error = String(err);
     } finally {
+      this.#stopping.delete(run.id);
       feed.stop();
       run.finished_at = new Date().toISOString();
+      this.#save(run);
       this.#emit(run, 'run_finished', {
         run_id: run.id,
         status: run.status,
@@ -187,13 +252,19 @@ export class Runner extends EventEmitter {
     }
   }
 
-  async #one(run: Run, kase: Case, behaviour: Behaviour, copy: number, feed: AgentFeed): Promise<CaseResult> {
+  async #one(
+    run: Run,
+    job: { kase: Case; behaviour: Behaviour; vocabulary: Vocabulary; copy: number },
+    feed: AgentFeed,
+  ): Promise<CaseResult> {
+    const { kase, behaviour, vocabulary, copy } = job;
     this.#emit(run, 'case_started', {
       run_id: run.id,
       case_id: kase.id,
       copy,
       title: kase.title,
       behaviour: behaviour.id,
+      vocabulary: vocabulary.id,
     });
     const call = await dial({
       agentWs: this.opts.agentWs,
@@ -201,6 +272,7 @@ export class Runner extends EventEmitter {
       kase,
       mode: run.mode,
       behaviour,
+      vocabulary,
       feed,
       outDir: this.opts.outDir,
       copy,
@@ -215,6 +287,7 @@ export class Runner extends EventEmitter {
       problem_id: kase.problem_id,
       title: kase.title,
       behaviour: behaviour.id,
+      vocabulary: vocabulary.id,
       copy,
       pass: grade.pass && leaked.length === 0,
       grade,

@@ -62,6 +62,12 @@ export class Router {
     return this;
   }
 
+  /** For a route no path pattern describes — everything under a prefix, say. */
+  addPattern(method: string, pattern: RegExp, handler: Handler, opts: { public?: boolean } = {}): this {
+    this.#routes.push({ method, pattern, keys: [], handler, public: opts.public ?? false });
+    return this;
+  }
+
   get(path: string, handler: Handler, opts?: { public?: boolean }): this {
     return this.add('GET', path, handler, opts);
   }

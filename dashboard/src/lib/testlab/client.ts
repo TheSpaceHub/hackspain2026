@@ -17,6 +17,18 @@ export function fetchSuite(signal?: AbortSignal): Promise<SuiteResponse> {
   return getJson<SuiteResponse>('/__testlab', signal);
 }
 
+/** Rebuild the random asks. Same seed, same asks — that is the whole point of it. */
+export async function regenerateSuite(req: { seed?: number; random?: number }): Promise<SuiteResponse> {
+  const res = await fetch(`${ORIGIN}/__testlab/suite`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  const body = (await res.json()) as SuiteResponse & { detail?: string };
+  if (!res.ok) throw new Error(body.detail ?? `POST /__testlab/suite → ${res.status}`);
+  return body;
+}
+
 export async function fetchRuns(signal?: AbortSignal): Promise<RunSummary[]> {
   return (await getJson<{ runs: RunSummary[] }>('/__testlab/runs', signal)).runs;
 }
@@ -34,6 +46,13 @@ export async function startRun(req: RunRequest): Promise<Run> {
   const body = (await res.json()) as Run & { detail?: string };
   if (!res.ok) throw new Error(body.detail ?? `POST /__testlab/runs → ${res.status}`);
   return body;
+}
+
+export async function stopRun(id: string): Promise<Run> {
+  const path = `/__testlab/runs/${encodeURIComponent(id)}/stop`;
+  const res = await fetch(`${ORIGIN}${path}`, { method: 'POST' });
+  if (!res.ok) throw new Error(`POST ${path} → ${res.status}`);
+  return (await res.json()) as Run;
 }
 
 export interface RunHandlers {

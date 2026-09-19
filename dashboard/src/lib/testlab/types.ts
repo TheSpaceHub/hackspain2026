@@ -45,10 +45,26 @@ export interface Behaviour {
   gain: number;
 }
 
+export interface Vocabulary {
+  id: string;
+  label: string;
+  description: string;
+  instructions: string;
+}
+
+/** Which suite is loaded, and the seed the random asks came out of. */
+export interface Generation {
+  source: 'real' | 'generated';
+  seed: number;
+  random: number;
+}
+
 export interface SuiteResponse {
   problems: Problem[];
   cases: Case[];
   behaviours: Behaviour[];
+  vocabularies: Vocabulary[];
+  generation: Generation;
   /** The model behind the persona callers, or null when there is none and scripts are used. */
   persona_caller: string | null;
 }
@@ -71,6 +87,7 @@ export interface CaseResult {
   problem_id: string;
   title: string;
   behaviour: string;
+  vocabulary: string;
   copy: number;
   pass: boolean;
   grade: { pass: boolean; misses: string[]; variant: number };
@@ -87,6 +104,7 @@ export interface CaseResult {
     ms_to_first_audio: number | null;
     caller: 'script' | 'persona';
     behaviour: string;
+    vocabulary: string;
     caller_turns: string[];
     transcript: Turn[];
     wav_path: string | null;
@@ -104,9 +122,10 @@ export interface IssueDraft {
 
 export interface RunSummary {
   id: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'stopped';
   mode: 'script' | 'persona';
   behaviours: string[];
+  vocabularies: string[];
   concurrency: number;
   started_at: string;
   finished_at: string | null;
@@ -117,7 +136,7 @@ export interface RunSummary {
 }
 
 export interface Run extends RunSummary {
-  cases: { case_id: string; problem_id: string; title: string; copies: number; behaviour: string }[];
+  cases: { case_id: string; problem_id: string; title: string; copies: number; behaviour: string; vocabulary: string }[];
   results: CaseResult[];
   issues: IssueDraft[];
 }
@@ -126,6 +145,7 @@ export interface RunRequest {
   case_ids?: string[];
   problem_ids?: string[];
   behaviours?: string[];
+  vocabularies?: string[];
   mode?: 'script' | 'persona';
   concurrency?: number;
 }

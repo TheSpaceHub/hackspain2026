@@ -26,6 +26,7 @@ export interface CaseResult {
   problem_id: string;
   title: string;
   behaviour: string;
+  vocabulary: string;
   copy: number;
   pass: boolean;
   grade: Grade;

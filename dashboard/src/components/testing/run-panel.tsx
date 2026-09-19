@@ -5,15 +5,27 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
-import type { Run } from '@/lib/testlab/types';
+import type { Case, Run } from '@/lib/testlab/types';
 import { ResultDetail } from './result-detail';
 
 /** The run as it happens: a bar, then a line per call, then the issues those calls add up to. */
-export function RunPanel({ run }: { run: Run }) {
+export function RunPanel({
+  run,
+  cases,
+  onStop,
+}: {
+  run: Run;
+  /** The suite as it stands; a regenerated suite no longer holds an old run's cases. */
+  cases: Map<string, Case>;
+  onStop: (runId: string) => void;
+}) {
   const [tab, setTab] = useState<'calls' | 'issues'>('calls');
   const [open, setOpen] = useState<string | null>(null);
   const pct = run.total === 0 ? 0 : Math.round((run.done / run.total) * 100);
-  const failed = run.done - run.passed;
+  // Counted off the rows on screen, not off the progress stream: the stream is a call
+  // ahead of the results, and a call that has finished but not arrived is neither.
+  const passed = run.results.filter((r) => r.pass).length;
+  const failed = run.results.length - passed;
 
   return (
     <Card size="sm" className="min-h-0 gap-3 overflow-hidden">
@@ -24,13 +36,18 @@ export function RunPanel({ run }: { run: Run }) {
             {run.status}
           </Badge>
           <span className="text-xs font-normal text-muted-foreground">
-            {run.mode} caller · {run.behaviours.join(', ')} · {run.concurrency} at once
+            {run.mode} caller · {run.behaviours.join(', ')} · {run.vocabularies.join(', ')} · {run.concurrency} at once
           </span>
           <span className="ml-auto text-xs font-normal tabular-nums">
-            <span className="text-emerald-600">{run.passed} passed</span>
+            <span className="text-emerald-600">{passed} passed</span>
             {failed > 0 && <span className="text-destructive"> · {failed} failed</span>}
             <span className="text-muted-foreground"> · {run.done}/{run.total}</span>
           </span>
+          {run.status === 'running' && (
+            <Button variant="outline" size="xs" onClick={() => onStop(run.id)}>
+              Stop
+            </Button>
+          )}
         </CardTitle>
         <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
           <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
@@ -53,7 +70,7 @@ export function RunPanel({ run }: { run: Run }) {
         {tab === 'calls' ? (
           <ul className="mt-3 flex flex-col divide-y divide-border/60 overflow-hidden rounded-md border border-border/60">
             {run.results.map((r) => {
-              const key = `${r.case_id}-${r.behaviour}-${r.copy}`;
+              const key = `${r.case_id}-${r.behaviour}-${r.vocabulary}-${r.copy}`;
               const isOpen = open === key;
               return (
                 <li key={key}>
@@ -76,8 +93,11 @@ export function RunPanel({ run }: { run: Run }) {
                     {r.leaked.length > 0 && <CircleAlert className="size-4 text-destructive" />}
                     <span className="font-mono text-xs text-muted-foreground">{r.case_id}</span>
                     {r.behaviour !== 'cooperative' && <Badge variant="outline">{r.behaviour.replace(/_/g, ' ')}</Badge>}
+                    {r.vocabulary && r.vocabulary !== 'plain' && (
+                      <Badge variant="outline">{r.vocabulary.replace(/_/g, ' ')}</Badge>
+                    )}
                   </button>
-                  {isOpen && <ResultDetail result={r} />}
+                  {isOpen && <ResultDetail result={r} kase={cases.get(r.case_id)} />}
                 </li>
               );
             })}

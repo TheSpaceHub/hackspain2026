@@ -4,29 +4,54 @@
  * It lives in the mock because the mock owns the world the cases were generated
  * against and the records they are graded on; the dashboard only needs a browser.
  *
- *   GET  /__testlab                 problems, cases and behaviours
- *   POST /__testlab/runs            {case_ids?, problem_ids?, behaviours?, mode?, concurrency?}
+ *   GET  /__testlab                 problems, cases, behaviours and vocabularies
+ *   POST /__testlab/suite           {seed?, random?} rebuild the real-clinic suite
+ *   POST /__testlab/runs            {case_ids?, problem_ids?, behaviours?, vocabularies?, mode?, concurrency?}
  *   GET  /__testlab/runs            every run, newest first
  *   GET  /__testlab/runs/:id        one run, with every result and the issue drafts
+ *   POST /__testlab/runs/:id/stop   dial no more calls; the ones in flight still finish
  *   GET  /__testlab/runs/:id/events one line per call as it settles (SSE)
  */
 import { fail, ok, type Router, STREAMING } from '../http.js';
 import type { Suite } from '../world/suite/index.js';
+import type { Generation } from '../world/suite/real/index.js';
 import { BEHAVIOURS } from '../../testlab/behaviour.js';
 import { llmAvailable, llmName } from '../../testlab/llm.js';
 import type { RunRequest, Runner } from '../../testlab/runner.js';
+import { VOCABULARIES } from '../../testlab/vocabulary.js';
 
-export function testlabRoutes(router: Router, suite: Suite, runner: Runner): void {
+/** The suite is replaceable at runtime, so the routes hold the box rather than the suite. */
+export interface Lab {
+  suite: Suite;
+  generation: Generation;
+  regenerate: (seed: number, random: number) => Promise<Suite>;
+}
+
+export function testlabRoutes(router: Router, lab: Lab, runner: Runner): void {
+  const describe = (): Record<string, unknown> => ({
+    problems: lab.suite.problems.map((p) => ({ ...p, cases: lab.suite.ofProblem(p.id).length })),
+    // The expectations come too: the tab shows what a case wants before it runs.
+    cases: lab.suite.cases,
+    behaviours: BEHAVIOURS,
+    vocabularies: VOCABULARIES,
+    generation: lab.generation,
+    persona_caller: llmAvailable() ? llmName() : null,
+  });
+
   router
-    .get('/__testlab', () =>
-      ok({
-        problems: suite.problems.map((p) => ({ ...p, cases: suite.ofProblem(p.id).length })),
-        // The expectations come too: the tab shows what a case wants before it runs.
-        cases: suite.cases,
-        behaviours: BEHAVIOURS,
-        persona_caller: llmAvailable() ? llmName() : null,
-      }),
-    { public: true })
+    .get('/__testlab', () => ok(describe()), { public: true })
+    .post('/__testlab/suite', async ({ body }) => {
+      const parsed = await body();
+      const req = (parsed.ok ? (parsed.value ?? {}) : {}) as { seed?: number; random?: number };
+      const seed = Number.isFinite(req.seed) ? Number(req.seed) : lab.generation.seed + 1;
+      const random = Number.isFinite(req.random) ? Number(req.random) : lab.generation.random;
+      try {
+        await lab.regenerate(seed, Math.min(Math.max(0, random), 60));
+        return ok(describe());
+      } catch (err) {
+        return fail(409, String(err instanceof Error ? err.message : err));
+      }
+    }, { public: true })
     .get('/__testlab/runs', () => ok({ runs: runner.list() }), { public: true })
     .post('/__testlab/runs', async ({ body }) => {
       const parsed = await body();
@@ -39,6 +64,10 @@ export function testlabRoutes(router: Router, suite: Suite, runner: Runner): voi
     }, { public: true })
     .get('/__testlab/runs/:id', ({ params }) => {
       const run = runner.get(params.id!);
+      return run ? ok(run) : fail(404, `no run ${params.id}`);
+    }, { public: true })
+    .post('/__testlab/runs/:id/stop', ({ params }) => {
+      const run = runner.stop(params.id!);
       return run ? ok(run) : fail(404, `no run ${params.id}`);
     }, { public: true })
     .get('/__testlab/runs/:id/events', ({ params, req, res }) => {

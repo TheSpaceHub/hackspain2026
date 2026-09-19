@@ -10,6 +10,7 @@
 import type { Case } from '../mock/world/suite/types.js';
 import type { Behaviour } from './behaviour.js';
 import { chat, llmAvailable, type Message } from './llm.js';
+import type { Vocabulary } from './vocabulary.js';
 
 export interface Caller {
   readonly kind: 'script' | 'persona';
@@ -40,6 +41,7 @@ class PersonaCaller implements Caller {
   constructor(
     private readonly kase: Case,
     private readonly behaviour: Behaviour,
+    private readonly vocabulary: Vocabulary,
     private readonly fallback: Caller,
   ) {}
 
@@ -81,14 +83,15 @@ class PersonaCaller implements Caller {
       'You are not the receptionist and you never do their job for them: you do not know the',
       'clinic\'s doctors, sites, rules or free slots, and you accept whatever they tell you about them.',
       ...(this.behaviour.instructions === '' ? [] : ['', `How you are on the phone: ${this.behaviour.instructions}`]),
+      ...(this.vocabulary.instructions === '' ? [] : ['', `How you talk: ${this.vocabulary.instructions}`]),
       'When you have what you came for, or they have made it clear you cannot have it, say goodbye',
       'and then reply with exactly <hangup> on the turn after that.',
     ].join('\n');
   }
 }
 
-export function callerFor(kase: Case, mode: 'script' | 'persona', behaviour: Behaviour): Caller {
+export function callerFor(kase: Case, mode: 'script' | 'persona', behaviour: Behaviour, vocabulary: Vocabulary): Caller {
   const script = new ScriptCaller(kase.script);
   if (mode === 'script' || !llmAvailable()) return script;
-  return new PersonaCaller(kase, behaviour, script);
+  return new PersonaCaller(kase, behaviour, vocabulary, script);
 }

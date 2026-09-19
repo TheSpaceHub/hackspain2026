@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchRun, fetchRuns, fetchSuite, startRun, subscribeToRun } from '@/lib/testlab/client';
+import {
+  fetchRun,
+  fetchRuns,
+  fetchSuite,
+  regenerateSuite,
+  startRun,
+  stopRun,
+  subscribeToRun,
+} from '@/lib/testlab/client';
 import type { Run, RunRequest, RunSummary, SuiteResponse } from '@/lib/testlab/types';
 
 export interface TestLab {
@@ -11,6 +19,8 @@ export interface TestLab {
   running: boolean;
   select: (runId: string | null) => void;
   start: (req: RunRequest) => Promise<void>;
+  stop: (runId: string) => Promise<void>;
+  regenerate: (req: { seed?: number; random?: number }) => Promise<void>;
 }
 
 /** Results arrive one call at a time; re-reading the whole run keeps this honest and simple. */
@@ -94,5 +104,26 @@ export function useTestLab(): TestLab {
     [refreshRuns],
   );
 
-  return { suite, error, runs, run, running: run?.status === 'running', select, start };
+  const stop = useCallback(
+    async (runId: string) => {
+      try {
+        await stopRun(runId);
+        await refreshRun(runId);
+      } catch (err) {
+        setError(String(err));
+      }
+    },
+    [refreshRun],
+  );
+
+  const regenerate = useCallback(async (req: { seed?: number; random?: number }) => {
+    setError(null);
+    try {
+      setSuite(await regenerateSuite(req));
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  return { suite, error, runs, run, regenerate, running: run?.status === 'running', select, start, stop };
 }

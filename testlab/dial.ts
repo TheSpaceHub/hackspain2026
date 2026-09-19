@@ -13,6 +13,7 @@ import type { Case } from '../mock/world/suite/types.js';
 import { mix, SAMPLE_RATE, say, silence } from './audio.js';
 import type { Behaviour } from './behaviour.js';
 import { callerFor } from './caller.js';
+import type { Vocabulary } from './vocabulary.js';
 import type { AgentFeed, Turn } from './feed.js';
 
 const FRAME_SAMPLES = 160;
@@ -24,6 +25,7 @@ export interface DialOptions {
   kase: Case;
   mode: 'script' | 'persona';
   behaviour: Behaviour;
+  vocabulary: Vocabulary;
   feed: AgentFeed;
   outDir: string;
   /** Distinguishes the calls of a Switchboard burst from one another. */
@@ -41,6 +43,7 @@ export interface CallOutcome {
   clears: number;
   caller: 'script' | 'persona';
   behaviour: string;
+  vocabulary: string;
   caller_turns: string[];
   transcript: Turn[];
   wav_path: string | null;
@@ -68,7 +71,7 @@ export async function dial(opts: DialOptions): Promise<CallOutcome> {
   const callId = randomUUID();
   const streamSid = `MZ${randomUUID().replace(/-/g, '')}`.slice(0, 34);
   const fromNumber = kase.from_number;
-  const caller = callerFor(kase, opts.mode, behaviour);
+  const caller = callerFor(kase, opts.mode, behaviour, opts.vocabulary);
   const voice = {
     language: kase.language,
     sex: kase.persona.voice,
@@ -88,6 +91,7 @@ export async function dial(opts: DialOptions): Promise<CallOutcome> {
     clears: 0,
     caller: caller.kind,
     behaviour: behaviour.id,
+    vocabulary: opts.vocabulary.id,
     caller_turns: [],
     transcript: [],
     wav_path: null,

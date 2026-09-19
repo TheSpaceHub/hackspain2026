@@ -21,9 +21,12 @@ export interface Suite {
 }
 
 export function buildSuite(world: World): Suite {
-  const cases = [...bookingCases(world), ...recordCases(world), ...conversationCases(world)].sort(
-    (a, b) => order(a) - order(b) || a.id.localeCompare(b.id),
-  );
+  return suiteOf([...bookingCases(world), ...recordCases(world), ...conversationCases(world)]);
+}
+
+/** The same shape over cases from anywhere — the real clinic's, in mirror mode. */
+export function suiteOf(all: Case[]): Suite {
+  const cases = [...all].sort((a, b) => order(a) - order(b) || a.id.localeCompare(b.id));
   return {
     problems: PROBLEMS,
     cases,
