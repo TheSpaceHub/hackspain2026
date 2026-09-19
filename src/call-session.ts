@@ -12,6 +12,8 @@ import {
   missingForRegistration,
   readCallState,
   recordMatch,
+  saidTimes,
+  sameClock,
   type CallState,
 } from './call-state.js';
 import { createExtractor, DEFAULT_EXTRACT_TIMEOUT_MS, type Extractor } from './extract.js';
@@ -26,6 +28,7 @@ import {
 } from './guards.js';
 import { mulawToPcm16 } from './mulaw.js';
 import { callContext, clog } from './log.js';
+import { normalizeNationalId } from './normalize.js';
 import { attachBrief } from './patient-brief.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
@@ -299,6 +302,7 @@ export class CallSession {
     const state = this.#state;
     const open = state && !state.accepted ? state.quoted : [];
     if (state && open.length > 0) {
+      state.quoted_spoken = true;
       const offer = open
         .map((s) => `${speakTime(s.start_time)} with ${s.provider_name ?? s.provider_id} at ${siteName(this.#shared.catalogue, s.location_id)}`)
         .join(', or ');
@@ -392,8 +396,20 @@ export class CallSession {
     const at = new Date().toISOString();
     for (let i = this.#turnsWritten; i < turns.length; i++) {
       const turn = turns[i]!;
+      if (
+        this.#state &&
+        turn.role === 'assistant' &&
+        this.#state.quoted.length > 0 &&
+        !this.#state.quoted_spoken &&
+        saidTimes(turn.text).some((said) =>
+          this.#state!.quoted.some((slot) => sameClock(slot, said)),
+        )
+      ) {
+        this.#state.quoted_spoken = true;
+      }
       // Queued, not awaited: the agent is already answering this turn.
       if (turn.role !== 'assistant') {
+        if (this.#state) this.#state.last_caller_text = turn.text;
         const before = turns[i - 1];
         this.#extractor?.observe(
           turn.text,
@@ -501,7 +517,17 @@ export class CallSession {
       budget,
     );
 
-    const actions = this.#guard(this.#actionsFor(decided));
+    const guarded = this.#guard(this.#actionsFor(decided));
+    const actions = guarded.map((action) => {
+      if (action.action !== 'register') return action;
+      const nationalId = normalizeNationalId(action.national_id);
+      if (!action.national_id || nationalId.problem || !nationalId.value) {
+        this.#errors.push(`registration refused: invalid national_id "${action.national_id ?? ''}"`);
+        clog.warn(`[register] refused invalid national_id "${action.national_id ?? ''}"`);
+        return FLOOR_ACTION;
+      }
+      return { ...action, national_id: nationalId.value };
+    });
     const submitStartedAt = Date.now();
     let submissions: SubmitResult[] = [];
     if (this.#callId) {

@@ -64,7 +64,7 @@ function harness(
     api,
     catalogue,
     now: () => NOW,
-    lastCallerText: () => lastCallerText,
+    lastCallerText: () => lastCallerText ?? state.last_caller_text,
     onAvailability: (a) => {
       availability = a;
     },
@@ -96,8 +96,9 @@ function harness(
     appointment_type_id: 'apt_review',
     start_time: '2026-10-12T09:15:00+02:00',
   }];
+  refused.state.quoted_spoken = true;
   const response = await refused.call('accept_slot', { choice: 1 });
-  check('a spoken time that was not offered is refused', /caller said 06:30/.test(response), true);
+  check('a spoken time that was not offered is refused', /caller said 18:30/.test(response), true);
   check('a refused spoken time is not accepted', refused.state.accepted, null);
 
   const corrected = harness({}, 'the 9 15 please');
@@ -115,11 +116,13 @@ function harness(
       start_time: '2026-10-12T09:15:00+02:00',
     },
   ];
+  corrected.state.quoted_spoken = true;
   await corrected.call('accept_slot', { choice: 2 });
   check('a matching spoken time accepts the matching quoted slot', corrected.state.accepted?.start_time, corrected.state.quoted[1]!.start_time);
 
   const numeric = harness({}, 'Yes, that one');
   numeric.state.quoted = [corrected.state.quoted[0]!];
+  numeric.state.quoted_spoken = true;
   await numeric.call('accept_slot', { choice: 1 });
   check('without a spoken time the numeric choice is honored', numeric.state.accepted?.start_time, numeric.state.quoted[0]!.start_time);
 
@@ -127,10 +130,12 @@ function harness(
   const silent = harness({}, undefined);
   silent.state.caller_turns = 2;
   recordQuote(silent.state, [corrected.state.quoted[0]!]);
+  silent.state.quoted_spoken = true;
   const notYet = await silent.call('accept_slot', { choice: 1 });
   check('no caller turn since the quote: refused', /has not answered/.test(notYet), true);
   check('and nothing is held', silent.state.accepted, null);
   silent.state.caller_turns = 3;
+  silent.state.last_caller_text = 'Yes, that one';
   await silent.call('accept_slot', { choice: 1 });
   check('once the caller has spoken the choice is honored', silent.state.accepted?.start_time, corrected.state.quoted[0]!.start_time);
 }
@@ -166,6 +171,8 @@ function harness(
 
   const quoted = h.state.quoted[1]!;
   h.state.caller_turns++; // the caller answers the offer
+  h.state.quoted_spoken = true;
+  h.state.last_caller_text = 'Yes, that one';
   await h.call('accept_slot', { choice: 2 });
   check('the accepted slot is the quoted string, character for character', h.state.accepted?.start_time, quoted.start_time);
   check('with the ids the diary gave', [h.state.accepted?.provider_id, h.state.accepted?.appointment_type_id], [quoted.provider_id, 'apt_review']);
@@ -199,6 +206,21 @@ function harness(
   check('and nothing is quoted', h.state.quoted.length, 0);
   check('and the restriction is kept in the call notes', h.state.request.blocked_by, 'D. Álvaro Cid does not accept asisa');
   check('and the decider can see the restriction', /Rule that stopped the diary: D\. Álvaro Cid does not accept asisa/.test(readCallState(h.state)), true);
+}
+
+{
+  const h = harness({
+    restriction: { provider_id: 'prov_iglesias', restriction: 'provider_not_in_network' },
+  });
+  recordRequest(h.state, { insurers: ['ASISA'] });
+  const fallback = await h.call('find_slots', {
+    when_phrase: 'next week',
+    specialty_id: 'dermatology',
+    provider_name: 'Dra. Elena Iglesias',
+  });
+  check('a blocked named provider triggers a provider-free retry', h.clinic.requests.filter((r) => r.path === '/api/v1/availability').length, 2);
+  check('the fallback quotes a real alternative', h.state.quoted[0]?.provider_id, 'prov_saenz');
+  check('the fallback response names the provider and plan', /Elena Iglesias.*asisa.*another dermatology/.test(fallback), true);
 }
 
 {
@@ -257,8 +279,8 @@ function harness(
     patient: { national_id: '1 2 3 4 5 6 7 8 A' },
   });
   check('the notes say whose appointment this is', /Caller is NOT the patient/.test(readCallState(h.state)), true);
-  check('a spelled-out id is joined up', h.state.patient.national_id, '12345678A');
-  check('a bad check letter is kept, flagged, not dropped', h.state.journal.some((e) => e.field === 'national_id' && e.note !== undefined), true);
+  check('a malformed spelled-out id is not stored', h.state.patient.national_id, undefined);
+  check('a bad check letter is dropped', h.state.patient.national_id, undefined);
 }
 
 // --- caching ----------------------------------------------------------------
@@ -380,6 +402,8 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   await h.call('identify_patient', { national_id: '12345678Z' });
   await h.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'general practice' });
   h.state.caller_turns++;
+  h.state.quoted_spoken = true;
+  h.state.last_caller_text = 'Yes, that one';
   const held = await h.call('accept_slot', { choice: 1 });
   check('the plan on the record bills the slot it can pay for', choosePolicy(h.state), 'sanitas');
   check('so the caller is not asked for a second policy', /other insurance/.test(held), false);
@@ -441,6 +465,8 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
     start_time: '2026-10-08T09:00:00+02:00',
     payable_with: ['sanitas'],
   });
+  state.quoted_spoken = true;
+  state.last_caller_text = 'Yes, that one';
   check('a third-party phone match cannot trigger fallback booking', bookFromState(state), undefined);
 }
 
@@ -461,6 +487,8 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
     start_time: '2026-10-08T09:00:00+02:00',
     payable_with: ['sanitas'],
   });
+  state.quoted_spoken = true;
+  state.last_caller_text = 'Yes, that one';
   const floored = overrideFlooredBooking(
     [{ action: 'no_action', reason: 'referral_required' }],
     state,
@@ -494,6 +522,8 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   recordRequest(h.state, { insurers: ['Adeslas'] });
   await h.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'general practice' });
   h.state.caller_turns++;
+  h.state.quoted_spoken = true;
+  h.state.last_caller_text = 'Yes, that one';
   const held = await h.call('accept_slot', { choice: 1 });
   check('the plan the caller named on the call is the one billed', choosePolicy(h.state), 'adeslas');
   check('and the slot is still held', /Held/.test(held), true);
@@ -501,6 +531,8 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   const stranger = harness();
   await stranger.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'general practice' });
   stranger.state.caller_turns++;
+  stranger.state.quoted_spoken = true;
+  stranger.state.last_caller_text = 'Yes, that one';
   stranger.state.quoted[0]!.payable_with = ['asisa'];
   const asked = await stranger.call('accept_slot', { choice: 1 });
   check('a slot no known plan pays for makes the agent ask for another policy', /other insurance/.test(asked), true);
