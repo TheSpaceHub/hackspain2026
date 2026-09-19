@@ -1,0 +1,228 @@
+/**
+ * The caller's voice, and the room they are calling from.
+ *
+ * Deepgram Aura for the words when there is a key, espeak-ng offline (or `say`
+ * on macOS) when there is not: espeak's buzz came back through the agent's own
+ * transcription as nonsense, which read as a caller talking gibberish rather
+ * than as the recogniser failing. Then a procedural bed for the noise cases —
+ * a street, a television, a room, a car — mixed in at a given signal-to-noise
+ * ratio so problem 12 is a real 5 dB call and not a label.
+ */
+import { execFile } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+import { readWav, toMono } from '../test/wav.js';
+import type { AudioBed, Background } from '../mock/world/suite/types.js';
+
+const exec = promisify(execFile);
+
+export const SAMPLE_RATE = 8000;
+
+/** espeak-ng speaks es and ca as well, which is what problem 11 needs. */
+const VOICES: Record<string, Record<Accent, { male: string; female: string }>> = {
+  en: {
+    local: { male: 'en-us', female: 'en-us+f3' },
+    far: { male: 'en-gb-scotland', female: 'en-gb-scotland+f3' },
+  },
+  es: {
+    local: { male: 'es', female: 'es+f3' },
+    far: { male: 'es-419', female: 'es-419+f3' },
+  },
+  ca: {
+    local: { male: 'ca', female: 'ca+f3' },
+    far: { male: 'ca', female: 'ca+f3' },
+  },
+};
+
+let warnedSilence = false;
+let warnedAura = false;
+
+/**
+ * Aura has no Catalan, so a Catalan line is spoken by a Peninsular Spanish voice.
+ *
+ * Each language also has an away-from-home accent — a clinic in Spain takes calls
+ * from Latin America, and a recogniser tuned to Peninsular Spanish is a fair thing
+ * to test. `local` is the accent the agent is built for; `far` is the one it is not.
+ */
+const AURA: Record<string, Record<Accent, { male: string; female: string }>> = {
+  en: {
+    local: { male: 'aura-2-arcas-en', female: 'aura-2-thalia-en' },
+    far: { male: 'aura-2-draco-en', female: 'aura-2-amalthea-en' },
+  },
+  es: {
+    local: { male: 'aura-2-alvaro-es', female: 'aura-2-diana-es' },
+    far: { male: 'aura-2-luciano-es', female: 'aura-2-antonia-es' },
+  },
+  ca: {
+    local: { male: 'aura-2-alvaro-es', female: 'aura-2-diana-es' },
+    far: { male: 'aura-2-aquila-es', female: 'aura-2-celeste-es' },
+  },
+};
+
+/**
+ * Deepgram Aura, raw 8 kHz PCM, the same rate the socket wants. Pace is done by
+ * resampling — clamped, because past a point it stops sounding like a person.
+ */
+async function aura(line: string, voice: Voice, key: string): Promise<Int16Array> {
+  const v = (AURA[voice.language] ?? AURA.en!)[voice.accent ?? 'local'];
+  const model = voice.sex === 'female' ? v.female : v.male;
+  const url = `https://api.deepgram.com/v1/speak?model=${model}&encoding=linear16&sample_rate=${SAMPLE_RATE}&container=none`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Token ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: line }),
+  });
+  if (!res.ok) throw new Error(`deepgram speak ${res.status}: ${await res.text()}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const pcm = new Int16Array(buf.length >> 1);
+  for (let i = 0; i < pcm.length; i++) pcm[i] = buf.readInt16LE(i * 2);
+  return amplify(pace(pcm, (voice.wpm ?? 150) / 150), voice.gain ?? 1);
+}
+
+/** Speeds a line up or slows it down by resampling; 1 leaves it alone. */
+function pace(pcm: Int16Array, rate: number): Int16Array {
+  const r = Math.max(0.8, Math.min(1.25, rate));
+  if (Math.abs(r - 1) < 0.02) return pcm;
+  const out = new Int16Array(Math.round(pcm.length / r));
+  for (let i = 0; i < out.length; i++) {
+    const at = i * r;
+    const j = Math.floor(at);
+    const next = pcm[Math.min(j + 1, pcm.length - 1)] ?? 0;
+    out[i] = Math.round((pcm[j] ?? 0) + (next - (pcm[j] ?? 0)) * (at - j));
+  }
+  return out;
+}
+
+/** Where the caller learnt to speak: the agent's own accent, or one from further off. */
+export type Accent = 'local' | 'far';
+
+export interface Voice {
+  language: string;
+  sex: 'male' | 'female';
+  accent?: Accent;
+  /** Words per minute; 150 is ordinary speech. */
+  wpm?: number;
+  /** Linear gain, under 1 for a caller who is hard to hear. */
+  gain?: number;
+}
+
+/** One line of speech at 8 kHz. Falls back to plausible silence when nothing can speak. */
+export async function say(line: string, voice: Voice): Promise<Int16Array> {
+  const key = process.env.DEEPGRAM_API_KEY;
+  if (key !== undefined && key !== '') {
+    try {
+      return await aura(line, voice, key);
+    } catch (err) {
+      if (!warnedAura) {
+        warnedAura = true;
+        console.warn(`[testlab] Aura unavailable, falling back to espeak: ${String(err)}`);
+      }
+    }
+  }
+  const dir = await mkdtemp(join(tmpdir(), 'testlab-tts-'));
+  const wav = join(dir, 'line.wav');
+  try {
+    if (process.platform === 'darwin') {
+      await exec('say', ['-r', String(voice.wpm ?? 150), '-o', wav, '--file-format=WAVE', '--data-format=LEI16@8000', line]);
+      return amplify(toMono(await readWav(wav), SAMPLE_RATE), voice.gain ?? 1);
+    }
+    const v = (VOICES[voice.language] ?? VOICES.en!)[voice.accent ?? 'local'];
+    const args = ['-v', voice.sex === 'female' ? v.female : v.male, '-s', String(voice.wpm ?? 150), '-w', wav, line];
+    await exec('espeak-ng', args);
+    return amplify(toMono(await readWav(wav), SAMPLE_RATE), voice.gain ?? 1);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    if (!warnedSilence) {
+      warnedSilence = true;
+      console.warn('[testlab] espeak-ng not found — callers will be silent (apt install espeak-ng)');
+    }
+    return new Int16Array(Math.round(SAMPLE_RATE * (1.5 + line.length / 15)));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+function amplify(pcm: Int16Array, gain: number): Int16Array {
+  if (gain === 1) return pcm;
+  const out = new Int16Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) out[i] = Math.max(-32768, Math.min(32767, Math.round(pcm[i]! * gain)));
+  return out;
+}
+
+/** Silence of a given length, so a pause is on the wire rather than a gap in it. */
+export function silence(ms: number): Int16Array {
+  return new Int16Array(Math.round((SAMPLE_RATE * ms) / 1000));
+}
+
+/** Deterministic noise, so a case that failed under a bed fails under the same one again. */
+function rng(seed: number): () => number {
+  let s = seed >>> 0 || 1;
+  return () => {
+    s ^= s << 13;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    return ((s >>> 0) / 0xffffffff) * 2 - 1;
+  };
+}
+
+/**
+ * Each bed is white noise through a one-pole filter plus whatever gives it away:
+ * traffic swells on a street, speech-band babble from a television, a hum in a car.
+ */
+function bed(kind: Background, samples: number, seed: number): Float32Array {
+  const out = new Float32Array(samples);
+  if (kind === 'silence') return out;
+  const rand = rng(seed);
+  let low = 0;
+  let band = 0;
+  for (let i = 0; i < samples; i++) {
+    const t = i / SAMPLE_RATE;
+    const white = rand();
+    low = low * 0.95 + white * 0.05;
+    band = band * 0.6 + (white - low) * 0.4;
+    if (kind === 'street') {
+      // Rumble, with a vehicle passing every few seconds.
+      const pass = Math.exp(-(((t % 4.5) - 2) ** 2) / 0.35);
+      out[i] = low * 6 + band * 0.4 + pass * white * 0.8;
+    } else if (kind === 'television') {
+      // Babble: speech-band noise with sentence-length envelopes.
+      const envelope = 0.4 + 0.6 * Math.abs(Math.sin(2 * Math.PI * 0.35 * t));
+      out[i] = band * envelope * 1.6 + low * 1.5;
+    } else if (kind === 'room') {
+      out[i] = low * 3 + band * 0.6;
+    } else {
+      // A car: engine hum, road noise, and the indicator.
+      const hum = Math.sin(2 * Math.PI * 92 * t) * 0.35 + Math.sin(2 * Math.PI * 47 * t) * 0.25;
+      const tick = t % 1.4 < 0.03 ? 0.5 * white : 0;
+      out[i] = hum + low * 4 + band * 0.3 + tick;
+    }
+  }
+  return out;
+}
+
+function rms(values: ArrayLike<number>): number {
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) sum += Number(values[i]) ** 2;
+  return Math.sqrt(sum / Math.max(1, values.length));
+}
+
+/**
+ * Mixes the bed under the speech at the case's SNR, measured over the speech itself
+ * so the ratio means what it says whatever the voice came out at.
+ */
+export function mix(speech: Int16Array, audio: AudioBed, seed: number): Int16Array {
+  if (audio.background === 'silence' || audio.signal_to_noise_db === null) return speech;
+  const noise = bed(audio.background, speech.length, seed);
+  const speechRms = rms(speech);
+  const noiseRms = rms(noise) || 1;
+  const wanted = speechRms / 10 ** (audio.signal_to_noise_db / 20);
+  const gain = wanted / noiseRms;
+  const out = new Int16Array(speech.length);
+  for (let i = 0; i < speech.length; i++) {
+    const v = speech[i]! + noise[i]! * gain;
+    out[i] = Math.max(-32768, Math.min(32767, Math.round(v)));
+  }
+  return out;
+}

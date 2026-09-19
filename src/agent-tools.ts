@@ -38,7 +38,7 @@ import {
   type QuotedSlot,
 } from './call-state.js';
 import { attachBrief, describeBrief } from './patient-brief.js';
-import { geocodeMadrid, rankSites } from './nearest-site.js';
+import { geocodeMadrid, rankSites, type Placed } from './nearest-site.js';
 import { resolveWhen } from './when.js';
 import { clog } from './log.js';
 
@@ -57,6 +57,8 @@ export interface ToolDeps {
    * refusal to say why. Only the local sim provides one (see sim-holds.ts).
    */
   hold?: (slot: QuotedSlot) => Promise<string | null>;
+  /** The address geocoder. Overridable so tests place an address without a network. */
+  geocode?: (address: string) => Promise<Placed | null>;
 }
 
 /**
@@ -306,7 +308,11 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         const matching = wanted
           ? availability.slots.filter((s) => inPart(s.start_time, wanted))
           : availability.slots;
-        const inOrder = [...(matching.length > 0 ? matching : availability.slots)].sort((a, b) =>
+        // Nothing in the half of the day they asked for is worth saying out loud: a
+        // caller who wanted the afternoon and hears ten forty-five thinks they were
+        // ignored, not accommodated.
+        const elsewhere = wanted !== undefined && matching.length === 0;
+        const inOrder = [...(elsewhere ? availability.slots : matching)].sort((a, b) =>
           a.start_time.localeCompare(b.start_time),
         );
         // Someone who asked for the soonest gets the soonest, not a menu: read three out
@@ -326,16 +332,19 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         recordQuote(state, quoted);
 
         const moved = window.adjusted_from ? `The day they asked for is closed, so this is from ${window.adjusted_from}. ` : '';
-        const lines = quoted.map(
-          (s, i) =>
-            `${i + 1}. ${speakTime(s.start_time)} with ${s.provider_name ?? s.provider_id} at ${siteName(catalogue, s.location_id)}`,
-        );
+        const partNote = elsewhere ? `Nothing in the ${wanted} that day, so say so before you offer these. ` : '';
+        // The warning is a sentence the model forgets two turns later; the half of the
+        // day rides on each time instead, so a slot read back out is still labelled.
+        const lines = quoted.map((s, i) => {
+          const half = elsewhere ? ` (${inPart(s.start_time, 'morning') ? 'morning' : 'afternoon'})` : '';
+          return `${i + 1}. ${speakTime(s.start_time)}${half} with ${s.provider_name ?? s.provider_id} at ${siteName(catalogue, s.location_id)}`;
+        });
         const soonestIntro = restrictionNote
           ? `The soonest with another ${alternateSpecialtyLabel(namedProvider?.specialty_name ?? specialty ?? 'doctor')} is:`
           : 'The soonest there is:';
         return restrictionNote + (window.earliest
-          ? `${moved}${soonestIntro} ${lines[0]}. Offer that one and no other. When they say yes, call accept_slot. Only if they turn it down, ask which day would suit and look again.`
-          : `${moved}Offer these, and nothing else: ${lines.join('; ')}. When they pick one, call accept_slot.`) + specialtyNote;
+          ? `${moved}${partNote}${soonestIntro} ${lines[0]}. Offer that one and no other. When they say yes, call accept_slot. Only if they turn it down, ask which day would suit and look again.`
+          : `${moved}${partNote}Offer these, and nothing else: ${lines.join('; ')}. When they pick one, call accept_slot.`) + specialtyNote;
       },
     }),
 
@@ -428,25 +437,123 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
     }),
 
     nearest_site: llm.tool({
-      description: 'Which of the clinic\'s sites is closest to an address the caller gives you.',
+      description:
+        'Which of the clinic\'s sites is closest to an address the caller gives you, and the soonest appointment there. Pass their words for the day too whenever they named one.',
       parameters: z.object({
-        address: z.string().describe('The street address or neighbourhood the caller named'),
+        address: z.string().describe('The street address the caller named, door number and all'),
         specialty_id: z.string().optional().describe('Only rank sites that offer this'),
+        when_phrase: z
+          .string()
+          .optional()
+          .describe('Their words for when they want to come, e.g. "on Thursday" — leave out if they have not said'),
       }),
       execute: async (args) => {
         if (!catalogue) return 'Cannot check that from here. Take the request and let the clinic come back to them.';
         const address = real(args.address);
         if (address === undefined || address.split(/\s+/).length < 2) {
-          return 'That is not an address. Ask them which street or neighbourhood they are in before calling this again.';
+          return 'That is not an address. Ask them which street and number they are at before calling this again.';
         }
-        const origin = await geocodeMadrid(address);
-        if (!origin) return 'Could not place that address. Ask which part of Madrid they are in.';
-        const ranked = rankSites(catalogue, origin, {
-          specialty_id: resolve(catalogue, args.specialty_id, (c, v) => specialtyByName(c, v)?.id),
-        });
+        const request = state.request;
+        const specialty = resolve(
+          catalogue,
+          real(args.specialty_id) ?? request.specialty_id,
+          (c, v) => specialtyByName(c, v)?.id,
+        );
+        const whenPhrase = real(args.when_phrase) ?? request.when_phrase;
+        const window = whenPhrase
+          ? resolveWhen(whenPhrase, now(), {
+              closureDays: catalogue.calendar?.closure_days,
+              maxSpanDays: catalogue.calendar?.max_span_days ?? undefined,
+            })
+          : null;
+
+        // The geocode and the diary are two strangers to each other, and the caller is
+        // listening to both: they go out together, and the day's slots cost nothing on
+        // top of placing the address. A diary that fails still leaves the distances.
+        const plans = knownPlanIds(catalogue, request.insurers);
+        const geocode = deps.geocode ?? ((query: string) => geocodeMadrid(query));
+        let diaryFailed = false;
+        const [origin, availability] = await Promise.all([
+          geocode(address),
+          window && (specialty || request.provider_id)
+            ? api
+                .findAvailability({
+                  date_from: window.date_from,
+                  date_to: window.date_to,
+                  provider_id: request.provider_id,
+                  specialty_id: specialty,
+                  patient_id: state.matched?.patient_id,
+                  insurer: plans.length > 0 ? plans : undefined,
+                })
+                .catch((err: unknown) => {
+                  clog.warn(`[nearest_site] diary: ${String(err)}`);
+                  diaryFailed = true;
+                  return null;
+                })
+            : null,
+        ]);
+
+        if (!origin) return 'Could not place that address. Ask which street and number they are at.';
+        // The geocoder answers a street it half-recognised with a real address somewhere
+        // else in the city, and a confident wrong coordinate ranks the sites wrongly.
+        if (origin.partial) {
+          return `That address only half-matched: the closest thing to it is ${origin.address}. Read that back and ask whether it is right before you rank anything.`;
+        }
+        const ranked = rankSites(catalogue, origin, { specialty_id: specialty });
         if (ranked.length === 0) return 'No site offers that. Say so plainly.';
-        const [first] = ranked;
-        return `Nearest is ${first!.name}, about ${first!.km} kilometres away.`;
+        if (availability) deps.onAvailability?.(availability);
+
+        const three = ranked.slice(0, 3);
+        const list = three.map((s) => `${s.name} about ${s.km} km`).join(', ');
+        const placed = origin.exact ? '' : ` That address only placed to the street, not the number, so say "about".`;
+        const distances = `Straight-line from ${origin.address}: ${list}.${placed}`;
+
+        // The nearest site is the answer only if they can be seen there: one that has
+        // nobody free on the day they asked for is a closer wrong answer.
+        // A day they asked for the afternoon of is not answered with nine in the morning.
+        const wanted = window?.part_of_day;
+        const open = (availability?.slots ?? []).filter((s) => !wanted || inPart(s.start_time, wanted));
+        const soonest = three
+          .map((site) => ({
+            site,
+            slot: open
+              .filter((s) => s.location_id === site.location_id)
+              .sort((a, b) => a.start_time.localeCompare(b.start_time))[0],
+          }))
+          .find((candidate) => candidate.slot !== undefined);
+
+        if (!soonest?.slot) {
+          // Three states the caller hears differently: the diary never answered, the
+          // diary refused on a standing rule, and the diary is simply full.
+          if (diaryFailed) {
+            return `${distances} The diary did not answer, so nothing is known about that day — say you will check and call find_slots again.`;
+          }
+          const blocked = (availability?.blocked ?? []).map((entry) => entry.restriction).join('; ');
+          if (blocked) {
+            recordRequest(state, { blocked_by: blocked });
+            clog.warn(`[nearest_site] blocked: ${blocked}`);
+            return `${distances} Nothing bookable at any of them: ${blocked}. Tell the caller plainly and do not offer a time.`;
+          }
+          const nothing = window
+            ? ` Nothing free at any of them then — offer to look at another day.`
+            : ` Ask which day suits and call find_slots.`;
+          return `${distances}${nothing}`;
+        }
+        if (state.request.blocked_by) retract(state, 'blocked_by');
+
+        const slot = soonest.slot;
+        recordRequest(state, { location_id: slot.location_id });
+        recordQuote(state, [
+          {
+            provider_id: slot.provider_id,
+            provider_name: slot.provider_name ?? undefined,
+            location_id: slot.location_id,
+            appointment_type_id: slot.appointment_type_id,
+            start_time: slot.start_time,
+            payable_with: slot.payable_with ?? undefined,
+          },
+        ]);
+        return `${distances} The nearest that can see them is ${soonest.site.name}: ${speakTime(slot.start_time)} with ${slot.provider_name ?? slot.provider_id}. Offer that one and no other. When they say yes, call accept_slot.`;
       },
     }),
 

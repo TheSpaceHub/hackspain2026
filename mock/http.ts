@@ -6,6 +6,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export interface Ctx {
   req: IncomingMessage;
+  /** Only for a handler that streams: writing to it means no Reply is sent. */
+  res: ServerResponse;
   url: URL;
   params: Record<string, string>;
   query: URLSearchParams;
@@ -18,7 +20,10 @@ export interface Reply {
   body: unknown;
 }
 
-export type Handler = (ctx: Ctx) => Reply | Promise<Reply>;
+/** A handler that has taken the response over itself: an event stream, say. */
+export const STREAMING = Symbol('streaming');
+
+export type Handler = (ctx: Ctx) => Reply | typeof STREAMING | Promise<Reply | typeof STREAMING>;
 
 interface Route {
   method: string;
@@ -54,6 +59,12 @@ export class Router {
       })}/?$`,
     );
     this.#routes.push({ method, pattern, keys, handler, public: opts.public ?? false });
+    return this;
+  }
+
+  /** For a route no path pattern describes — everything under a prefix, say. */
+  addPattern(method: string, pattern: RegExp, handler: Handler, opts: { public?: boolean } = {}): this {
+    this.#routes.push({ method, pattern, keys: [], handler, public: opts.public ?? false });
     return this;
   }
 
@@ -102,6 +113,7 @@ export class Router {
     let cached: Awaited<ReturnType<Ctx['body']>> | undefined;
     const ctx: Ctx = {
       req,
+      res,
       url,
       params,
       query: url.searchParams,
@@ -118,7 +130,8 @@ export class Router {
     };
 
     try {
-      send(await route.handler(ctx));
+      const reply = await route.handler(ctx);
+      if (reply !== STREAMING) send(reply);
     } catch (err) {
       console.error(`[mock] ${req.method} ${url.pathname} failed`, err);
       send(fail(500, 'Internal Server Error'));
