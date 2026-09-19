@@ -93,6 +93,8 @@ export interface CallState {
   last_caller_text?: string;
   accepted: QuotedSlot | null;
   phone_match_rejected?: string;
+  /** Doctor names (folded) the caller has already been asked to spell. */
+  spelling_asked: string[];
   rejected: Partial<Record<PatientField, { spoken: string; problem: string }>>;
   /** Every write, in order, including the ones that were later retracted. */
   journal: { at: string; field: string; value: string | null; note?: string }[];
@@ -110,6 +112,7 @@ export function createCallState(callId: string, fromNumber?: string): CallState 
     turns_seen: 0,
     caller_turns: 0,
     accepted: null,
+    spelling_asked: [],
     rejected: {},
     journal: [],
   };
@@ -324,18 +327,34 @@ const HEDGE_WORDS = [
   'but', 'instead', 'rather', 'other', 'different', 'another', 'no', 'not', "can't",
   'cannot', 'change', 'actually', 'what about', 'could i', 'is there',
 ];
+/** Hedges that, in a question after a clear yes, ask about the booking rather than reopen it. */
+const SOFT_HEDGES = ['change', 'could i', 'can i', 'is there'];
 
 /** Classify the caller's last turn without treating surprise or small talk as consent. */
 export function callerAccepted(text: string): 'yes' | 'no' | 'unclear' {
   const normalized = text.toLowerCase().replace(/[’]/g, "'");
-  const has = (token: string): boolean => {
-    const pattern = token.includes(' ')
-      ? new RegExp(`\\b${token.replace(/ /g, '\\s+')}\\b`, 'i')
-      : new RegExp(`\\b${token.replace(/[?]/g, '\\?')}\\b`, 'i');
-    return pattern.test(normalized);
-  };
-  if (HEDGE_WORDS.some(has)) return 'no';
-  if (ACCEPTANCE_WORDS.some(has)) return 'yes';
+  // "Yes, that's fine. Could I change it later if I had to?" is a yes with a question
+  // after it; "yes, but could I have it at Norte?" is a counter-offer. The hedge only
+  // counts against a yes when it shares a sentence with it, or is not a question.
+  let accepted = false;
+  for (const raw of normalized.split(/(?<=[.!?])\s+/)) {
+    const sentence = raw.trim();
+    if (sentence === '') continue;
+    const test = (token: string): boolean => {
+      const pattern = token.includes(' ')
+        ? new RegExp(`\\b${token.replace(/ /g, '\\s+')}\\b`, 'i')
+        : new RegExp(`\\b${token.replace(/[?]/g, '\\?')}\\b`, 'i');
+      return pattern.test(sentence);
+    };
+    if (HEDGE_WORDS.some(test)) {
+      const question = /\?$/.test(sentence) || /^(?:and |um |uh |so )*(?:if |could i|can i|is it|would it|will i|do i)/.test(sentence);
+      const counterOffer = HEDGE_WORDS.filter((word) => !SOFT_HEDGES.includes(word)).some(test);
+      if (accepted && question && !counterOffer) continue;
+      return 'no';
+    }
+    if (ACCEPTANCE_WORDS.some(test)) accepted = true;
+  }
+  if (accepted) return 'yes';
   return /\b(?:take|choose|pick)\s+(?:the\s+)?(?:first|second|third|last|latest)\s+one\b/.test(normalized)
     ? 'yes'
     : 'unclear';

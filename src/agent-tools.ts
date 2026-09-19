@@ -42,6 +42,7 @@ import { attachBrief, describeBrief } from './patient-brief.js';
 import { geocodeMadrid, rankSites } from './nearest-site.js';
 import { resolveWhen } from './when.js';
 import { clog } from './log.js';
+import { fold } from './fuzzy.js';
 
 export interface ToolDeps {
   state: CallState;
@@ -136,10 +137,31 @@ function resolve(
  * A doctor's name that is not one unmistakable match is never resolved here: the agent
  * asks the caller to spell it. The nearest surnames go along so it can offer them.
  */
-function spellDoctor(catalogue: Catalogue, spoken: string, found: Catalogue['providers']): string {
+function spellDoctor(
+  state: CallState,
+  catalogue: Catalogue,
+  spoken: string,
+  found: Catalogue['providers'],
+  specialtyId?: string,
+): string {
   const candidates = found.length > 0 ? found : providersByName(catalogue, spoken, true);
   const names = candidates.map((p) => `${p.name} (${p.specialty_name ?? 'unknown'})`).join(', ');
-  return `"${spoken}" is not a clear match for one doctor${names ? `; it could be ${names}` : ''}. Ask the caller to spell the surname letter by letter and read it back, then look again. Do not pick one, and do not say we have no such doctor.`;
+  const key = fold(spoken);
+  if (!state.spelling_asked.includes(key)) {
+    state.spelling_asked.push(key);
+    return `"${spoken}" is not a clear match for one doctor${names ? `; it could be ${names}` : ''}. Ask the caller to spell the surname letter by letter and read it back, then look again. Do not pick one, and do not say we have no such doctor.`;
+  }
+  if (found.length > 1) {
+    return `"${spoken}" still fits more than one doctor: ${names}. Do not ask for the spelling again — name them and ask which one the caller means.`;
+  }
+  // Spelled once already and still nobody: the clinic has no such doctor. Say so and
+  // offer the real ones, rather than asking for the spelling a second time.
+  const pool = catalogue.providers.filter((p) => specialtyId === undefined || p.specialty_id === specialtyId);
+  const offer = (pool.length > 0 ? pool : catalogue.providers)
+    .map((p) => `${p.name} (${p.specialty_name ?? 'unknown'}, ${p.location_names.join('/') || 'unknown site'})`)
+    .join('; ');
+  const dept = pool.length > 0 && specialtyId !== undefined ? pool[0]!.specialty_name ?? 'that department' : 'the clinic';
+  return `The caller has already spelled "${spoken}" and it is nobody on the clinic's list${names ? ` (nearest: ${names})` : ''}. Do not ask them to spell it again. Tell them plainly there is no Dr ${spoken} at Clínica Arenal, name the doctors of ${dept} — ${offer} — and ask whether one of them will do. If they only want Dr ${spoken}, say you are sorry you cannot help with that and end the call; do not book anyone else.`;
 }
 
 /** Plans the clinic actually sells. A misheard insurer is dropped, not priced against. */
@@ -238,7 +260,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         let namedProvider: Catalogue['providers'][number] | undefined;
         if (args.provider_name && catalogue) {
           const found = providersByName(catalogue, args.provider_name);
-          if (found.length !== 1) return spellDoctor(catalogue, args.provider_name, found);
+          if (found.length !== 1) return spellDoctor(state, catalogue, args.provider_name, found, specialty);
           if (found.length === 1) {
             namedProvider = found[0]!;
             providerId = namedProvider.id;
@@ -512,7 +534,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         if (!catalogue) return 'Cannot check that from here. Tell the caller the clinic will confirm.';
         if (args.doctor_name) {
           const found = providersByName(catalogue, args.doctor_name);
-          if (found.length !== 1) return spellDoctor(catalogue, args.doctor_name, found);
+          if (found.length !== 1) return spellDoctor(state, catalogue, args.doctor_name, found, state.request.specialty_id);
           return found
             .map(
               (p) =>

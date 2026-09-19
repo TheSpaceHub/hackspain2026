@@ -316,6 +316,13 @@ function harness(
   check('a doctor is described off the catalogue', /physiotherapy/.test(doctor), true);
   const garbled = await h.call('clinic_fact', { doctor_name: 'House' });
   check('a garbled doctor name asks for the spelling, never denies', /spell the surname/.test(garbled) && !/No doctor of that name/.test(garbled), true);
+  // Patricia spelled "Fuentes" and was asked to spell it twelve times: once spelled, a
+  // name that is still nobody is said to be nobody, with the department's real doctors.
+  const spelled = await h.call('find_slots', { when_phrase: 'tomorrow', provider_name: 'House', specialty_id: 'spec_gp' });
+  check('the second time the name is unknown it is not a spelling request', /Do not ask them to spell it again/.test(spelled) && /no Dr House/.test(spelled), true);
+  check('and the department\'s doctors are offered instead', /Marta Sáez/.test(spelled), true);
+  const again = await h.call('clinic_fact', { doctor_name: 'House' });
+  check('clinic_fact agrees', /no Dr House/.test(again), true);
   check('a site closed that day says so', /closed that day/.test(await h.call('clinic_fact', { location_id: 'loc_norte', date: '2026-10-10' })), true);
 }
 

@@ -240,6 +240,9 @@ check('affirmative time sentence is accepted', callerAccepted('Monday at 9 30 AM
 check('surprise is unclear', callerAccepted('Oh,'), 'unclear');
 check('greeting is unclear', callerAccepted('Hello?'), 'unclear');
 check('redirect after yes is a refusal', callerAccepted('Yes. But could I have it at Norte?'), 'no');
+check('a question about changing it later is still a yes', callerAccepted('Oh, great. Yes. Monday at 10 15 AM is fine. If I needed to, could I change it later?'), 'yes');
+check('and so is a trailing "and, um, could I change it?"', callerAccepted('Yes. That works for me. And, um, could I change it later if I had to?'), 'yes');
+check('yes but change to another day is a refusal', callerAccepted('Yes. Could I change it to another day though?'), 'no');
 check('explicit no is a refusal', callerAccepted('No. I need a dermatologist who takes DKV'), 'no');
 check('okay is accepted', callerAccepted('Okay'), 'yes');
 check('yeah go on is accepted', callerAccepted('Yeah. Go on.'), 'yes');
