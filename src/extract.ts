@@ -13,6 +13,7 @@
 import { z } from 'zod';
 import {
   contradictsMatch,
+  callerNameMatchesPatient,
   recordPatientField,
   recordMatch,
   recordRequest,
@@ -82,11 +83,24 @@ Schema: {"patient":{"given_name","first_surname","second_surname","national_id",
 
 /** Placeholders the small models reach for rather than leaving a key out. */
 const PLACEHOLDERS = new Set(['unknown', 'n/a', 'na', 'none', 'null', 'undefined', '', 'not provided', 'not given']);
+const RELATIONSHIPS = new Set([
+  'mother', 'father', 'parent', 'son', 'daughter', 'child', 'wife', 'husband',
+  'partner', 'spouse', 'carer', 'guardian', 'brother', 'sister', 'grandmother',
+  'grandfather', 'friend', 'madre', 'padre', 'hijo', 'hija', 'esposo', 'esposa',
+  'pareja', 'cuidador', 'tutor', 'hermano', 'hermana', 'abuelo', 'abuela',
+]);
 
 function real(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return PLACEHOLDERS.has(trimmed.toLowerCase()) ? undefined : trimmed || undefined;
+}
+
+function relationship(value: unknown): string | undefined {
+  const valueReal = real(value);
+  if (!valueReal) return undefined;
+  const folded = valueReal.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  return RELATIONSHIPS.has(folded) ? valueReal : undefined;
 }
 
 /** Injectable so the tests never touch the network. */
@@ -324,12 +338,18 @@ export function applyPatch(state: CallState, patch: ExtractedPatch, heard?: stri
   if (Object.keys(changed).length > 0) recordRequest(state, changed);
 
   if (patch.caller_is_patient !== undefined) {
-    const caller = { name: real(patch.caller_name), relationship: real(patch.relationship) };
+    const caller = { name: real(patch.caller_name), relationship: relationship(patch.relationship) };
     const unchanged =
       state.caller_is_patient === patch.caller_is_patient &&
       caller.name === undefined &&
       caller.relationship === undefined;
-    if (!unchanged) recordThirdParty(state, patch.caller_is_patient, caller);
+    if (!unchanged) {
+      if (patch.caller_is_patient === false && (caller.relationship === undefined || callerNameMatchesPatient(state, caller.name))) {
+        clog.warn('[extract] ignored caller_is_patient=false: no relationship / caller is the patient');
+      } else {
+        recordThirdParty(state, patch.caller_is_patient, caller);
+      }
+    }
   }
 }
 
