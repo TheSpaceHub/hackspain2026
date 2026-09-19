@@ -322,6 +322,11 @@ export class CallSession {
     this.#lastAgentQuestion = asked.length > 0 ? asked[asked.length - 1] : undefined;
   }
 
+  /** 12 s, then 14, 16, ...: each unanswered nudge gives the caller a little longer. */
+  #silenceWait(): number {
+    return SILENCE_NUDGE_MS + this.#nudges * 2_000;
+  }
+
   #clearSilenceTimer(): void {
     if (this.#silenceTimer) clearTimeout(this.#silenceTimer);
     this.#silenceTimer = null;
@@ -339,7 +344,7 @@ export class CallSession {
     this.#silenceTimer = setTimeout(() => {
       this.#silenceTimer = null;
       void this.#handleSilence();
-    }, SILENCE_NUDGE_MS);
+    }, this.#silenceWait());
   }
 
   async #handleSilence(): Promise<void> {
@@ -353,7 +358,7 @@ export class CallSession {
       ) return;
 
       this.#nudges++;
-      clog.info(`[silence] no caller speech for ${SILENCE_NUDGE_MS / 1000}s · nudge ${this.#nudges}`);
+      clog.info(`[silence] no caller speech for ${this.#silenceWait() / 1000 - 2}s · nudge ${this.#nudges}`);
       // Fixed text, not a model turn: asked to "repeat the offer so they can say yes",
       // the model called accept_slot on the caller's behalf and booked ten silent calls.
       // We never hang up on silence: some callers take twenty seconds to answer; the

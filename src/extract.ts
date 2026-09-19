@@ -345,7 +345,8 @@ export function applyPatch(state: CallState, patch: ExtractedPatch, heard?: stri
   const given = real(patch.patient?.given_name);
   const surname = real(patch.patient?.first_surname);
   const candidate = [given, surname].filter(Boolean).join(' ');
-  const doctorName = candidate ? providerName(candidate) ?? (surname ? providerName(surname) : undefined) : undefined;
+  // Full name only: plenty of patients share a surname with one of our doctors.
+  const doctorName = given && surname ? providerName(candidate) : undefined;
   if (doctorName) clog.warn(`[extract] "${doctorName}" is a doctor, not the caller`);
 
   for (const field of PATIENT_FIELDS) {
