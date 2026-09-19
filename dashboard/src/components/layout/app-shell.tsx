@@ -24,6 +24,8 @@ interface AppShellProps {
   /** Flip the agent between the real clinic and the sim. Absent on agents that cannot. */
   onMode?: (mode: AgentMode) => void;
   switching: boolean;
+  /** Why the last switch failed; shown in red next to the pill. */
+  switchError?: string | null;
   children: ReactNode;
 }
 
@@ -105,11 +107,13 @@ function ModePill({
   url,
   onMode,
   switching,
+  switchError,
 }: {
   mode: ConsoleMode;
   url: string | null;
   onMode?: (mode: AgentMode) => void;
   switching: boolean;
+  switchError?: string | null;
 }) {
   const Icon = MODE_ICON[mode];
   const next: AgentMode | null = mode === 'simulation' ? 'live' : mode === 'live' ? 'simulation' : null;
@@ -126,17 +130,24 @@ function ModePill({
     );
   }
   return (
-    <button
-      type="button"
-      onClick={() => onMode(next)}
-      disabled={switching}
-      className={cn(classes, 'group cursor-pointer transition-opacity hover:opacity-80 disabled:cursor-wait disabled:opacity-60')}
-      title={`New calls book into ${url}${mode === 'simulation' ? ' — nothing reaches Prosper' : ' — the real clinic'}.\nClick to switch to ${MODE_LABEL[next]}; calls already open finish where they started.`}
-    >
-      <Icon className="size-3.5" />
-      {switching ? 'Switching…' : MODE_LABEL[mode]}
-      <ArrowLeftRight className="size-3 opacity-50 group-hover:opacity-100" />
-    </button>
+    <span className="flex items-center gap-2">
+      {switchError && (
+        <span className="text-xs text-destructive" title={switchError}>
+          Switch failed
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={() => onMode(next)}
+        disabled={switching}
+        className={cn(classes, 'group cursor-pointer transition-opacity hover:opacity-80 disabled:cursor-wait disabled:opacity-60')}
+        title={`New calls book into ${url}${mode === 'simulation' ? ' — nothing reaches Prosper' : ' — the real clinic'}.\nClick to switch to ${MODE_LABEL[next]}; calls already open finish where they started.`}
+      >
+        <Icon className="size-3.5" />
+        {switching ? 'Switching…' : MODE_LABEL[mode]}
+        <ArrowLeftRight className="size-3 opacity-50 group-hover:opacity-100" />
+      </button>
+    </span>
   );
 }
 
@@ -151,7 +162,7 @@ function Clock() {
   );
 }
 
-export function AppShell({ nav, active, onNavigate, clinicApi, mode, onMode, switching, children }: AppShellProps) {
+export function AppShell({ nav, active, onNavigate, clinicApi, mode, onMode, switching, switchError, children }: AppShellProps) {
   useEffect(() => {
     document.title = mode === 'simulation' ? '[SIM] Agent la L' : mode === 'live' ? '[LIVE] Agent la L' : 'Agent la L';
   }, [mode]);
@@ -161,7 +172,7 @@ export function AppShell({ nav, active, onNavigate, clinicApi, mode, onMode, swi
         <Brand />
         <Tabs nav={nav} active={active} onNavigate={onNavigate} />
         <div className="ml-auto flex items-center gap-4 text-sm text-muted-foreground">
-          <ModePill mode={mode} url={clinicApi} onMode={onMode} switching={switching} />
+          <ModePill mode={mode} url={clinicApi} onMode={onMode} switching={switching} switchError={switchError} />
           <span className="h-4 w-px bg-border" />
           <Clock />
         </div>

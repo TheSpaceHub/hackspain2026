@@ -194,7 +194,7 @@ curl -N localhost:8788/__sim/events?since=0 # every hold, release, booking… as
   calls** — a call already open finishes against the clinic it started on. The console
   reads `/health` and shows Live as a green pill (the dashboard as it always was) and
   Simulation as a violet pill, `[SIM]` in the tab title, and a **Clinic** tab. Clicking
-  the top-right pill flips the mode (going live asks first).
+  the top-right pill flips the mode.
 - **The Clinic tab** is the sim's diary: each provider's day as 15-minute cells (the
   clinic's own bookings, ones made by calls, slots on hold coloured per call), the live
   holds with their countdown, Reset / Re-snapshot, and **Events** — the clinic's activity

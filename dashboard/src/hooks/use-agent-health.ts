@@ -8,6 +8,8 @@ export interface AgentHealthState {
   /** Switch the agent's clinic. Resolves to the health it reports afterwards. */
   setMode: (mode: AgentMode) => Promise<void>;
   switching: boolean;
+  /** Why the last switch failed, until the next one. */
+  switchError: string | null;
 }
 
 /**
@@ -17,6 +19,7 @@ export interface AgentHealthState {
 export function useAgentHealth(connected: boolean): AgentHealthState {
   const [health, setHealth] = useState<AgentHealth | null>(null);
   const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!connected) return;
@@ -36,12 +39,15 @@ export function useAgentHealth(connected: boolean): AgentHealthState {
 
   const setMode = useCallback(async (mode: AgentMode) => {
     setSwitching(true);
+    setSwitchError(null);
     try {
       setHealth(await setAgentMode(mode));
+    } catch (err: unknown) {
+      setSwitchError(err instanceof Error ? err.message : String(err));
     } finally {
       setSwitching(false);
     }
   }, []);
 
-  return { health, setMode, switching };
+  return { health, setMode, switching, switchError };
 }
