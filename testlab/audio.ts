@@ -1,9 +1,12 @@
 /**
  * The caller's voice, and the room they are calling from.
  *
- * espeak-ng offline (or `say` on macOS) for the words, and a procedural bed for
- * the noise cases — a street, a television, a room, a car — mixed in at a given
- * signal-to-noise ratio so problem 12 is a real 5 dB call and not a label.
+ * Deepgram Aura for the words when there is a key, espeak-ng offline (or `say`
+ * on macOS) when there is not: espeak's buzz came back through the agent's own
+ * transcription as nonsense, which read as a caller talking gibberish rather
+ * than as the recogniser failing. Then a procedural bed for the noise cases —
+ * a street, a television, a room, a car — mixed in at a given signal-to-noise
+ * ratio so problem 12 is a real 5 dB call and not a label.
  */
 import { execFile } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -25,6 +28,48 @@ const VOICES: Record<string, { male: string; female: string }> = {
 };
 
 let warnedSilence = false;
+let warnedAura = false;
+
+/** Aura has no Catalan, so a Catalan line is spoken by a Peninsular Spanish voice. */
+const AURA: Record<string, { male: string; female: string }> = {
+  en: { male: 'aura-2-arcas-en', female: 'aura-2-thalia-en' },
+  es: { male: 'aura-2-alvaro-es', female: 'aura-2-diana-es' },
+  ca: { male: 'aura-2-alvaro-es', female: 'aura-2-diana-es' },
+};
+
+/**
+ * Deepgram Aura, raw 8 kHz PCM, the same rate the socket wants. Pace is done by
+ * resampling — clamped, because past a point it stops sounding like a person.
+ */
+async function aura(line: string, voice: Voice, key: string): Promise<Int16Array> {
+  const v = AURA[voice.language] ?? AURA.en!;
+  const model = voice.sex === 'female' ? v.female : v.male;
+  const url = `https://api.deepgram.com/v1/speak?model=${model}&encoding=linear16&sample_rate=${SAMPLE_RATE}&container=none`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Token ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: line }),
+  });
+  if (!res.ok) throw new Error(`deepgram speak ${res.status}: ${await res.text()}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const pcm = new Int16Array(buf.length >> 1);
+  for (let i = 0; i < pcm.length; i++) pcm[i] = buf.readInt16LE(i * 2);
+  return amplify(pace(pcm, (voice.wpm ?? 150) / 150), voice.gain ?? 1);
+}
+
+/** Speeds a line up or slows it down by resampling; 1 leaves it alone. */
+function pace(pcm: Int16Array, rate: number): Int16Array {
+  const r = Math.max(0.8, Math.min(1.25, rate));
+  if (Math.abs(r - 1) < 0.02) return pcm;
+  const out = new Int16Array(Math.round(pcm.length / r));
+  for (let i = 0; i < out.length; i++) {
+    const at = i * r;
+    const j = Math.floor(at);
+    const next = pcm[Math.min(j + 1, pcm.length - 1)] ?? 0;
+    out[i] = Math.round((pcm[j] ?? 0) + (next - (pcm[j] ?? 0)) * (at - j));
+  }
+  return out;
+}
 
 export interface Voice {
   language: string;
@@ -37,6 +82,17 @@ export interface Voice {
 
 /** One line of speech at 8 kHz. Falls back to plausible silence when nothing can speak. */
 export async function say(line: string, voice: Voice): Promise<Int16Array> {
+  const key = process.env.DEEPGRAM_API_KEY;
+  if (key !== undefined && key !== '') {
+    try {
+      return await aura(line, voice, key);
+    } catch (err) {
+      if (!warnedAura) {
+        warnedAura = true;
+        console.warn(`[testlab] Aura unavailable, falling back to espeak: ${String(err)}`);
+      }
+    }
+  }
   const dir = await mkdtemp(join(tmpdir(), 'testlab-tts-'));
   const wav = join(dir, 'line.wav');
   try {
