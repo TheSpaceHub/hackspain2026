@@ -122,11 +122,11 @@ export const BEHAVIOURS: Behaviour[] = [
     ...base,
     id: 'rambler',
     label: 'Rambles',
-    description: 'Long digressions with the answer buried somewhere in them.',
+    description: 'Buries the answer in a longer sentence than it needed.',
     instructions: [
-      'You digress at length — your sister, the traffic, the last time you were in — and the thing they actually',
-      'asked for comes out somewhere in the middle of all that, said in passing, because to you it is the least',
-      'interesting part of the story.',
+      'You take the long way round: the answer they asked for is in there, but with how the knee has been since',
+      'Thursday and what the last doctor said wrapped around it. Keep it to one sentence, all of it about your',
+      'own health and your own appointments — you are long-winded, not off the subject.',
     ].join(' '),
   },
   {

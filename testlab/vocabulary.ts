@@ -48,10 +48,12 @@ export const VOCABULARIES: Vocabulary[] = [
   {
     id: 'off_topic',
     label: 'Off topic',
-    description: 'Talks about everything except the thing they rang about.',
+    description: 'Drifts off the point — into the parking, the last visit, the wait — then comes back.',
     instructions: [
-      'You keep wandering off the subject — the weather, the parking, a programme you watched, what the last',
-      'doctor said about your neighbour. You get back to the point only when they pull you back, and not for long.',
+      'You drift off the point, but only ever around your own visit: the parking at the clinic, how long the',
+      'wait was last time, the tablets you were given, getting there after work. One short drift per turn at',
+      'most, then you are back on the phone call. You never bring up the world outside your own health and',
+      'appointments, and you never ask them about themselves.',
     ].join(' '),
   },
   {
