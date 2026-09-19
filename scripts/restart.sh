@@ -26,4 +26,8 @@ done
 pkill -f 'tsx src/index.ts' || true
 sleep 2
 cd "$(dirname "$0")/.."
+# tsx is a node shebang script; a nohup'd shell may not carry the nvm PATH.
+if ! command -v node >/dev/null 2>&1 && [ -d "$HOME/.nvm/versions/node" ]; then
+  PATH="$HOME/.nvm/versions/node/$(ls "$HOME/.nvm/versions/node" | tail -1)/bin:$PATH"
+fi
 exec ./node_modules/.bin/tsx src/index.ts
