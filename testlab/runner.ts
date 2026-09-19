@@ -222,7 +222,9 @@ export class Runner extends EventEmitter {
         for (;;) {
           const job = jobs[cursor++];
           if (!job || this.#stopping.has(run.id)) return;
-          const result = await this.#one(run, job, feed);
+          // One call blowing up is a finding, not the end of the round: the rest of
+          // the cases still have something to say.
+          const result = await this.#one(run, job, feed).catch((err: unknown) => this.#broken(run, job, err));
           run.results.push(result);
           run.done++;
           if (result.pass) run.passed++;
@@ -236,7 +238,7 @@ export class Runner extends EventEmitter {
       for (const result of run.results) {
         const kase = this.suite.byId.get(result.case_id);
         if (result.pass || !kase) continue;
-        result.summary = await summarise(kase, result);
+        result.summary = await summarise(kase, result).catch(() => undefined);
       }
       run.issues = issueDrafts(run.results, this.suite.byId);
       run.status = this.#stopping.has(run.id) ? 'stopped' : 'done';
@@ -258,6 +260,56 @@ export class Runner extends EventEmitter {
         error: run.error,
       });
     }
+  }
+
+  /** A call that threw, written up as the failure it is so the round can carry on. */
+  #broken(
+    run: Run,
+    job: { kase: Case; behaviour: Behaviour; vocabulary: Vocabulary; copy: number },
+    err: unknown,
+  ): CaseResult {
+    const detail = String(err instanceof Error ? err.message : err);
+    const grade: Grade = { pass: false, misses: [`the call itself failed: ${detail}`], variant: -1 };
+    return {
+      case_id: job.kase.id,
+      problem_id: job.kase.problem_id,
+      title: job.kase.title,
+      behaviour: job.behaviour.id,
+      vocabulary: job.vocabulary.id,
+      copy: job.copy,
+      pass: false,
+      grade,
+      actions: [],
+      leaked: [],
+      call: {
+        call_id: '',
+        from_number: job.kase.from_number,
+        ok: false,
+        error: detail,
+        frames_sent: 0,
+        frames_received: 0,
+        ms_to_first_audio: null,
+        clears: 0,
+        caller: run.mode,
+        behaviour: job.behaviour.id,
+        vocabulary: job.vocabulary.id,
+        caller_prompt: null,
+        caller_turns: [],
+        transcript: [],
+        wav_path: null,
+        call_ms: 0,
+      },
+      insights: [
+        {
+          code: 'call_failed',
+          severity: 'blocker',
+          detail: `The call could not be made or did not survive: ${detail}`,
+          why: 'The lab threw before the call could be graded, so this is the harness or the agent process, not a decision the agent made.',
+          suggestion: 'Check the agent is up and reachable, then run this case again on its own.',
+          evidence: [],
+        },
+      ],
+    };
   }
 
   async #one(

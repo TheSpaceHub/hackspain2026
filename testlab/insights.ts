@@ -17,8 +17,13 @@ export type Severity = 'blocker' | 'major' | 'minor';
 export interface Insight {
   code: string;
   severity: Severity;
+  /** What went wrong, in the terms of this call. */
   detail: string;
+  /** Why it went wrong: the mechanism behind the symptom. */
+  why: string;
   suggestion: string;
+  /** The turns the finding was read off, so the reader can see it for themselves. */
+  evidence: string[];
 }
 
 export interface CaseResult {
@@ -42,6 +47,23 @@ const ASKS_ID = /\b(dni|nie|identifi|documento|número de|passport|date of birth
 const SPANISH = /\b(buenos|gracias|cita|tarde|puedo|usted|doctora|seguro|día)\b/i;
 const CATALAN = /\b(bon dia|gràcies|visita|vostè|metge|dilluns|si us plau)\b/i;
 
+/** One transcript turn, written the way a person reads a call. */
+function line(t: { role: string; text: string }): string {
+  return `${t.role === 'user' ? 'caller' : 'agent'}: ${t.text}`;
+}
+
+/** The turns around the first one that matches, or the end of the call if none does. */
+function near(
+  transcript: readonly { role: string; text: string }[],
+  match: ((t: { role: string; text: string }) => boolean) | null,
+  span = 4,
+): string[] {
+  if (transcript.length === 0) return [];
+  const at = match ? transcript.findIndex(match) : -1;
+  if (at === -1) return transcript.slice(-span).map(line);
+  return transcript.slice(Math.max(0, at - 1), at + span - 1).map(line);
+}
+
 /** The wire names of the actions the platform records, as the suite writes them. */
 function actionsOf(result: { actions: Record<string, unknown>[] }): string[] {
   return result.actions.map((a) => String(a.action ?? '?'));
@@ -59,14 +81,20 @@ export function insightsFor(kase: Case, result: Omit<CaseResult, 'insights'>): I
       code: 'mute',
       severity: 'blocker',
       detail: 'The agent sent no audio at all; the platform cuts a silent call and scores it against us.',
+      why:
+        'The socket opened and the caller spoke, so the leg was up — nothing was ever synthesised back down it. ' +
+        'That is a TTS or greeting-path failure, not a decision the agent made.',
       suggestion: 'Check the TTS path and the greeting: first audio must leave inside a second of the socket opening.',
+      evidence: near(result.call.transcript, null, 3),
     });
   } else if ((result.call.ms_to_first_audio ?? 0) > 2_000) {
     found.push({
       code: 'slow_greeting',
       severity: 'minor',
       detail: `First audio took ${result.call.ms_to_first_audio}ms.`,
+      why: 'The greeting waits on the first model turn, so the caller hears dead air for as long as that turn takes.',
       suggestion: 'Send the greeting from a cached utterance rather than waiting on the first model turn.',
+      evidence: result.call.transcript.slice(0, 2).map(line),
     });
   }
 
@@ -75,7 +103,11 @@ export function insightsFor(kase: Case, result: Omit<CaseResult, 'insights'>): I
       code: 'deaf',
       severity: 'blocker',
       detail: 'Nothing the caller said was transcribed — the agent heard none of the call.',
+      why:
+        `The caller took ${result.call.caller_turns.length} turns and not one came back from the recogniser, so every ` +
+        'later decision was made on an empty conversation. Usually a language hint, an endpointing setting or the noise bed.',
       suggestion: 'Check STT: language hints, the endpointing model, and whether the noise bed is drowning the caller.',
+      evidence: result.call.caller_turns.slice(0, 3).map((t) => `caller (spoken, never transcribed): ${t}`),
     });
   }
 
@@ -84,7 +116,11 @@ export function insightsFor(kase: Case, result: Omit<CaseResult, 'insights'>): I
       code: 'privacy_leak',
       severity: 'blocker',
       detail: `Said something it was told to protect: ${result.leaked.join(', ')}.`,
+      why:
+        'The agent read a protected value back down the line to confirm it, before the caller had been established as ' +
+        'the person entitled to hear it. Confirming by reading out is the leak.',
       suggestion: 'Never read an identifier, phone number or diary entry back to a caller who has not been identified as the patient.',
+      evidence: near(result.call.transcript, (t) => t.role !== 'user' && result.leaked.some((l) => t.text.includes(l)), 3),
     });
   }
 
@@ -93,13 +129,26 @@ export function insightsFor(kase: Case, result: Omit<CaseResult, 'insights'>): I
       code: 'no_record',
       severity: 'blocker',
       detail: 'Nothing was submitted before the window shut.',
+      why:
+        said.length > 0
+          ? 'The agent was still talking when the window shut: it treated the conversation as unfinished and so never ' +
+            'committed a record, when an unfinished call should still be written up.'
+          : 'The call produced no agent speech and no record, so the decider was never reached at all.',
       suggestion: 'The decider must always write a record: a refusal with a reason still scores, silence never does.',
+      evidence: near(result.call.transcript, null),
     });
   } else if (wanted.length > 0 && got.join('+') !== wanted.join('+')) {
     found.push({
       code: 'wrong_action',
       severity: 'major',
       detail: `Submitted ${got.join(' + ')} where the case wants ${wanted.join(' + ')}.`,
+      why:
+        got.includes('NO_ACTION') && wanted.includes('BOOK')
+          ? 'The agent reached a refusal on a request the clinic can satisfy — a guard fired (most often the caller ' +
+            'not being identified to its satisfaction) and nothing after that could book.'
+          : 'The conversation ended somewhere other than where the case leads, so the decider read this shape of call ' +
+            'as a different kind of request.',
+      evidence: near(result.call.transcript, null),
       suggestion:
         got.includes('NO_ACTION') && wanted.includes('BOOK')
           ? 'A refusal was recorded for a bookable request: check the guard that decided it, and whether the caller was identified.'
@@ -114,28 +163,42 @@ export function insightsFor(kase: Case, result: Omit<CaseResult, 'insights'>): I
         code: 'wrong_reason',
         severity: 'major',
         detail: miss,
+        why: 'The agent worked out that it had to refuse but not which rule was refusing, so it reached for a nearby code.',
         suggestion: 'The refusal is right but the reason is not; reasons are scored, so map the blocking rule to its exact code.',
+        evidence: near(result.call.transcript, null),
       });
     } else if (field === 'slot' || field === 'start_time') {
       found.push({
         code: 'wrong_slot',
         severity: 'major',
         detail: miss,
+        why:
+          'The time in the record came from the words in the conversation rather than from the slot the availability ' +
+          'call returned, so rounding, a spoken "half past" or a timezone shifted it.',
         suggestion: 'Book the slot the availability call returned, not a time the agent restated in words.',
+        evidence: near(result.call.transcript, (t) => /\d{1,2}[:.]\d{2}|o'clock|y media|en punto/i.test(t.text), 3),
       });
     } else if (field === 'provider_id' || field === 'location_id') {
       found.push({
         code: 'wrong_where',
         severity: 'major',
         detail: miss,
+        why:
+          'The provider or site was resolved a second time, by name, when the record was written — and the name ' +
+          'matched a different row than the slot did.',
         suggestion: 'Carry the provider and site from the chosen slot into the record instead of re-resolving them by name.',
+        evidence: near(result.call.transcript, null),
       });
     } else if (field === 'patient_id') {
       found.push({
         code: 'wrong_patient',
         severity: 'blocker',
         detail: miss,
+        why:
+          'The lookup settled on the first plausible match instead of the one the caller identified, which is what a ' +
+          'namesake or a partial identifier does to a name search.',
         suggestion: 'The record names the wrong patient — check the namesake handling and the identifier used to look them up.',
+        evidence: near(result.call.transcript, (t) => ASKS_ID.test(t.text), 4),
       });
     }
   }
@@ -145,7 +208,11 @@ export function insightsFor(kase: Case, result: Omit<CaseResult, 'insights'>): I
       code: 'never_identified',
       severity: 'major',
       detail: 'The agent never asked for an identifier, so nothing it booked can be tied to the patient on file.',
+      why:
+        'The caller gave a name and the agent took it, so identification never became a step of the call — and by the ' +
+        'time a decision was due there was no way to look the patient up.',
       suggestion: 'Ask for a DNI, phone number or date of birth before the call reaches a decision.',
+      evidence: result.call.transcript.slice(0, 4).map(line),
     });
   }
 
@@ -156,7 +223,11 @@ export function insightsFor(kase: Case, result: Omit<CaseResult, 'insights'>): I
         code: 'wrong_language',
         severity: 'major',
         detail: `The caller speaks ${kase.language} and the agent answered in something else.`,
+        why:
+          'The language was fixed before the caller spoke rather than taken from what they said, so the whole call ran ' +
+          'in the default one.',
         suggestion: 'Follow the caller into their language on the first turn and stay there for the rest of the call.',
+        evidence: result.call.transcript.slice(0, 4).map(line),
       });
     }
   }
@@ -166,7 +237,11 @@ export function insightsFor(kase: Case, result: Omit<CaseResult, 'insights'>): I
       code: 'ran_long',
       severity: 'minor',
       detail: `The caller used all ${kase.persona.turn_cap} of their turns without getting there.`,
+      why:
+        'The turns went on confirming things already said instead of asking for the one fact still missing, so the call ' +
+        'ran out of room before it reached a decision.',
       suggestion: 'Ask for the missing fact directly instead of confirming things the caller has already said.',
+      evidence: near(result.call.transcript, null),
     });
   }
 
@@ -238,6 +313,10 @@ function caseSection(f: CaseResult, kase: Case | undefined): string[] {
   if (f.grade.misses.length > 0) lines.push(`- missed: ${f.grade.misses.join('; ')}`);
   if (f.leaked.length > 0) lines.push(`- said out loud what it must not: ${f.leaked.join(', ')}`);
   if (f.summary) lines.push('', f.summary);
+  for (const i of f.insights) {
+    lines.push('', `**${i.code}** — ${i.detail} *Why:* ${i.why}`);
+    if (i.evidence.length > 0) lines.push('', 'Where it shows:', '```', ...i.evidence, '```');
+  }
   const said = tail(f);
   if (said.length > 0) lines.push('', 'The end of the call:', '```', ...said, '```');
   return [...lines, ''];
@@ -253,8 +332,15 @@ export function issueDrafts(results: CaseResult[], byId?: Map<string, Case>): Is
 
   return [...byProblem.entries()].map(([problemId, failures]) => {
     const all = results.filter((r) => r.problem_id === problemId);
+    // One entry per kind of failure, kept from the call that shows it most plainly:
+    // the one that actually left a transcript to quote.
     const codes = new Map<string, Insight>();
-    for (const f of failures) for (const i of f.insights) codes.set(i.code, i);
+    for (const f of failures) {
+      for (const i of f.insights) {
+        const held = codes.get(i.code);
+        if (!held || (held.evidence.length === 0 && i.evidence.length > 0)) codes.set(i.code, i);
+      }
+    }
     const worst: Severity = [...codes.values()].some((i) => i.severity === 'blocker')
       ? 'blocker'
       : [...codes.values()].some((i) => i.severity === 'major')
@@ -264,9 +350,17 @@ export function issueDrafts(results: CaseResult[], byId?: Map<string, Case>): Is
     const body = [
       `${failures.length} of ${all.length} local cases fail on **${failures[0]!.problem_id}**.`,
       '',
-      '### What goes wrong',
-      ...[...codes.values()].map((i) => `- **${i.code}** — ${i.detail}`),
+      '### What goes wrong, and why',
       '',
+      ...[...codes.values()].flatMap((i) => [
+        `**${i.code}** (${i.severity}) — ${i.detail}`,
+        '',
+        `*Why:* ${i.why}`,
+        ...(i.evidence.length > 0
+          ? ['', 'Heard on the line:', '```', ...i.evidence, '```']
+          : []),
+        '',
+      ]),
       '### Suggested fix',
       ...[...new Set([...codes.values()].map((i) => i.suggestion))].map((s) => `- ${s}`),
       '',

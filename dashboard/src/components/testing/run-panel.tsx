@@ -4,9 +4,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { cn } from '@/lib/utils';
 import { draftFix } from '@/lib/testlab/client';
 import type { Case, FixPlan, Run } from '@/lib/testlab/types';
+import { Markdown } from './markdown';
 import { ResultDetail } from './result-detail';
 
 /** The run as it happens: a bar, then a line per call, then the issues those calls add up to. */
@@ -158,7 +158,7 @@ export function RunPanel({
                     <Wand2 /> {drafting === issue.problem_id ? 'Drafting…' : 'Draft a fix'}
                   </Button>
                 </div>
-                <pre className={cn('overflow-x-auto px-3 py-2 text-xs whitespace-pre-wrap')}>{issue.body}</pre>
+                <Markdown className="px-3 py-2">{issue.body}</Markdown>
                 {fixes[issue.problem_id] !== undefined &&
                   (typeof fixes[issue.problem_id] === 'string' ? (
                     <p className="border-t border-border/60 px-3 py-2 text-xs text-destructive">
@@ -183,9 +183,7 @@ export function RunPanel({
                           <Copy />
                         </Button>
                       </div>
-                      <pre className="overflow-x-auto px-3 pb-2 text-xs whitespace-pre-wrap">
-                        {(fixes[issue.problem_id] as FixPlan).plan}
-                      </pre>
+                      <Markdown className="px-3 pb-2">{(fixes[issue.problem_id] as FixPlan).plan}</Markdown>
                       <p className="px-3 pb-2 text-xs text-muted-foreground">
                         Hand this to a coding agent on {(fixes[issue.problem_id] as FixPlan).branch} to write the
                         change and open the pull request.

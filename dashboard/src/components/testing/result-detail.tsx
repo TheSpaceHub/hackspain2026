@@ -1,6 +1,7 @@
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { Case, CaseResult } from '@/lib/testlab/types';
+import { Markdown } from './markdown';
 
 const SEVERITY: Record<string, 'destructive' | 'brand' | 'outline'> = {
   blocker: 'destructive',
@@ -81,7 +82,7 @@ export function ResultDetail({ result, kase }: { result: CaseResult; kase?: Case
 
       {kase && <HowTested kase={kase} />}
 
-      {result.summary && <p className="text-sm">{result.summary}</p>}
+      {result.summary && <Markdown className="text-sm">{result.summary}</Markdown>}
 
       {result.grade.misses.length > 0 && (
         <div>
@@ -110,6 +111,17 @@ export function ResultDetail({ result, kase }: { result: CaseResult; kase?: Case
                 <span className="font-mono text-xs text-muted-foreground">{i.code}</span>
               </div>
               <p className="mt-1">{i.detail}</p>
+              {i.why && (
+                <p className="mt-1 text-muted-foreground">
+                  <span className="font-medium text-foreground">Why: </span>
+                  {i.why}
+                </p>
+              )}
+              {i.evidence.length > 0 && (
+                <pre className="mt-2 overflow-x-auto rounded-md bg-muted/50 px-3 py-2 text-xs whitespace-pre-wrap">
+                  {i.evidence.join('\n')}
+                </pre>
+              )}
               <p className="mt-1 text-muted-foreground">{i.suggestion}</p>
             </div>
           ))}
