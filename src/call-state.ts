@@ -85,6 +85,9 @@ export interface CallState {
   quoted: QuotedSlot[];
   turns_seen: number;
   quoted_at?: number;
+  /** Final caller utterances so far, and how many there were when the quote was read. */
+  caller_turns: number;
+  quoted_after_caller_turns?: number;
   accepted: QuotedSlot | null;
   phone_match_rejected?: string;
   /** Every write, in order, including the ones that were later retracted. */
@@ -100,6 +103,7 @@ export function createCallState(callId: string, fromNumber?: string): CallState 
     request: { insurers: [] },
     quoted: [],
     turns_seen: 0,
+    caller_turns: 0,
     accepted: null,
     journal: [],
   };
@@ -222,7 +226,17 @@ function namePartMatches(spoken: string, record: string | null | undefined, pref
 export function recordQuote(state: CallState, slots: QuotedSlot[]): void {
   state.quoted = slots;
   state.quoted_at = state.turns_seen;
+  state.quoted_after_caller_turns = state.caller_turns;
   for (const slot of slots) record(state, 'quoted', `${slot.start_time} ${slot.provider_id}`);
+}
+
+/** Nobody has answered the offer yet: the caller has not spoken since it was read. */
+export function callerSilentSinceQuote(state: CallState): boolean {
+  return (
+    state.quoted.length > 0 &&
+    state.quoted_after_caller_turns !== undefined &&
+    state.caller_turns === state.quoted_after_caller_turns
+  );
 }
 
 const ORDINALS: Record<string, number> = {

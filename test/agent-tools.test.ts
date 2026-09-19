@@ -16,6 +16,7 @@ import {
   readCallState,
   recordAccepted,
   recordMatch,
+  recordQuote,
   recordRequest,
   setPlanVocabulary,
 } from '../src/call-state.js';
@@ -121,6 +122,17 @@ function harness(
   numeric.state.quoted = [corrected.state.quoted[0]!];
   await numeric.call('accept_slot', { choice: 1 });
   check('without a spoken time the numeric choice is honored', numeric.state.accepted?.start_time, numeric.state.quoted[0]!.start_time);
+
+  // Ten silent callers were booked because the model "accepted" for them after a nudge.
+  const silent = harness({}, undefined);
+  silent.state.caller_turns = 2;
+  recordQuote(silent.state, [corrected.state.quoted[0]!]);
+  const notYet = await silent.call('accept_slot', { choice: 1 });
+  check('no caller turn since the quote: refused', /has not answered/.test(notYet), true);
+  check('and nothing is held', silent.state.accepted, null);
+  silent.state.caller_turns = 3;
+  await silent.call('accept_slot', { choice: 1 });
+  check('once the caller has spoken the choice is honored', silent.state.accepted?.start_time, corrected.state.quoted[0]!.start_time);
 }
 
 // --- identification --------------------------------------------------------
@@ -153,6 +165,7 @@ function harness(
   check('the times are spoken, never as ISO', /2026-10-08T/.test(offered), false);
 
   const quoted = h.state.quoted[1]!;
+  h.state.caller_turns++; // the caller answers the offer
   await h.call('accept_slot', { choice: 2 });
   check('the accepted slot is the quoted string, character for character', h.state.accepted?.start_time, quoted.start_time);
   check('with the ids the diary gave', [h.state.accepted?.provider_id, h.state.accepted?.appointment_type_id], [quoted.provider_id, 'apt_review']);
@@ -366,6 +379,7 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   const h = harness();
   await h.call('identify_patient', { national_id: '12345678Z' });
   await h.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'general practice' });
+  h.state.caller_turns++;
   const held = await h.call('accept_slot', { choice: 1 });
   check('the plan on the record bills the slot it can pay for', choosePolicy(h.state), 'sanitas');
   check('so the caller is not asked for a second policy', /other insurance/.test(held), false);
@@ -479,12 +493,14 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   await h.call('identify_patient', { national_id: '12345678Z' });
   recordRequest(h.state, { insurers: ['Adeslas'] });
   await h.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'general practice' });
+  h.state.caller_turns++;
   const held = await h.call('accept_slot', { choice: 1 });
   check('the plan the caller named on the call is the one billed', choosePolicy(h.state), 'adeslas');
   check('and the slot is still held', /Held/.test(held), true);
 
   const stranger = harness();
   await stranger.call('find_slots', { when_phrase: 'tomorrow', specialty_id: 'general practice' });
+  stranger.state.caller_turns++;
   stranger.state.quoted[0]!.payable_with = ['asisa'];
   const asked = await stranger.call('accept_slot', { choice: 1 });
   check('a slot no known plan pays for makes the agent ask for another policy', /other insurance/.test(asked), true);

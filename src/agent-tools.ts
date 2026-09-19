@@ -28,6 +28,7 @@ import {
   recordAccepted,
   recordMatch,
   recordQuote,
+  callerSilentSinceQuote,
   recordRequest,
   retract,
   saidTimes,
@@ -296,6 +297,10 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
       execute: async (args) => {
         let slot = state.quoted[args.choice - 1];
         if (!slot) return 'That is not one of the times you offered. Read the list again or call find_slots.';
+        if (callerSilentSinceQuote(state)) {
+          clog.warn(`[accept_slot] refused: caller has not spoken since the quote`);
+          return 'The caller has not answered yet — nothing has been accepted. Do not hold anything; ask again whether that time suits and wait for their answer.';
+        }
         const callerText = deps.lastCallerText?.();
         const spoken = callerText ? saidTimes(callerText) : [];
         if (spoken.length > 0) {
@@ -423,7 +428,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
   return tools;
 }
 
-function siteName(catalogue: Catalogue | null, locationId: string): string {
+export function siteName(catalogue: Catalogue | null, locationId: string): string {
   if (!catalogue) return locationId;
   return locationById(catalogue, locationId)?.name ?? locationId;
 }

@@ -2,6 +2,7 @@ import { voice } from '@livekit/agents';
 import { AudioFrame } from '@livekit/rtc-node';
 import type { WebSocket } from 'ws';
 import { GREETING, ReceptionistAgent } from './agent.js';
+import { siteName, speakTime } from './agent-tools.js';
 import { MediaStreamAudioInput } from './audio-input.js';
 import { MediaStreamAudioOutput } from './audio-output.js';
 import { writeCallLog, type CallLog } from './call-log.js';
@@ -250,6 +251,7 @@ export class CallSession {
       session.on(voice.AgentSessionEventTypes.UserInputTranscribed, (event) => {
         if (event.isFinal) {
           this.#nudges = 0;
+          if (this.#state) this.#state.caller_turns++;
           this.#pendingDeadAir.push({ turn: ++this.#deadAirTurn, at: Date.now() });
         }
         this.#clearSilenceTimer();
@@ -292,6 +294,19 @@ export class CallSession {
     }
   }
 
+  /** What to say into silence: the open offer if there is one, otherwise a plain check-in. */
+  #nudgeText(): string {
+    const state = this.#state;
+    const open = state && !state.accepted ? state.quoted : [];
+    if (state && open.length > 0) {
+      const offer = open
+        .map((s) => `${speakTime(s.start_time)} with ${s.provider_name ?? s.provider_id} at ${siteName(this.#shared.catalogue, s.location_id)}`)
+        .join(', or ');
+      return `Are you still there? I can offer ${offer}. Would that suit you?`;
+    }
+    return 'Are you still there? How can I help you today?';
+  }
+
   #clearSilenceTimer(): void {
     if (this.#silenceTimer) clearTimeout(this.#silenceTimer);
     this.#silenceTimer = null;
@@ -325,12 +340,10 @@ export class CallSession {
       this.#nudges++;
       clog.info(`[silence] no caller speech for ${SILENCE_NUDGE_MS / 1000}s · nudge ${this.#nudges}`);
       if (this.#nudges <= 2) {
+        // Fixed text, not a model turn: asked to "repeat the offer so they can say yes",
+        // the model called accept_slot on the caller's behalf and booked ten silent calls.
         try {
-          session.generateReply({
-            instructions:
-              'The caller has said nothing for several seconds since your last sentence. In one short sentence check they are still there and repeat your last question or the appointment you offered (with day and time), so they can answer with a yes.',
-            allowInterruptions: true,
-          });
+          session.say(this.#nudgeText(), { allowInterruptions: true });
         } catch (err) {
           this.#errors.push(`silence nudge: ${String(err)}`);
         }
