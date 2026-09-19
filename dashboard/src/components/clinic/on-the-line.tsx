@@ -1,12 +1,14 @@
 import { PhoneIncoming } from 'lucide-react';
 import { ListenButton } from '@/components/live/listen-button';
 import type { Call } from '@/lib/agent/model';
+import type { AgentMode } from '@/lib/agent/origin';
 import { formatDuration, formatPhone, shortId } from '@/lib/format';
 import { elapsedMs } from '@/lib/live';
 import { callHue } from '@/lib/sim/model';
 import type { Hold } from '@/lib/sim/wire';
 
 interface OnTheLineProps {
+  mode: AgentMode;
   /** Calls the agent has open right now, whichever clinic they are on. */
   calls: Call[];
   holds: Hold[];
@@ -15,7 +17,7 @@ interface OnTheLineProps {
 }
 
 /** Who is talking to the clinic this second, with the audio a click away. */
-export function OnTheLine({ calls, holds, now, onOpenCall }: OnTheLineProps) {
+export function OnTheLine({ mode, calls, holds, now, onOpenCall }: OnTheLineProps) {
   if (calls.length === 0) {
     return <p className="py-2 text-sm text-muted-foreground">Nobody on the line.</p>;
   }
@@ -41,7 +43,7 @@ export function OnTheLine({ calls, holds, now, onOpenCall }: OnTheLineProps) {
               {formatDuration(elapsedMs(c, now))}
               {held > 0 && ` · ${held} hold${held === 1 ? '' : 's'}`}
             </span>
-            <ListenButton id={c.id} />
+            <ListenButton mode={mode} id={c.id} />
           </li>
         );
       })}

@@ -1,6 +1,5 @@
 import { fileURLToPath, URL } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
-import basicSsl from '@vitejs/plugin-basic-ssl';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
@@ -8,18 +7,12 @@ import { defineConfig } from 'vite';
 const AGENT_ORIGIN = process.env.VITE_AGENT_ORIGIN ?? 'http://localhost:7860';
 /** The local Prosper (pnpm mock) — it owns the generated world, so the test lab lives there. */
 const TESTLAB_ORIGIN = process.env.VITE_TESTLAB_ORIGIN ?? 'http://localhost:8787';
+const SIM_AGENT_ORIGIN = process.env.VITE_SIM_AGENT_ORIGIN ?? 'http://localhost:7861';
 /** The shared clinic (`pnpm sim`), when the agent is pointed at it: its /__sim routes on :8788. */
 const SIM_ORIGIN = process.env.VITE_SIM_ORIGIN ?? 'http://localhost:8788';
 
-/**
- * `pnpm dev:https`: the same console over a self-signed certificate, for a phone on the
- * same network. Browsers only give a page the microphone on https (or localhost), and the
- * Test call tab needs it. The phone warns about the certificate once; accept and go on.
- */
-const HTTPS = process.env.DASHBOARD_HTTPS === '1';
-
 export default defineConfig({
-  plugins: [react(), tailwindcss(), ...(HTTPS ? [basicSsl()] : [])],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
@@ -28,7 +21,7 @@ export default defineConfig({
     // the machine, and binding IPv6-only leaves half of those refusing connections.
     // It also puts the console on the LAN, which is what a demo to the room needs.
     host: '::',
-    port: HTTPS ? 5174 : 5173,
+    port: 5173,
     // Same-origin in dev, so EventSource needs no CORS dance and cookies would carry.
     proxy: {
       '/health': AGENT_ORIGIN,
@@ -37,9 +30,19 @@ export default defineConfig({
       '/stats': AGENT_ORIGIN,
       '/events': { target: AGENT_ORIGIN, changeOrigin: true, ws: false },
       '/__testlab': { target: TESTLAB_ORIGIN, changeOrigin: true },
+      '/agents/live': {
+        target: AGENT_ORIGIN,
+        changeOrigin: true,
+        ws: true,
+        rewrite: (path) => path.replace(/^\/agents\/live/, ''),
+      },
+      '/agents/simulation': {
+        target: SIM_AGENT_ORIGIN,
+        changeOrigin: true,
+        ws: true,
+        rewrite: (path) => path.replace(/^\/agents\/simulation/, ''),
+      },
       '/__sim': { target: SIM_ORIGIN, changeOrigin: true, ws: false },
-      // The agent's call socket, for the Test tab's "Local agent" endpoint.
-      '/ws': { target: AGENT_ORIGIN, ws: true },
     },
   },
 });

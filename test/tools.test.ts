@@ -15,6 +15,7 @@ import { detectMedicalEmergency, applyEmergencyGuard, appointmentKindFor, enforc
 import { providersByName, siteHours, type Catalogue } from '../src/clinic-api.js';
 import {
   acceptFromTranscript,
+  callerAccepted,
   createCallState,
   recordPatientField,
   recordQuote,
@@ -38,10 +39,11 @@ function check(name: string, actual: unknown, expected: unknown): void {
 
 check('DNI spaced digits', normalizeNationalId('1 2 3 4 5 6 7 8 Z').value, '12345678Z');
 check('DNI check letter ok', normalizeNationalId('12345678Z').problem, undefined);
-check('DNI wrong check letter is flagged, not corrected', normalizeNationalId('12345678A').value, '12345678A');
+check('DNI wrong check letter is dropped', normalizeNationalId('12345678A').value, '');
 check('DNI wrong check letter names the right one', /should be Z/.test(normalizeNationalId('12345678A').problem ?? ''), true);
 check('NIE uses its prefix digit', normalizeNationalId('X1234567L').problem, undefined);
 check('DNI missing its letter', normalizeNationalId('12345678').problem, 'missing the check letter');
+check('truncated NIE is dropped', normalizeNationalId('Y6').value, '');
 check('phone with +34', normalizePhone('+34 612 345 678').value, '612345678');
 check('phone with 0034', normalizePhone('0034612345678').value, '612345678');
 check('phone dictated as words', normalizePhone('six one two three four five six seven eight').value, '612345678');
@@ -311,14 +313,25 @@ const tuesday = quote('2026-09-22T09:30:00+02:00', 'PR2');
 function afterQuote(said: string[]): QuotedSlot | null {
   const call = createCallState('call-2');
   recordQuote(call, [monday, noon, tuesday]);
+  call.quoted_spoken = true;
   return acceptFromTranscript(
     call,
     said.map((text) => ({ role: 'user', text })),
   );
 }
 
+check('affirmative sentence is accepted', callerAccepted("Yes. That's fine. I'll take it."), 'yes');
+check('affirmative time sentence is accepted', callerAccepted('Monday at 9 30 AM is fine'), 'yes');
+check('surprise is unclear', callerAccepted('Oh,'), 'unclear');
+check('greeting is unclear', callerAccepted('Hello?'), 'unclear');
+check('redirect after yes is a refusal', callerAccepted('Yes. But could I have it at Norte?'), 'no');
+check('explicit no is a refusal', callerAccepted('No. I need a dermatologist who takes DKV'), 'no');
+check('okay is accepted', callerAccepted('Okay'), 'yes');
+check('yeah go on is accepted', callerAccepted('Yeah. Go on.'), 'yes');
+
 check('a time the caller says is matched to the quote', afterQuote(["Monday at 11 45 AM. Yeah, I'll take that."])?.start_time, monday.start_time);
 check('the afternoon face of the same clock', afterQuote(['12:00 works'])?.start_time, noon.start_time);
+check('a spoken clock in words is matched to the quote', afterQuote(['nine thirty please'])?.start_time, tuesday.start_time);
 check('an ordinal picks off the list we read out', afterQuote(['the first one please'])?.start_time, monday.start_time);
 check('and so does the last', afterQuote(["I'll take the last one"])?.start_time, tuesday.start_time);
 check('the request phrasing is not a choice', afterQuote(['what is the soonest you have', 'ok', 'thanks', 'bye']), null);
@@ -329,6 +342,7 @@ check('nothing is chosen when nothing was said', afterQuote(["I'll think about i
   const noReply = createCallState('call-after-quote');
   noReply.turns_seen = 2;
   recordQuote(noReply, [nineThirty]);
+  noReply.quoted_spoken = true;
   check(
     'a request before the quote is not an acceptance',
     acceptFromTranscript(noReply, [
@@ -341,6 +355,7 @@ check('nothing is chosen when nothing was said', afterQuote(["I'll think about i
   const ordinalReply = createCallState('call-after-ordinal');
   ordinalReply.turns_seen = 2;
   recordQuote(ordinalReply, [nineThirty]);
+  ordinalReply.quoted_spoken = true;
   check(
     'an ordinal after the quote is an acceptance',
     acceptFromTranscript(ordinalReply, [
@@ -354,6 +369,7 @@ check('nothing is chosen when nothing was said', afterQuote(["I'll think about i
   const clockReply = createCallState('call-after-clock');
   clockReply.turns_seen = 2;
   recordQuote(clockReply, [nineThirty]);
+  clockReply.quoted_spoken = true;
   check(
     'a clock time after the quote is an acceptance',
     acceptFromTranscript(clockReply, [
@@ -367,11 +383,13 @@ check('nothing is chosen when nothing was said', afterQuote(["I'll think about i
 
 const held = createCallState('call-3');
 recordQuote(held, [monday, noon]);
+held.quoted_spoken = true;
 held.accepted = noon;
 check('a slot already held is never overwritten', acceptFromTranscript(held, [{ role: 'user', text: '11:45 then' }]), null);
 
 const unchosen = createCallState('call-4');
 recordQuote(unchosen, [monday]);
+unchosen.quoted_spoken = true;
 check('an unaccepted quote still carries its ids', /provider_id=PR1 location_id=LOC_CENTRO appointment_type_id=AT_REVIEW/.test(readCallState(unchosen)), true);
 
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);

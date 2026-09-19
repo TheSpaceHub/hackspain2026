@@ -12,10 +12,13 @@ import type { Availability } from './clinic-api.js';
 import { choosePolicy, type CallState } from './call-state.js';
 
 export function bookFromState(state: CallState): Extract<Action, { action: 'book' }> | undefined {
+  // `accepted` is only set once accept_slot has checked the quote was read and the caller
+  // answered yes; the caller's last words at hang-up are usually "thanks, goodbye".
   const accepted = state.accepted;
   const matched = state.matched;
   const policy_id = choosePolicy(state);
   if (!accepted || !matched || !policy_id) return undefined;
+  if (accepted.for_patient_id !== matched.patient_id) return undefined;
   if (!state.caller_is_patient && state.matched_by === 'phone') return undefined;
   return {
     action: 'book',

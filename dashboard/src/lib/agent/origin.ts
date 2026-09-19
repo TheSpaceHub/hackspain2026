@@ -1,15 +1,27 @@
-/**
- * Where the agent is. In dev, nowhere in particular: Vite proxies every agent path, so
- * requests stay same-origin. A deployed console (Vercel) has no proxy and talks to the
- * agent's public URL directly — the same tunnel Prosper dials. That URL changes whenever
- * the tunnel restarts, so it is set at runtime, not baked into the build:
- *
- *   https://console.example/?agent=https://xyz.trycloudflare.com   (a link to share)
- *
- * It sticks in this browser until changed. VITE_AGENT_ORIGIN is only the fallback.
- */
+export type AgentMode = 'live' | 'simulation';
 
-const KEY = 'agent-origin';
+const MODE_KEY = 'console.mode';
+const ORIGIN_KEYS: Record<AgentMode, string> = {
+  live: 'agent-origin.live',
+  simulation: 'agent-origin.simulation',
+};
+
+export function storedMode(): AgentMode {
+  try {
+    const value = localStorage.getItem(MODE_KEY);
+    return value === 'simulation' ? 'simulation' : 'live';
+  } catch {
+    return 'live';
+  }
+}
+
+export function storeMode(mode: AgentMode): void {
+  try {
+    localStorage.setItem(MODE_KEY, mode);
+  } catch {
+    // Private windows may not persist local storage.
+  }
+}
 
 /** Accepts what people paste: a bare host, https://…, or the wss://…/ws Prosper dials. */
 export function normalizeOrigin(input: string): string {
@@ -23,52 +35,57 @@ export function normalizeOrigin(input: string): string {
     .replace(/\/ws$/, '');
 }
 
-function initial(): string {
-  if (!import.meta.env.PROD) return '';
-  const param = new URLSearchParams(window.location.search).get('agent');
-  if (param !== null) {
-    const origin = normalizeOrigin(param);
-    try {
-      localStorage.setItem(KEY, origin);
-    } catch {
-      // private window: it holds for this visit only
-    }
-    return origin;
-  }
+function storedOrigin(mode: AgentMode): string {
   try {
-    const stored = localStorage.getItem(KEY);
-    if (stored) return stored;
+    return localStorage.getItem(ORIGIN_KEYS[mode]) ?? '';
   } catch {
-    // unreadable storage: fall through to the build's default
+    return '';
   }
-  return normalizeOrigin(import.meta.env.VITE_AGENT_ORIGIN ?? '');
 }
 
-/** '' in dev (same-origin through the proxy) or when a deployed console has none yet. */
-export const AGENT_ORIGIN = initial();
+function fallbackOrigin(mode: AgentMode): string {
+  const configured = mode === 'live' ? import.meta.env.VITE_AGENT_ORIGIN : import.meta.env.VITE_SIM_AGENT_ORIGIN;
+  return normalizeOrigin(configured ?? '');
+}
 
-/** A deployed console that does not know where its agent is yet. */
-export const NEEDS_AGENT_ORIGIN = import.meta.env.PROD && !AGENT_ORIGIN;
-
-/** Point the console at another agent. Reloads, so every open stream reconnects there. */
-export function setAgentOrigin(input: string): void {
-  const origin = normalizeOrigin(input);
+function writeOrigin(mode: AgentMode, origin: string): void {
   try {
-    localStorage.setItem(KEY, origin);
+    localStorage.setItem(ORIGIN_KEYS[mode], origin);
   } catch {
-    // private window: carry it in the URL instead
+    // Private windows may not persist local storage.
   }
+}
+
+function applyQueryOrigin(): void {
+  if (!import.meta.env.PROD) return;
+  const param = new URLSearchParams(window.location.search).get('agent');
+  if (param !== null) writeOrigin(storedMode(), normalizeOrigin(param));
+}
+
+applyQueryOrigin();
+
+/** HTTP base for the selected fixed-mode agent. */
+export function agentOrigin(mode: AgentMode): string {
+  if (!import.meta.env.PROD) return `/agents/${mode}`;
+  return storedOrigin(mode) || fallbackOrigin(mode);
+}
+
+/** Whether a deployed console still needs an agent URL for this mode. */
+export function needsAgentOrigin(mode: AgentMode): boolean {
+  return import.meta.env.PROD && !agentOrigin(mode);
+}
+
+/** Point one deployed console mode at another agent and reload its streams. */
+export function setAgentOrigin(mode: AgentMode, input: string): void {
+  const origin = normalizeOrigin(input);
+  writeOrigin(mode, origin);
   const url = new URL(window.location.href);
   url.searchParams.set('agent', origin);
   window.location.replace(url.toString());
 }
 
-/** The call socket of the agent this console reads — what the Test tab rings by default. */
-export function agentSocketUrl(): string {
-  return `${(AGENT_ORIGIN || window.location.origin).replace(/^http/, 'ws')}/ws`;
-}
-
-/** For display: the host alone. */
-export function agentHost(): string {
-  return AGENT_ORIGIN ? AGENT_ORIGIN.replace(/^https?:\/\//, '') : window.location.host;
+/** The host shown in the per-mode connection control. */
+export function agentHost(mode: AgentMode): string {
+  const origin = agentOrigin(mode);
+  return origin ? origin.replace(/^https?:\/\//, '') : window.location.host;
 }

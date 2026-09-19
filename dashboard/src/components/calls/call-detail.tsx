@@ -1,6 +1,7 @@
 import { PhoneIncoming, PhoneOff } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { type Call, callStatus } from '@/lib/agent/model';
+import type { AgentMode } from '@/lib/agent/origin';
 import { recordingUrl } from '@/lib/agent/client';
 import { formatClock, formatDay, formatDuration, formatPhone, shortId } from '@/lib/format';
 import { ClinicTrace } from '@/components/clinic/clinic-trace';
@@ -17,6 +18,7 @@ const ENDED_BY: Record<string, string> = {
 };
 
 interface CallDetailProps {
+  mode: AgentMode;
   call: Call;
   loading: boolean;
   now: number;
@@ -35,7 +37,7 @@ function TranscriptSkeleton() {
   );
 }
 
-export function CallDetail({ call, loading, now }: CallDetailProps) {
+export function CallDetail({ mode, call, loading, now }: CallDetailProps) {
   const status = callStatus(call, now);
   const phone = formatPhone(call.fromNumber);
   const endedBy = call.endedBy ? (ENDED_BY[call.endedBy] ?? call.endedBy.replace(/_/g, ' ')) : null;
@@ -84,7 +86,7 @@ export function CallDetail({ call, loading, now }: CallDetailProps) {
             <>
               <RecordCard call={call} />
               {call.recording.available && (
-                <audio controls preload="none" src={recordingUrl(call.id)} className="h-8 w-full max-w-xs" />
+                <audio controls preload="none" src={recordingUrl(mode, call.id)} className="h-8 w-full max-w-xs" />
               )}
             </>
           )}

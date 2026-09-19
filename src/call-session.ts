@@ -3,6 +3,7 @@ import { AudioFrame } from '@livekit/rtc-node';
 import { join } from 'node:path';
 import type { WebSocket } from 'ws';
 import { GREETING, ReceptionistAgent } from './agent.js';
+import { siteName, speakTime } from './agent-tools.js';
 import { MediaStreamAudioInput } from './audio-input.js';
 import { MediaStreamAudioOutput } from './audio-output.js';
 import { writeCallLog, type CallLog } from './call-log.js';
@@ -12,6 +13,8 @@ import {
   missingForRegistration,
   readCallState,
   recordMatch,
+  saidTimes,
+  sameClock,
   type CallState,
   type QuotedSlot,
 } from './call-state.js';
@@ -28,6 +31,7 @@ import {
 import { mulawToPcm16 } from './mulaw.js';
 import { CallRecorder, type RecordingSummary } from './recorder.js';
 import { callContext, clog } from './log.js';
+import { normalizeNationalId } from './normalize.js';
 import { attachBrief } from './patient-brief.js';
 import { holdSlot, releaseHolds } from './sim-holds.js';
 import { clinicTarget, type ClinicMode, type ClinicTarget } from './clinic-target.js';
@@ -104,6 +108,7 @@ export class CallSession {
   #turnsWritten = 0;
   #silenceTimer: NodeJS.Timeout | null = null;
   #nudges = 0;
+  #lastAgentQuestion?: string;
   #greetingFinished = false;
   #deadAir: { turn: number; ms: number }[] = [];
   #pendingDeadAir: { turn: number; at: number }[] = [];
@@ -186,6 +191,7 @@ export class CallSession {
         stream_sid: this.#streamSid,
         from_number: this.#fromNumber,
         started_at: new Date(this.#startedAt).toISOString(),
+        clinic_mode: this.#clinic.mode,
       });
       this.#recorder = new CallRecorder({
         path: join(config.logDir, 'recordings', sanitizeCallId(this.#callId) + '.wav'),
@@ -285,6 +291,7 @@ export class CallSession {
       session.on(voice.AgentSessionEventTypes.UserInputTranscribed, (event) => {
         if (event.isFinal) {
           this.#nudges = 0;
+          if (this.#state) this.#state.caller_turns++;
           this.#pendingDeadAir.push({ turn: ++this.#deadAirTurn, at: Date.now() });
         }
         this.#clearSilenceTimer();
@@ -327,6 +334,30 @@ export class CallSession {
     }
   }
 
+  /** What to say into silence: the last thing we asked, or the open offer, or a plain check-in. */
+  #nudgeText(): string {
+    const question = this.#lastAgentQuestion;
+    if (question) return `Are you still there? ${question}`;
+    const state = this.#state;
+    const open = state && !state.accepted ? state.quoted : [];
+    if (state && open.length > 0) {
+      state.quoted_spoken = true;
+      const offer = open
+        .map((s) => `${speakTime(s.start_time)} with ${s.provider_name ?? s.provider_id} at ${siteName(this.#shared.catalogue, s.location_id)}`)
+        .join(', or ');
+      return `Are you still there? I can offer ${offer}. Would that suit you?`;
+    }
+    return 'Are you still there? How can I help you today?';
+  }
+
+  /** The agent's own last question, so a nudge repeats what was actually asked. */
+  #rememberAgentQuestion(text: string): void {
+    if (text.startsWith('Are you still there?')) return;
+    const sentences = text.match(/[^.!?]+[.!?]/g) ?? [text];
+    const asked = sentences.map((x) => x.trim()).filter((x) => x.endsWith('?'));
+    this.#lastAgentQuestion = asked.length > 0 ? asked[asked.length - 1] : undefined;
+  }
+
   #clearSilenceTimer(): void {
     if (this.#silenceTimer) clearTimeout(this.#silenceTimer);
     this.#silenceTimer = null;
@@ -359,29 +390,15 @@ export class CallSession {
 
       this.#nudges++;
       clog.info(`[silence] no caller speech for ${SILENCE_NUDGE_MS / 1000}s · nudge ${this.#nudges}`);
-      if (this.#nudges <= 2) {
-        try {
-          session.generateReply({
-            instructions:
-              'The caller has said nothing for several seconds since your last sentence. In one short sentence check they are still there and repeat your last question or the appointment you offered (with day and time), so they can answer with a yes.',
-            allowInterruptions: true,
-          });
-        } catch (err) {
-          this.#errors.push(`silence nudge: ${String(err)}`);
-        }
-        return;
-      }
-
+      // Fixed text, not a model turn: asked to "repeat the offer so they can say yes",
+      // the model called accept_slot on the caller's behalf and booked ten silent calls.
+      // We never hang up on silence: some callers take twenty seconds to answer; the
+      // call-length limit is the only end.
       try {
-        const goodbye = session.say(
-          "I'm sorry, I can't hear you. Please call us back at Clínica Arenal whenever suits you. Goodbye.",
-          { allowInterruptions: true },
-        );
-        await goodbye.waitForPlayout();
+        session.say(this.#nudgeText(), { allowInterruptions: true });
       } catch (err) {
-        this.#errors.push(`silence goodbye: ${String(err)}`);
+        this.#errors.push(`silence nudge: ${String(err)}`);
       }
-      if (!this.#closing) void this.finish('caller_silent');
     } catch (err) {
       this.#errors.push(`silence timer: ${String(err)}`);
     }
@@ -414,8 +431,21 @@ export class CallSession {
     const at = new Date().toISOString();
     for (let i = this.#turnsWritten; i < turns.length; i++) {
       const turn = turns[i]!;
+      if (turn.role === 'assistant') this.#rememberAgentQuestion(turn.text);
+      if (
+        this.#state &&
+        turn.role === 'assistant' &&
+        this.#state.quoted.length > 0 &&
+        !this.#state.quoted_spoken &&
+        saidTimes(turn.text).some((said) =>
+          this.#state!.quoted.some((slot) => sameClock(slot, said)),
+        )
+      ) {
+        this.#state.quoted_spoken = true;
+      }
       // Queued, not awaited: the agent is already answering this turn.
       if (turn.role !== 'assistant') {
+        if (this.#state) this.#state.last_caller_text = turn.text;
         const before = turns[i - 1];
         this.#extractor?.observe(
           turn.text,
@@ -529,7 +559,17 @@ export class CallSession {
       budget,
     );
 
-    const actions = this.#guard(this.#actionsFor(decided));
+    const guarded = this.#guard(this.#actionsFor(decided));
+    const actions = guarded.map((action) => {
+      if (action.action !== 'register') return action;
+      const nationalId = normalizeNationalId(action.national_id);
+      if (!action.national_id || nationalId.problem || !nationalId.value) {
+        this.#errors.push(`registration refused: invalid national_id "${action.national_id ?? ''}"`);
+        clog.warn(`[register] refused invalid national_id "${action.national_id ?? ''}"`);
+        return FLOOR_ACTION;
+      }
+      return { ...action, national_id: nationalId.value };
+    });
     const submitStartedAt = Date.now();
     let submissions: SubmitResult[] = [];
     if (this.#callId) {

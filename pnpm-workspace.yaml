@@ -1,5 +1,6 @@
 packages:
   - dashboard
+  - softphone
 
 allowBuilds:
   '@livekit/local-inference': true

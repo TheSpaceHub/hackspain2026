@@ -3,12 +3,14 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CallFeed } from '@/hooks/use-call-feed';
 import { useNow } from '@/hooks/use-now';
 import { callStatus } from '@/lib/agent/model';
+import type { AgentMode } from '@/lib/agent/origin';
 import { Card } from '@/components/ui/card';
 import { CallDetail } from './call-detail';
 import { CallList } from './call-list';
 import { EmptyState } from './empty-state';
 
 interface FinishedCallsViewProps {
+  mode: AgentMode;
   feed: CallFeed;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
@@ -18,7 +20,7 @@ interface FinishedCallsViewProps {
  * Master–detail over every call that is no longer live. The list carries counts
  * only; opening a call pulls its transcript and submissions once.
  */
-export function FinishedCallsView({ feed, selectedId, onSelect: select }: FinishedCallsViewProps) {
+export function FinishedCallsView({ mode, feed, selectedId, onSelect: select }: FinishedCallsViewProps) {
   const now = useNow();
   const [loaded, setLoaded] = useState<ReadonlySet<string>>(() => new Set());
   const [loading, setLoading] = useState<string | null>(null);
@@ -59,7 +61,7 @@ export function FinishedCallsView({ feed, selectedId, onSelect: select }: Finish
 
       <Card size="sm" className="min-h-0 gap-0 py-0">
         {selected ? (
-          <CallDetail call={selected} loading={loading === selected.id} now={now} />
+          <CallDetail mode={mode} call={selected} loading={loading === selected.id} now={now} />
         ) : selectedId && loading === selectedId ? null : selectedId ? (
           <EmptyState icon={MessagesSquare} title="Call not found">
             The agent has no call with this id. It may have been cleared from its store.

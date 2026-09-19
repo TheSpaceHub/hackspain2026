@@ -61,6 +61,7 @@ export interface QuotedSlot {
   provider_name?: string;
   location_id: string;
   appointment_type_id: string;
+  for_patient_id?: string;
   /** ISO 8601 with offset, straight from /availability — never re-derived from speech. */
   start_time: string;
   payable_with?: string[];
@@ -83,8 +84,13 @@ export interface CallState {
   caller?: { name?: string; relationship?: string };
   request: CallRequest;
   quoted: QuotedSlot[];
+  quoted_spoken: boolean;
   turns_seen: number;
   quoted_at?: number;
+  /** Final caller utterances so far, and how many there were when the quote was read. */
+  caller_turns: number;
+  quoted_after_caller_turns?: number;
+  last_caller_text?: string;
   accepted: QuotedSlot | null;
   phone_match_rejected?: string;
   /** Every write, in order, including the ones that were later retracted. */
@@ -99,7 +105,9 @@ export function createCallState(callId: string, fromNumber?: string): CallState 
     caller_is_patient: true,
     request: { insurers: [] },
     quoted: [],
+    quoted_spoken: false,
     turns_seen: 0,
+    caller_turns: 0,
     accepted: null,
     journal: [],
   };
@@ -134,8 +142,7 @@ export interface RecordResult {
 
 /**
  * One field of the patient draft. A value that fails its own check — a DNI whose letter
- * does not match its digits — is stored anyway and flagged: the caller can only correct
- * what we admit we heard, and a flagged value still beats an empty field at close.
+ * does not match its digits — is dropped before it can reach registration or lookup.
  */
 export function recordPatientField(
   state: CallState,
@@ -146,6 +153,10 @@ export function recordPatientField(
   if (field === 'insurer' && !value) {
     clog.warn(`[state] dropped insurer "${spoken}": not a plan the clinic bills`);
     return { value: '', stored: false, problem: 'not a plan the clinic bills' };
+  }
+  if (field === 'national_id' && problem) {
+    clog.warn(`[state] dropped national id "${spoken}": ${problem}`);
+    return { value: '', stored: false, problem };
   }
   record(state, field, value, problem);
   state.patient[field] = value;
@@ -221,8 +232,19 @@ function namePartMatches(spoken: string, record: string | null | undefined, pref
 /** Slots we actually said out loud, so the submitted `slot` is the quoted string exactly. */
 export function recordQuote(state: CallState, slots: QuotedSlot[]): void {
   state.quoted = slots;
+  state.quoted_spoken = false;
   state.quoted_at = state.turns_seen;
+  state.quoted_after_caller_turns = state.caller_turns;
   for (const slot of slots) record(state, 'quoted', `${slot.start_time} ${slot.provider_id}`);
+}
+
+/** Nobody has answered the offer yet: the caller has not spoken since it was read. */
+export function callerSilentSinceQuote(state: CallState): boolean {
+  return (
+    state.quoted.length > 0 &&
+    state.quoted_after_caller_turns !== undefined &&
+    state.caller_turns === state.quoted_after_caller_turns
+  );
 }
 
 const ORDINALS: Record<string, number> = {
@@ -250,10 +272,68 @@ function clockFace(iso: string): { hour: number; minute: number } | undefined {
 
 export function saidTimes(turn: string): { hour: number; minute: number }[] {
   const times: { hour: number; minute: number }[] = [];
-  for (const m of turn.matchAll(/\b(\d{1,2})\s*[:.\s]\s*(\d{2})\b/g)) {
-    times.push({ hour: Number(m[1]), minute: Number(m[2]) });
+  for (const m of turn.matchAll(/\b(\d{1,2})(?:(?:\s*[:.]\s*|\s+)(\d{2})\s*(am|pm)?|\s*(am|pm))\b/gi)) {
+    let hour = Number(m[1]);
+    const minute = Number(m[2] ?? 0);
+    const meridiem = (m[3] ?? m[4])?.toLowerCase();
+    if (meridiem === 'pm' && hour < 12) hour += 12;
+    if (meridiem === 'am' && hour === 12) hour = 0;
+    times.push({ hour, minute });
+  }
+  const words: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+    seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  };
+  const minutes: Record<string, number> = {
+    oh: 0, zero: 0, five: 5, ten: 10, fifteen: 15, twenty: 20,
+    'twenty five': 25, thirty: 30, 'thirty five': 35,
+    forty: 40, 'forty five': 45, fifty: 50, 'fifty five': 55,
+  };
+  const wordPattern = Object.keys(words).join('|');
+  const minutePattern = Object.keys(minutes)
+    .sort((a, b) => b.length - a.length)
+    .map((word) => word.replace(' ', '[- ]'))
+    .join('|');
+  const re = new RegExp(
+    `\\b(${wordPattern})(?:\\s+(${minutePattern})(?:\\s+(am|pm))?|\\s+(am|pm))\\b`,
+    'gi',
+  );
+  for (const m of turn.matchAll(re)) {
+    const hour = words[m[1]!.toLowerCase()];
+    if (hour === undefined) continue;
+    const minuteWord = m[2]?.toLowerCase().replace(/-/g, ' ');
+    const minute = minuteWord ? minutes[minuteWord] : 0;
+    if (minute === undefined) continue;
+    const meridiem = m[3]?.toLowerCase();
+    const adjustedHour = meridiem === 'pm' && hour < 12 ? hour + 12 : meridiem === 'am' && hour === 12 ? 0 : hour;
+    times.push({ hour: adjustedHour, minute });
   }
   return times;
+}
+
+const ACCEPTANCE_WORDS = [
+  'yes', 'yeah', 'yep', 'sure', 'okay', 'ok', 'fine', 'perfect', 'great', 'good',
+  'please', 'book it', 'take it', 'go ahead', 'that one', 'that works', 'suits', 'confirm',
+];
+const HEDGE_WORDS = [
+  'but', 'instead', 'rather', 'other', 'different', 'another', 'no', 'not', "can't",
+  'cannot', 'change', 'actually', 'what about', 'could i', 'is there',
+];
+
+/** Classify the caller's last turn without treating surprise or small talk as consent. */
+export function callerAccepted(text: string): 'yes' | 'no' | 'unclear' {
+  const normalized = text.toLowerCase().replace(/[’]/g, "'");
+  const has = (token: string): boolean => {
+    const pattern = token.includes(' ')
+      ? new RegExp(`\\b${token.replace(/ /g, '\\s+')}\\b`, 'i')
+      : new RegExp(`\\b${token.replace(/[?]/g, '\\?')}\\b`, 'i');
+    return pattern.test(normalized);
+  };
+  if (HEDGE_WORDS.some(has)) return 'no';
+  if (ACCEPTANCE_WORDS.some(has)) return 'yes';
+  return /\b(?:take|choose|pick)\s+(?:the\s+)?(?:first|second|third|last|latest)\s+one\b/.test(normalized)
+    ? 'yes'
+    : 'unclear';
 }
 
 export function sameClock(
@@ -263,7 +343,9 @@ export function sameClock(
   const face = clockFace(slot.start_time);
   if (!face || face.minute !== said.minute) return false;
   // "11:45" and "quarter to twelve in the morning" reach us as the 12-hour face.
-  return face.hour === said.hour || face.hour === said.hour + 12;
+  return face.hour === said.hour ||
+    face.hour === said.hour + 12 ||
+    face.hour + 12 === said.hour;
 }
 
 /**
@@ -277,13 +359,17 @@ export function acceptFromTranscript(
   state: CallState,
   turns: { role: string; text: string }[],
 ): QuotedSlot | null {
-  if (state.accepted || state.quoted.length === 0) return null;
+  if (state.accepted || state.quoted.length === 0 || !state.quoted_spoken) return null;
   const spoken = turns
     .map((turn, index) => ({ ...turn, index }))
     .filter((turn) => turn.role === 'user' && turn.index >= (state.quoted_at ?? 0));
 
-  for (let i = spoken.length - 1; i >= 0; i--) {
-    const text = spoken[i]!.text.toLowerCase();
+  const latest = spoken.at(-1);
+  if (!latest) return null;
+  {
+    const text = latest.text.toLowerCase();
+    const accepted = callerAccepted(text);
+    if (accepted === 'no') return null;
 
     const byClock = saidTimes(text).flatMap((said) =>
       state.quoted.filter((slot) => sameClock(slot, said)),
@@ -300,7 +386,7 @@ export function acceptFromTranscript(
     const ordinals = asksForOptions
       ? []
       : Object.keys(ORDINALS).filter((word) => new RegExp(`\\b${word}\\b`).test(text));
-    if (ordinals.length === 1) {
+    if (accepted === 'yes' && ordinals.length === 1) {
       const at = ORDINALS[ordinals[0]!]!;
       const slot = at < 0 ? state.quoted[state.quoted.length - 1] : state.quoted[at];
       if (slot) {

@@ -11,6 +11,7 @@
  */
 
 import { z } from 'zod';
+import { providersByName, type Catalogue } from './clinic-api.js';
 import {
   contradictsMatch,
   recordPatientField,
@@ -88,6 +89,17 @@ const RELATIONSHIPS = new Set([
   'grandfather', 'friend', 'madre', 'padre', 'hijo', 'hija', 'esposo', 'esposa',
   'pareja', 'cuidador', 'tutor', 'hermano', 'hermana', 'abuelo', 'abuela',
 ]);
+
+let PROVIDER_CATALOGUE: Catalogue | null = null;
+
+export function setProviderVocabulary(catalogue: Catalogue | null): void {
+  PROVIDER_CATALOGUE = catalogue;
+}
+
+function providerName(spoken: string): string | undefined {
+  if (!PROVIDER_CATALOGUE) return undefined;
+  return providersByName(PROVIDER_CATALOGUE, spoken).length > 0 ? spoken : undefined;
+}
 
 function real(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -330,9 +342,17 @@ export function heardIt(field: PatientField, value: string, heard: string): bool
  * `heard` is the turn the patch came from; pass it and anything not in it is dropped.
  */
 export function applyPatch(state: CallState, patch: ExtractedPatch, heard?: string): void {
+  const given = real(patch.patient?.given_name);
+  const surname = real(patch.patient?.first_surname);
+  const candidate = [given, surname].filter(Boolean).join(' ');
+  // Full name only: plenty of patients share a surname with one of our doctors.
+  const doctorName = given && surname ? providerName(candidate) : undefined;
+  if (doctorName) clog.warn(`[extract] "${doctorName}" is a doctor, not the caller`);
+
   for (const field of PATIENT_FIELDS) {
     const value = real(patch.patient?.[field]);
     if (value === undefined) continue;
+    if (doctorName && (field === 'given_name' || field === 'first_surname')) continue;
     if (heard !== undefined && !heardIt(field, value, heard)) {
       clog.warn(`[extract] dropped ${field} "${value}": not in what the caller said`);
       continue;
@@ -342,12 +362,16 @@ export function applyPatch(state: CallState, patch: ExtractedPatch, heard?: stri
     if (before === result.value) state.journal.pop();
   }
 
-  const given = real(patch.patient?.given_name);
-  const surname = real(patch.patient?.first_surname);
+  const heardGiven = given !== undefined && (heard === undefined || heardIt('given_name', given, heard));
+  const heardSurname = surname !== undefined && (heard === undefined || heardIt('first_surname', surname, heard));
   if (
     state.caller_is_patient &&
     patch.caller_is_patient !== false &&
-    contradictsMatch(state, given, surname)
+    contradictsMatch(
+      state,
+      heardGiven && !doctorName ? given : undefined,
+      heardSurname && !doctorName ? surname : undefined,
+    )
   ) {
     const name = [given, surname, real(patch.patient?.second_surname)].filter(Boolean).join(' ');
     recordMatch(state, null, `phone match dropped: caller says they are ${name}`);
