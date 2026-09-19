@@ -223,6 +223,47 @@ check('and so does the last', afterQuote(["I'll take the last one"])?.start_time
 check('the request phrasing is not a choice', afterQuote(['what is the soonest you have', 'ok', 'thanks', 'bye']), null);
 check('nothing is chosen when nothing was said', afterQuote(["I'll think about it"]), null);
 
+{
+  const nineThirty = quote('2026-09-21T09:30:00+02:00', 'PR3');
+  const noReply = createCallState('call-after-quote');
+  noReply.turns_seen = 2;
+  recordQuote(noReply, [nineThirty]);
+  check(
+    'a request before the quote is not an acceptance',
+    acceptFromTranscript(noReply, [
+      { role: 'user', text: 'Book the soonest appointment with orthopaedics.' },
+      { role: 'assistant', text: 'The soonest is Monday at 9:30 with Dr Peral.' },
+    ]),
+    null,
+  );
+
+  const ordinalReply = createCallState('call-after-ordinal');
+  ordinalReply.turns_seen = 2;
+  recordQuote(ordinalReply, [nineThirty]);
+  check(
+    'an ordinal after the quote is an acceptance',
+    acceptFromTranscript(ordinalReply, [
+      { role: 'user', text: 'Book the soonest appointment with orthopaedics.' },
+      { role: 'assistant', text: 'The soonest is Monday at 9:30 with Dr Peral.' },
+      { role: 'user', text: 'Yes, the first one.' },
+    ])?.start_time,
+    nineThirty.start_time,
+  );
+
+  const clockReply = createCallState('call-after-clock');
+  clockReply.turns_seen = 2;
+  recordQuote(clockReply, [nineThirty]);
+  check(
+    'a clock time after the quote is an acceptance',
+    acceptFromTranscript(clockReply, [
+      { role: 'user', text: 'Book the soonest appointment with orthopaedics.' },
+      { role: 'assistant', text: 'The soonest is Monday at 9:30 with Dr Peral.' },
+      { role: 'user', text: '9 30 please.' },
+    ])?.start_time,
+    nineThirty.start_time,
+  );
+}
+
 const held = createCallState('call-3');
 recordQuote(held, [monday, noon]);
 held.accepted = noon;

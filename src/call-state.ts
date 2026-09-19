@@ -82,6 +82,8 @@ export interface CallState {
   caller?: { name?: string; relationship?: string };
   request: CallRequest;
   quoted: QuotedSlot[];
+  turns_seen: number;
+  quoted_at?: number;
   accepted: QuotedSlot | null;
   phone_match_rejected?: string;
   /** Every write, in order, including the ones that were later retracted. */
@@ -96,6 +98,7 @@ export function createCallState(callId: string, fromNumber?: string): CallState 
     caller_is_patient: true,
     request: { insurers: [] },
     quoted: [],
+    turns_seen: 0,
     accepted: null,
     journal: [],
   };
@@ -206,6 +209,7 @@ export function contradictsMatch(state: CallState, given?: string, surname?: str
 /** Slots we actually said out loud, so the submitted `slot` is the quoted string exactly. */
 export function recordQuote(state: CallState, slots: QuotedSlot[]): void {
   state.quoted = slots;
+  state.quoted_at = state.turns_seen;
   for (const slot of slots) record(state, 'quoted', `${slot.start_time} ${slot.provider_id}`);
 }
 
@@ -262,7 +266,9 @@ export function acceptFromTranscript(
   turns: { role: string; text: string }[],
 ): QuotedSlot | null {
   if (state.accepted || state.quoted.length === 0) return null;
-  const spoken = turns.filter((t) => t.role === 'user');
+  const spoken = turns
+    .map((turn, index) => ({ ...turn, index }))
+    .filter((turn) => turn.role === 'user' && turn.index >= (state.quoted_at ?? 0));
 
   for (let i = spoken.length - 1; i >= 0; i--) {
     const text = spoken[i]!.text.toLowerCase();
@@ -276,12 +282,12 @@ export function acceptFromTranscript(
     }
     if (byClock.length > 1) return null;
 
-    // "the soonest you have" is how the request itself is phrased, so an ordinal only
-    // counts as a choice when it comes after the list was read out.
-    const ordinals =
-      i < spoken.length - 2
-        ? []
-        : Object.keys(ORDINALS).filter((word) => new RegExp(`\\b${word}\\b`).test(text));
+    // Availability questions such as "what is the soonest" are requests, not choices.
+    const asksForOptions = /\b(?:what|which|when|do you have|is there)\b/.test(text) &&
+      Object.keys(ORDINALS).some((word) => new RegExp(`\\b${word}\\b`).test(text));
+    const ordinals = asksForOptions
+      ? []
+      : Object.keys(ORDINALS).filter((word) => new RegExp(`\\b${word}\\b`).test(text));
     if (ordinals.length === 1) {
       const at = ORDINALS[ordinals[0]!]!;
       const slot = at < 0 ? state.quoted[state.quoted.length - 1] : state.quoted[at];

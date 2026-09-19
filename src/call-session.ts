@@ -270,6 +270,7 @@ export class CallSession {
     } catch {
       return;
     }
+    if (this.#state) this.#state.turns_seen = turns.length;
     const at = new Date().toISOString();
     for (let i = this.#turnsWritten; i < turns.length; i++) {
       const turn = turns[i]!;
@@ -310,6 +311,7 @@ export class CallSession {
 
     try {
       this.#transcript = this.#session ? buildCallTranscript(this.#session.history) : [];
+      if (this.#state) this.#state.turns_seen = this.#transcript.length;
     } catch (err) {
       this.#errors.push(`transcript: ${String(err)}`);
     }
