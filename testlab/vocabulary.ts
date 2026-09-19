@@ -25,11 +25,14 @@ export const VOCABULARIES: Vocabulary[] = [
   {
     id: 'vague',
     label: 'Vague',
-    description: 'Never names the specialty, the doctor or the day outright.',
+    description: 'Times and places as a person says them: "first thing", "after lunch", "the usual one".',
     instructions: [
-      'You are not very sure of the names for any of this, so you describe things instead: "the bone people",',
-      '"the usual place", "my regular one", "soon-ish, after work". Asked to be exact you reach for another',
-      'rough description first, and the actual name only comes to you if they keep at it.',
+      'You say things the way people say them to each other, not the way a diary writes them down. Times are',
+      '"first thing in the morning", "right after lunch", "sometime before I pick the kids up", "end of next',
+      'week"; days are "Tuesday-ish" or "the day after tomorrow"; places are "the usual one", "the one near the',
+      'market"; doctors are "my regular one" and specialties "the bone people". None of it is evasion — it is',
+      'simply how you think about your week. If they offer you an exact time or read a date back, you are happy',
+      'to say yes or no to it; you just would not have come up with it yourself.',
     ].join(' '),
   },
   {
