@@ -8,6 +8,7 @@
  */
 
 import { blendBehaviours } from '../testlab/behaviour.js';
+import { atDifficulty, difficultyOf } from '../testlab/difficulty.js';
 import { interleave } from '../testlab/runner.js';
 import { blendVocabularies } from '../testlab/vocabulary.js';
 
@@ -48,6 +49,23 @@ const mixed = blendVocabularies(['vague', 'code_switching']);
 check('two ways of talking are one way of talking', mixed.id === 'vague+code_switching', mixed.id);
 check('and it keeps both', mixed.instructions.includes(vague.instructions), mixed.instructions);
 check('plain plus one is that one', blendVocabularies(['plain', 'terse']).id === 'terse');
+
+// The difficulty is the same caller turned up, so it folds into the blend rather than
+// replacing it: the traits still read, the call just costs more.
+const hard = difficultyOf('hard');
+const turnedUp = atDifficulty(both, hard);
+check('normal leaves the caller alone', atDifficulty(both, difficultyOf('normal')) === both);
+check('an unknown level is normal', difficultyOf('nonsense').id === 'normal');
+check(
+  'a harder call keeps the traits and adds its own',
+  turnedUp.instructions.includes(both.instructions) && turnedUp.instructions.includes(hard.instructions),
+  turnedUp.instructions,
+);
+check('and drags: slower, with longer gaps', turnedUp.wpm <= both.wpm && turnedUp.lead_ms > both.lead_ms);
+check(
+  'a cooperative caller at brutal is still told how hard it is',
+  atDifficulty(blendBehaviours([]), difficultyOf('brutal')).instructions.includes('change your mind'),
+);
 
 // And the order a round is dialled in: round-robin over the problems, so a round read
 // or stopped early has something to say about the whole board.

@@ -55,6 +55,18 @@ export interface Vocabulary {
   instructions: string;
 }
 
+/** How much work the caller is, at whatever traits were picked. */
+export interface Difficulty {
+  id: string;
+  label: string;
+  description: string;
+  instructions: string;
+  wpm_scale: number;
+  lead_scale: number;
+  lead_min_ms: number;
+  extra_turns: number;
+}
+
 /** Which suite is loaded, and the seed the random asks came out of. */
 export interface Generation {
   source: 'real' | 'generated';
@@ -67,6 +79,8 @@ export interface SuiteResponse {
   cases: Case[];
   behaviours: Behaviour[];
   vocabularies: Vocabulary[];
+  /** Absent on a mock running code older than the difficulty dial. */
+  difficulties?: Difficulty[];
   generation: Generation;
   /** The model behind the persona callers, or null when there is none and scripts are used. */
   persona_caller: string | null;
@@ -134,6 +148,8 @@ export interface RunSummary {
   mode: 'script' | 'persona';
   behaviours: string[];
   vocabularies: string[];
+  /** Absent on runs recorded before the dial existed; they were all 'normal'. */
+  difficulty?: string;
   concurrency: number;
   started_at: string;
   finished_at: string | null;
@@ -161,6 +177,7 @@ export interface RunRequest {
   problem_ids?: string[];
   behaviours?: string[];
   vocabularies?: string[];
+  difficulty?: string;
   mode?: 'script' | 'persona';
   concurrency?: number;
 }

@@ -53,8 +53,9 @@ export function RunPanel({
             {run.status}
           </Badge>
           <span className="text-xs font-normal text-muted-foreground">
-            {run.mode} caller, all at once: {[...run.behaviours, ...run.vocabularies].join(' + ').replace(/_/g, ' ')} ·{' '}
-            {run.concurrency} calls at a time
+            {run.mode} caller, all at once: {[...run.behaviours, ...run.vocabularies].join(' + ').replace(/_/g, ' ')}
+            {run.difficulty && run.difficulty !== 'normal' ? ` · ${run.difficulty}` : ''} · {run.concurrency} calls at
+            a time
           </span>
           <span className="ml-auto text-xs font-normal tabular-nums">
             <span className="text-emerald-600">{passed} passed</span>

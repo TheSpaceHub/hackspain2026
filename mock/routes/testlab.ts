@@ -17,6 +17,7 @@ import { fail, ok, type Router, STREAMING } from '../http.js';
 import type { Suite } from '../world/suite/index.js';
 import type { Generation } from '../world/suite/real/index.js';
 import { BEHAVIOURS } from '../../testlab/behaviour.js';
+import { DIFFICULTIES } from '../../testlab/difficulty.js';
 import { fixPlan } from '../../testlab/fix.js';
 import { llmAvailable, llmName } from '../../testlab/llm.js';
 import type { RunRequest, Runner } from '../../testlab/runner.js';
@@ -36,6 +37,7 @@ export function testlabRoutes(router: Router, lab: Lab, runner: Runner): void {
     cases: lab.suite.cases,
     behaviours: BEHAVIOURS,
     vocabularies: VOCABULARIES,
+    difficulties: DIFFICULTIES,
     generation: lab.generation,
     persona_caller: llmAvailable() ? llmName() : null,
   });

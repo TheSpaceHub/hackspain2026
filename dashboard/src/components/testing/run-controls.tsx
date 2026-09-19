@@ -26,6 +26,7 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
   const [behaviours, setBehaviours] = useState<ReadonlySet<string>>(() => new Set(['cooperative']));
   const [mode, setMode] = useState<'persona' | 'script'>(suite.persona_caller ? 'persona' : 'script');
   const [vocabularies, setVocabularies] = useState<ReadonlySet<string>>(() => new Set(['plain']));
+  const [difficulty, setDifficulty] = useState('normal');
   const [concurrency, setConcurrency] = useState(4);
   const [confirmed, setConfirmed] = useState(false);
   const [seed, setSeed] = useState(suite.generation.seed);
@@ -44,6 +45,8 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
   const calls = picked.reduce((n, c) => n + Math.max(1, c.burst), 0);
   const traits = suite.behaviours.filter((b) => behaviours.has(b.id));
   const voices = suite.vocabularies.filter((v) => vocabularies.has(v.id));
+  const levels = suite.difficulties ?? [];
+  const level = levels.find((d) => d.id === difficulty);
 
   // A big run costs minutes of real calls, and the default selection is every problem —
   // so anything past a couple of dozen asks first rather than starting on one click.
@@ -57,6 +60,7 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
       problem_ids: problems.size > 0 ? [...problems] : undefined,
       behaviours: [...behaviours],
       vocabularies: [...vocabularies],
+      difficulty,
       mode,
       concurrency,
     });
@@ -166,17 +170,52 @@ export function RunControls({ suite, busy, onRun, onRegenerate }: RunControlsPro
               );
             })}
           </div>
-          {traits.length + voices.length > 0 && (
-            <p className="mt-2 rounded-md bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
-              This run's caller: {[...traits, ...voices].map((t) => t.label.toLowerCase()).join(', ')}.
-            </p>
-          )}
           {mode === 'script' && vocabularies.size > 0 && (
             <p className="mt-2 text-xs text-muted-foreground">
               Scripts say the same words whoever is talking — how they talk only bites in persona mode.
             </p>
           )}
         </div>
+
+        {levels.length > 0 && (
+          <>
+            <Separator />
+
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">How hard they make it</p>
+              <p className="mb-2 text-xs text-muted-foreground">
+                The same caller, turned up: how roundabout the ask is, how much they volunteer, and how many times
+                the appointment has to be read back before they will agree to it.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {levels.map((d) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    title={d.description}
+                    onClick={() => setDifficulty(d.id)}
+                    className={cn(
+                      'rounded-4xl border px-2.5 py-1 text-xs transition-colors',
+                      d.id === difficulty
+                        ? 'border-transparent bg-primary text-primary-foreground'
+                        : 'border-border text-muted-foreground hover:bg-muted',
+                    )}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+              {level && <p className="mt-2 text-xs text-muted-foreground">{level.description}</p>}
+            </div>
+          </>
+        )}
+
+        {traits.length + voices.length > 0 && (
+          <p className="rounded-md bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
+            This run's caller: {[...traits, ...voices].map((t) => t.label.toLowerCase()).join(', ')}
+            {level && level.id !== 'normal' ? `, and ${level.label.toLowerCase()} going on for the agent` : ''}.
+          </p>
+        )}
 
         <Separator />
 

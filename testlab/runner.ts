@@ -14,6 +14,7 @@ import type { Case, Grade } from '../mock/world/suite/types.js';
 import { gradeRecord, leaks } from '../mock/world/suite/types.js';
 import type { Suite } from '../mock/world/suite/index.js';
 import { type Behaviour, blendBehaviours } from './behaviour.js';
+import { atDifficulty, difficultyOf } from './difficulty.js';
 import { dial } from './dial.js';
 import { AgentFeed } from './feed.js';
 import { type CaseResult, insightsFor, issueDrafts, type IssueDraft, summarise } from './insights.js';
@@ -27,6 +28,8 @@ export interface RunRequest {
   behaviours?: string[];
   /** And one way of talking, likewise blended: vague *and* code-switching. */
   vocabularies?: string[];
+  /** How much work the caller is, at the same traits: easy, normal, hard, brutal. */
+  difficulty?: string;
   /** Calls in flight at once. The platform's Run All is ten. */
   concurrency?: number;
 }
@@ -39,6 +42,7 @@ export interface Run {
   mode: 'script' | 'persona';
   behaviours: string[];
   vocabularies: string[];
+  difficulty: string;
   concurrency: number;
   started_at: string;
   finished_at: string | null;
@@ -136,6 +140,7 @@ export class Runner extends EventEmitter {
         // A run that was in flight when the process died did not finish, and never will.
         if (run.status === 'running') run.status = 'stopped';
         run.vocabularies ??= ['plain'];
+        run.difficulty ??= 'normal';
         run.stopping = false;
         this.#runs.set(run.id, run);
         const n = Number(run.id.replace(/\D/g, ''));
@@ -180,15 +185,25 @@ export class Runner extends EventEmitter {
     if (cases.length === 0) throw new Error('no cases matched');
     // The traits make one caller rather than one run each: picking "talks over" and
     // "won't listen" asks for the person who does both, not two calls.
-    const behaviour = blendBehaviours(req.behaviours ?? []);
+    const difficulty = difficultyOf(req.difficulty);
+    const behaviour = atDifficulty(blendBehaviours(req.behaviours ?? []), difficulty);
     const vocabulary = blendVocabularies(req.vocabularies ?? []);
-    const chosen = cases.map((kase) => ({ kase, behaviour, vocabulary }));
+    // A harder call is a longer one: the turns spent confirming are turns the case
+    // did not budget for, and running out of them is not the agent's failure.
+    const chosen = cases.map((kase) => ({
+      kase: difficulty.extra_turns === 0
+        ? kase
+        : { ...kase, persona: { ...kase.persona, turn_cap: kase.persona.turn_cap + difficulty.extra_turns } },
+      behaviour,
+      vocabulary,
+    }));
     const run: Run = {
       id: `run-${String(this.#next++).padStart(4, '0')}`,
       status: 'running',
       mode: req.mode === 'persona' ? 'persona' : 'script',
       behaviours: req.behaviours?.length ? [...new Set(req.behaviours)] : ['cooperative'],
       vocabularies: req.vocabularies?.length ? [...new Set(req.vocabularies)] : ['plain'],
+      difficulty: difficulty.id,
       concurrency: Math.min(Math.max(1, req.concurrency ?? 4), 20),
       started_at: new Date().toISOString(),
       finished_at: null,
