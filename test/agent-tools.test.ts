@@ -8,6 +8,7 @@
 
 import { llm } from '@livekit/agents';
 import { buildTools, speakTime } from '../src/agent-tools.js';
+import { printedToolCall } from '../src/agent.js';
 import { createCallState, readCallState, recordRequest } from '../src/call-state.js';
 import { applyPatch } from '../src/extract.js';
 import { ClinicApi, catalogueSchema } from '../src/clinic-api.js';
@@ -175,8 +176,7 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
     relationship: 'daughter',
     patient: { national_id: '1 2 3 4 5 6 7 8 A' },
   });
-  const notes = await h.call('read_notes');
-  check('the notes say whose appointment this is', /Caller is NOT the patient/.test(notes), true);
+  check('the notes say whose appointment this is', /Caller is NOT the patient/.test(readCallState(h.state)), true);
   check('a spelled-out id is joined up', h.state.patient.national_id, '12345678A');
   check('a bad check letter is kept, flagged, not dropped', h.state.journal.some((e) => e.field === 'national_id' && e.note !== undefined), true);
 }
@@ -240,6 +240,17 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
     await tools.identify_patient!.execute({ name: 'unknown' } as never, {} as never),
   );
   check('and a placeholder name is never looked up', /Nothing to search on/.test(identified), true);
+}
+
+// --- a tool call it printed instead of making --------------------------------
+
+{
+  const known = new Set(['clinic_fact', 'find_slots']);
+  const printed = printedToolCall('{"name": "clinic_fact", "parameters": {"doctor_name": "Cid"}}', known);
+  check('a printed tool call is taken as the call it meant', printed?.name, 'clinic_fact');
+  check('with its arguments', printed?.args, '{"doctor_name":"Cid"}');
+  check('a tool nobody has is not invented', printedToolCall('{"name": "wire_money"}', known), null);
+  check('and prose is left alone', printedToolCall('Good morning.', known), null);
 }
 
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);

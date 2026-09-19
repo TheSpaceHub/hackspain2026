@@ -461,6 +461,7 @@ export class CallSession {
         frames_out: this.#framesOut,
       },
       transcript: this.#transcript,
+      notes: this.#state ? readCallState(this.#state) : undefined,
       decider: {
         input: {
           from_number: this.#fromNumber,

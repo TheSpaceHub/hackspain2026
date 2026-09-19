@@ -26,7 +26,6 @@ import {
   recordMatch,
   recordQuote,
   recordRequest,
-  readCallState,
   type CallState,
   type QuotedSlot,
 } from './call-state.js';
@@ -117,12 +116,6 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
         const visited = patient.has_visited_before ? 'has been seen here before' : 'has never been seen here';
         return `Found ${[patient.given_name, patient.first_surname].filter(Boolean).join(' ')}, ${visited}, plan on record ${patient.insurer ?? 'none'}. Do not read this back.`;
       },
-    }),
-
-    read_notes: llm.tool({
-      description:
-        'What has been written down about this caller so far. Everything they say is noted for you automatically; read it back when you need to check what you already have.',
-      execute: async () => readCallState(state),
     }),
 
     find_slots: llm.tool({

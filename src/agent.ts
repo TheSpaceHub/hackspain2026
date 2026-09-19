@@ -1,4 +1,5 @@
-import { voice } from '@livekit/agents';
+import { llm, voice } from '@livekit/agents';
+import { randomUUID } from 'node:crypto';
 import { buildTools, type ToolDeps } from './agent-tools.js';
 
 export const GREETING =
@@ -58,7 +59,7 @@ Do not say goodbye while any item above is still missing — ask for it instead.
 # Your tools, and when to use them
 You can see the clinic's systems through your tools, and only through them.
 
-Everything the caller tells you — their details, what they want, who they are calling for, a correction — is written down for you automatically as they say it. Do not spend a turn recording it; just carry on talking. read_notes shows you what is on the notes and what is still missing.
+Everything the caller tells you — their details, what they want, who they are calling for, a correction — is written down for you automatically as they say it. Never spend a turn recording it, checking it or reading it back: it is already on the file, and the conversation in front of you tells you what you still need. Call a tool only for something you cannot answer from what has been said on this call:
 
 - identify_patient as soon as you have a name and one identifier.
 - find_slots before you mention any time at all, then accept_slot the instant they say yes to one.
@@ -85,8 +86,84 @@ You only handle appointments for this clinic. If the caller is selling something
 # Ending
 Once the caller has confirmed the request is right, thank them, tell them the clinic will be in touch to confirm, and say goodbye.`;
 
+/**
+ * A small model sometimes prints a tool call instead of making one. Left alone the
+ * synthesiser reads the JSON out to the caller, so make the call it meant to make.
+ */
+export function printedToolCall(text: string, known: Set<string>): llm.FunctionCall | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const obj = parsed as Record<string, unknown>;
+  const name = typeof obj.name === 'string' ? obj.name : undefined;
+  if (name === undefined || !known.has(name)) return null;
+  const args = obj.parameters ?? obj.arguments ?? {};
+  return llm.FunctionCall.create({
+    callId: `printed_${randomUUID()}`,
+    name,
+    args: typeof args === 'string' ? args : JSON.stringify(args),
+  });
+}
+
+/** Said in place of a swallowed blob: silence reads as a dropped line. */
+const RECOVER = 'Sorry, could you say that again?';
+
 export class ReceptionistAgent extends voice.Agent {
   constructor(deps: ToolDeps) {
     super({ instructions: INSTRUCTIONS, tools: buildTools(deps) });
+  }
+
+  /**
+   * Hold a turn that opens with `{` until it is whole: it is either a tool call the
+   * model forgot to make, or a blob nobody should hear. Anything else streams straight
+   * through, so a turn that speaks is not delayed at all.
+   */
+  override async llmNode(
+    chatCtx: llm.ChatContext,
+    toolCtx: llm.ToolContext,
+    settings: voice.ModelSettings,
+  ): Promise<ReadableStream<llm.ChatChunk | string> | null> {
+    const stream = await voice.Agent.default.llmNode(this, chatCtx, toolCtx, settings);
+    if (!stream) return stream;
+
+    const known = new Set(Object.keys(toolCtx));
+    let held = '';
+    let holding = true;
+
+    return stream.pipeThrough(
+      new TransformStream<llm.ChatChunk | string, llm.ChatChunk | string>({
+        transform(chunk, controller) {
+          const text = typeof chunk === 'string' ? chunk : (chunk.delta?.content ?? '');
+          const isCall = typeof chunk !== 'string' && chunk.delta?.toolCalls !== undefined;
+          if (!holding || text === '' || isCall) {
+            controller.enqueue(chunk);
+            return;
+          }
+          held += text;
+          const seen = held.trimStart();
+          if (seen === '' || seen.startsWith('{')) return;
+          holding = false;
+          controller.enqueue(held);
+          held = '';
+        },
+        flush(controller) {
+          if (held === '') return;
+          const call = printedToolCall(held.trim(), known);
+          if (!call) {
+            controller.enqueue(RECOVER);
+            return;
+          }
+          console.warn(`[agent] printed a ${call.name} tool call instead of making it`);
+          controller.enqueue({
+            id: randomUUID(),
+            delta: { role: 'assistant', toolCalls: [call] },
+          });
+        },
+      }),
+    );
   }
 }
