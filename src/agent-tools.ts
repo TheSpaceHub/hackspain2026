@@ -3,9 +3,12 @@
  *
  * Two rules shape all of them. A caller hears every millisecond, so each tool is one
  * request with a hard cap and returns a single short line the agent can read aloud
- * unchanged. And nothing a caller acts on is invented: a slot, a doctor, a site or a
- * plan is read off the API or the cached catalogue, and the exact strings behind it are
- * kept in call state so the submission at close quotes them rather than the transcript.
+ * unchanged — and a tool exists at all only when the agent cannot answer without its
+ * result, since every call costs a second pass of the dialogue model before the caller
+ * hears a word. Note-taking does not qualify and runs beside the call in `extract.ts`.
+ * And nothing a caller acts on is invented: a slot, a doctor, a site or a plan is read
+ * off the API or the cached catalogue, and the exact strings behind it are kept in call
+ * state so the submission at close quotes them rather than the transcript.
  */
 
 import { llm } from '@livekit/agents';
@@ -21,14 +24,10 @@ import {
 import {
   recordAccepted,
   recordMatch,
-  recordPatientField,
   recordQuote,
   recordRequest,
-  recordThirdParty,
   readCallState,
-  retract,
   type CallState,
-  type PatientField,
   type QuotedSlot,
 } from './call-state.js';
 import { geocodeMadrid, rankSites } from './nearest-site.js';
@@ -73,28 +72,8 @@ async function capped<T>(name: string, ms: number, work: Promise<T> | T): Promis
 }
 
 /**
- * Small models hand back JSON-in-JSON — `"true"` for a boolean, `"[]"` for an array —
- * and a strict schema turns that into a rejected tool call the caller waits through.
- * The value is unambiguous, so take it rather than lose the turn.
- */
-const looseBoolean = z.preprocess(
-  (v) => (v === 'true' ? true : v === 'false' ? false : v),
-  z.boolean(),
-);
-
-const looseStringArray = z.preprocess((v) => {
-  if (typeof v !== 'string') return v;
-  try {
-    const parsed: unknown = JSON.parse(v);
-    return Array.isArray(parsed) ? parsed : [v];
-  } catch {
-    return v.trim() === '' ? [] : [v];
-  }
-}, z.array(z.string()));
-
-/**
- * The same models fill required-looking fields with `"unknown"` rather than leaving them
- * out, and a patient called Unknown is worse than a patient with no name yet.
+ * Small models fill required-looking fields with `"unknown"` rather than leaving them
+ * out, and looking a patient called Unknown up is a wasted second of the caller's time.
  */
 const PLACEHOLDERS = new Set(['unknown', 'n/a', 'na', 'none', 'null', 'undefined', '']);
 
@@ -102,11 +81,6 @@ function real(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   return PLACEHOLDERS.has(value.trim().toLowerCase()) ? undefined : value;
 }
-
-const PATIENT_FIELDS = [
-  'given_name', 'first_surname', 'second_surname', 'national_id',
-  'date_of_birth', 'phone', 'email', 'insurer',
-] as const;
 
 export function buildTools(deps: ToolDeps): llm.ToolContextLike {
   const { state, api, catalogue } = deps;
@@ -145,81 +119,9 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
       },
     }),
 
-    record_patient_field: llm.tool({
-      description:
-        'Write one detail about the patient down. Call it the moment you hear the value — every field of a new registration must go through here.',
-      parameters: z.object({
-        field: z.enum(PATIENT_FIELDS),
-        value: z.string().describe('Exactly as the caller said it, including spelled-out letters'),
-      }),
-      execute: async (args) => {
-        const value = real(args.value);
-        if (value === undefined) return `You do not have their ${args.field} yet. Ask for it.`;
-        const result = recordPatientField(state, args.field as PatientField, value);
-        return result.problem
-          ? `Saved ${args.field} as ${result.value}, but ${result.problem}. Ask them for it once more.`
-          : `Saved ${args.field}.`;
-      },
-    }),
-
-    record_request: llm.tool({
-      description:
-        'Write down what the caller wants: the intent, the specialty or complaint, any doctor or site they name, when they want to come, and every insurer they mention.',
-      parameters: z.object({
-        intent: z.enum(['book', 'reschedule', 'cancel', 'register', 'question']).optional(),
-        specialty_id: z.string().optional(),
-        complaint: z.string().optional().describe("The problem in the caller's own words"),
-        provider_name: z.string().optional(),
-        location_id: z.string().optional(),
-        when_phrase: z.string().optional().describe('The caller\'s own words, e.g. "Thursday morning"'),
-        language: z.string().optional().describe('A language they asked the doctor to speak'),
-        insurers: looseStringArray.optional().describe('Every plan named on this call'),
-      }),
-      execute: async (args) => {
-        recordRequest(state, {
-          ...args,
-          specialty_id: real(args.specialty_id),
-          complaint: real(args.complaint),
-          provider_name: real(args.provider_name),
-          location_id: real(args.location_id),
-          when_phrase: real(args.when_phrase),
-          language: real(args.language),
-          insurers: args.insurers?.map(real).filter((i): i is string => i !== undefined),
-        });
-        return 'Noted.';
-      },
-    }),
-
-    record_third_party: llm.tool({
-      description:
-        'The caller is ringing about somebody else. Call it as soon as you know, so the appointment goes to the patient and not to the caller.',
-      parameters: z.object({
-        caller_is_patient: looseBoolean,
-        caller_name: z.string().optional(),
-        relationship: z.string().optional().describe('e.g. daughter, husband, carer'),
-      }),
-      execute: async (args) => {
-        recordThirdParty(state, args.caller_is_patient, {
-          name: real(args.caller_name),
-          relationship: real(args.relationship),
-        });
-        return args.caller_is_patient
-          ? 'Noted, they are the patient.'
-          : 'Noted. Everything from here is about the patient, not the caller.';
-      },
-    }),
-
-    retract_detail: llm.tool({
-      description: 'The caller corrected something you already wrote down and has not yet replaced it.',
-      parameters: z.object({ field: z.string() }),
-      execute: async (args) => {
-        retract(state, args.field as PatientField);
-        return `Dropped ${args.field}.`;
-      },
-    }),
-
     read_notes: llm.tool({
-      description: 'Everything you have written down so far, and what is still missing. Cheap; use it before you say goodbye.',
+      description:
+        'What has been written down about this caller so far. Everything they say is noted for you automatically; read it back when you need to check what you already have.',
       execute: async () => readCallState(state),
     }),
 

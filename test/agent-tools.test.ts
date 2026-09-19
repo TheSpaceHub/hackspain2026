@@ -8,7 +8,8 @@
 
 import { llm } from '@livekit/agents';
 import { buildTools, speakTime } from '../src/agent-tools.js';
-import { createCallState, readCallState } from '../src/call-state.js';
+import { createCallState, readCallState, recordRequest } from '../src/call-state.js';
+import { applyPatch } from '../src/extract.js';
 import { ClinicApi, catalogueSchema } from '../src/clinic-api.js';
 import { FakeClinic, fakeCatalogue } from './fake-clinic.js';
 
@@ -113,7 +114,7 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
 
 {
   const h = harness();
-  await h.call('record_request', { insurers: ['ASISA'] });
+  recordRequest(h.state, { insurers: ['ASISA'] });
   await h.call('identify_patient', { national_id: '48064716Y' });
   const blocked = await h.call('find_slots', { when_phrase: 'next week', specialty_id: 'spec_physio' });
   check('a refusing insurer is reported as the rule, not as a full diary', /does not accept asisa/.test(blocked), true);
@@ -168,12 +169,16 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
 
 {
   const h = harness();
-  await h.call('record_third_party', { caller_is_patient: false, caller_name: 'Ana', relationship: 'daughter' });
-  await h.call('record_patient_field', { field: 'national_id', value: '1 2 3 4 5 6 7 8 A' });
+  applyPatch(h.state, {
+    caller_is_patient: false,
+    caller_name: 'Ana',
+    relationship: 'daughter',
+    patient: { national_id: '1 2 3 4 5 6 7 8 A' },
+  });
   const notes = await h.call('read_notes');
   check('the notes say whose appointment this is', /Caller is NOT the patient/.test(notes), true);
-  check('a bad check letter is flagged to the agent', /should be Z/.test(readCallState(h.state)), false);
-  check('and to the caller, at the point it is heard', /ask them for it once more/i.test(await h.call('record_patient_field', { field: 'national_id', value: '12345678A' })), true);
+  check('a spelled-out id is joined up', h.state.patient.national_id, '12345678A');
+  check('a bad check letter is kept, flagged, not dropped', h.state.journal.some((e) => e.field === 'national_id' && e.note !== undefined), true);
 }
 
 // --- caching ----------------------------------------------------------------
@@ -226,34 +231,15 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
   const state = createCallState('call-sloppy');
   const tools = buildTools({ state, api, catalogue, now: () => NOW }) as unknown as Record<string, llm.FunctionTool>;
 
-  // Llama hands booleans and arrays back as strings; a rejected call is a lost turn.
-  const third = tools.record_third_party!;
-  const parsedThird = third.parameters.parse({ caller_is_patient: 'false', relationship: 'daughter' });
-  check('a stringified boolean is taken at its word', parsedThird.caller_is_patient, false);
-
-  const request = tools.record_request!;
-  check('a stringified empty array is taken as empty', request.parameters.parse({ insurers: '[]' }).insurers, []);
-  check(
-    'a stringified array of plans survives',
-    request.parameters.parse({ insurers: '["Sanitas"]' }).insurers,
-    ['Sanitas'],
-  );
-
-  // And it fills fields it does not know with the word "unknown".
-  const field = tools.record_patient_field!;
-  await field.execute({ field: 'given_name', value: 'unknown' } as never, {} as never);
-  check('a placeholder name is never written down', state.patient.given_name, undefined);
-  await field.execute({ field: 'given_name', value: 'Joaquín' } as never, {} as never);
-  check('a real name is', state.patient.given_name, 'Joaquín');
-
-  await request.execute({ intent: 'register', when_phrase: 'unknown' } as never, {} as never);
-  check('a placeholder when is dropped', state.request.when_phrase, undefined);
-  check('the intent beside it is kept', state.request.intent, 'register');
-
   const near = String(
     await tools.nearest_site!.execute({ address: 'unknown' } as never, {} as never),
   );
   check('a placeholder address is bounced back as a question', /Ask them which street/.test(near), true);
+
+  const identified = String(
+    await tools.identify_patient!.execute({ name: 'unknown' } as never, {} as never),
+  );
+  check('and a placeholder name is never looked up', /Nothing to search on/.test(identified), true);
 }
 
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);

@@ -6,6 +6,7 @@ import { MediaStreamAudioInput } from './audio-input.js';
 import { MediaStreamAudioOutput } from './audio-output.js';
 import { writeCallLog, type CallLog } from './call-log.js';
 import { createCallState, readCallState, recordMatch, type CallState } from './call-state.js';
+import { createExtractor, type Extractor } from './extract.js';
 import type { Availability, Catalogue, ClinicApi } from './clinic-api.js';
 import { config } from './config.js';
 import { FLOOR_ACTION, decide, type DeciderResult } from './decider.js';
@@ -17,6 +18,12 @@ import { submitActions, type SubmitResult } from './submit.js';
 import type { Store } from './store/index.js';
 import { buildCallTranscript, formatTranscript, type TranscriptTurn } from './transcript.js';
 import { SAMPLE_RATE, type InboundMessage, type StartMessage } from './twilio.js';
+
+/**
+ * How long the close waits for the last exchange to be written down. Past it the
+ * decider reads the transcript for that detail instead, which is slower but not wrong.
+ */
+const EXTRACT_SETTLE_MS = 4_000;
 
 /** Everything deliberately shared across sockets, and nothing else. */
 export interface Shared {
@@ -60,6 +67,8 @@ export class CallSession {
   #endedBy = 'unknown';
   #transcript: TranscriptTurn[] = [];
   #state: CallState | null = null;
+  /** Fills the scratchpad off the turn, so note-taking costs the caller nothing. */
+  #extractor: Extractor | null = null;
   /** The last availability answer, so the submitted type is the one the diary offered. */
   #availability: Availability | null = null;
   /** Turns already handed to the store, so a live flush never re-sends one. */
@@ -120,6 +129,10 @@ export class CallSession {
     this.#fromNumber = msg.start?.customParameters?.from_number;
     this.#startedAt = Date.now();
     this.#state = createCallState(this.#callId, this.#fromNumber);
+    this.#extractor = createExtractor({
+      state: this.#state,
+      onError: (message) => this.#errors.push(`extract: ${message}`),
+    });
 
     // The line they rang from is a free directory query, and it resolves while the
     // greeting is still playing — often before they finish their first sentence.
@@ -240,6 +253,14 @@ export class CallSession {
     const at = new Date().toISOString();
     for (let i = this.#turnsWritten; i < turns.length; i++) {
       const turn = turns[i]!;
+      // Queued, not awaited: the agent is already answering this turn.
+      if (turn.role !== 'assistant') {
+        const before = turns[i - 1];
+        this.#extractor?.observe(
+          turn.text,
+          before?.role === 'assistant' ? before.text : undefined,
+        );
+      }
       this.#shared.store.write({
         type: 'turn',
         call_id: this.#callId,
@@ -292,6 +313,12 @@ export class CallSession {
       .catch((err: unknown) => this.#errors.push(`session close: ${String(err)}`));
 
     const budget = this.#deadlineAt - Date.now() - config.submitReserveMs;
+
+    // The last exchange is usually still being written down when the caller hangs up,
+    // and the decider reads the notes. Give it a slice of the window, not the window.
+    this.#flushTurns();
+    await this.#extractor?.settle(Math.max(0, Math.min(EXTRACT_SETTLE_MS, budget - 2_000)));
+
     const decided = await decide(
       {
         callId: this.#callId,
