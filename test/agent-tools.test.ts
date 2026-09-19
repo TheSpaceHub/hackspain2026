@@ -156,6 +156,26 @@ function harness(
   check('an unknown id is a new patient, not an error', /new patient/.test(none), true);
 }
 
+{
+  const h = harness();
+  await h.call('find_slots', { when_phrase: 'as soon as possible', specialty_id: 'spec_gp' });
+  check('a pre-identification quote has no patient binding', h.state.quoted[0]?.for_patient_id, undefined);
+  await h.call('identify_patient', { name: 'Marta Ruiz', date_of_birth: '1985-03-14' });
+  h.state.quoted_spoken = true;
+  h.state.last_caller_text = 'Yes, that one';
+  const refused = await h.call('accept_slot', { choice: 1 });
+  check('a quote made before identification is refused', /looked up before we knew/.test(refused), true);
+  check('a stale pre-identification quote is not accepted', h.state.accepted, null);
+
+  await h.call('find_slots', { when_phrase: 'as soon as possible', specialty_id: 'spec_gp' });
+  check('a new quote is bound to the identified patient', h.state.quoted[0]?.for_patient_id, 'pat_001');
+  h.state.quoted_spoken = true;
+  h.state.caller_turns++;
+  h.state.last_caller_text = 'Yes, that one';
+  await h.call('accept_slot', { choice: 1 });
+  check('a quote for the identified patient can be accepted', h.state.accepted?.for_patient_id, 'pat_001');
+}
+
 // --- the diary -------------------------------------------------------------
 
 {
@@ -220,7 +240,7 @@ function harness(
   });
   check('a blocked named provider triggers a provider-free retry', h.clinic.requests.filter((r) => r.path === '/api/v1/availability').length, 2);
   check('the fallback quotes a real alternative', h.state.quoted[0]?.provider_id, 'prov_saenz');
-  check('the fallback response names the provider and plan', /Elena Iglesias.*asisa.*another dermatology/.test(fallback), true);
+  check('the fallback response names the provider and plan', /Elena Iglesias.*asisa.*another dermatologist/.test(fallback), true);
 }
 
 {
@@ -233,6 +253,7 @@ function harness(
   check('the soonest search skips the full day', h.state.quoted[0]!.start_time.slice(0, 10), '2026-10-09');
   check('and offers that one alone, not a menu they can pick a later time off', h.state.quoted.length, 1);
   check('which is the one it read out', /Offer that one and no other/.test(open), true);
+  check('an ordinary earliest search keeps its original wording', /The soonest there is:/.test(open), true);
   check('spoken, not as ISO', /2026-10-09T/.test(open), false);
 }
 
@@ -439,6 +460,7 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
     location_id: 'loc',
     appointment_type_id: 'apt',
     start_time: '2026-10-08T09:00:00+02:00',
+    for_patient_id: 'pat-dkv',
     payable_with: ['dkv', 'sanitas'],
   });
   check('the matched record plan is primary when both plans pay', choosePolicy(state), 'dkv');
@@ -463,6 +485,7 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
     location_id: 'loc_centro',
     appointment_type_id: 'apt_review',
     start_time: '2026-10-08T09:00:00+02:00',
+    for_patient_id: 'pat_001',
     payable_with: ['sanitas'],
   });
   state.quoted_spoken = true;
@@ -485,6 +508,7 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
     location_id: 'loc_centro',
     appointment_type_id: 'apt_review',
     start_time: '2026-10-08T09:00:00+02:00',
+    for_patient_id: 'pat_001',
     payable_with: ['sanitas'],
   });
   state.quoted_spoken = true;

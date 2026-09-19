@@ -18,6 +18,7 @@ export function bookFromState(state: CallState): Extract<Action, { action: 'book
   const matched = state.matched;
   const policy_id = choosePolicy(state);
   if (!accepted || !matched || !policy_id) return undefined;
+  if (accepted.for_patient_id !== matched.patient_id) return undefined;
   if (!state.caller_is_patient && state.matched_by === 'phone') return undefined;
   return {
     action: 'book',

@@ -7,11 +7,15 @@
  * land is on the notes by the time the decider reads them.
  */
 
-import { applyPatch, createExtractor, parsePatch, type Complete } from '../src/extract.js';
+import { applyPatch, createExtractor, parsePatch, setProviderVocabulary, type Complete } from '../src/extract.js';
+import { catalogueSchema } from '../src/clinic-api.js';
 import { createCallState, readCallState, recordMatch, setPlanVocabulary } from '../src/call-state.js';
 
 let failed = 0;
 setPlanVocabulary([{ id: 'nueva_mutua_sanitaria', name: 'Nueva Mutua Sanitaria' }]);
+setProviderVocabulary(catalogueSchema.parse({
+  providers: [{ id: 'prov-roca', name: 'Dra. Anita Roca' }],
+}));
 function check(name: string, actual: unknown, expected: unknown): void {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
@@ -161,6 +165,35 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
     patient: { given_name: 'Fernando', first_surname: 'Serrano' },
   });
   check('a third-party patient name does not drop the phone match', thirdParty.matched?.patient_id, 'P1');
+}
+{
+  const state = createCallState('call-doctor-name');
+  recordMatch(state, {
+    patient_id: 'P00768',
+    given_name: 'Charlie',
+    first_surname: 'Lewis',
+    second_surname: 'Turner',
+  }, undefined, 'phone');
+  applyPatch(
+    state,
+    { patient: { given_name: 'Anita', first_surname: 'Roca' } },
+    "I need to see Dra Anita's Roca",
+  );
+  check('a doctor name does not contradict a phone match', state.matched?.patient_id, 'P00768');
+  check('a doctor name does not reject a phone match', state.phone_match_rejected, undefined);
+  check('a doctor name is not recorded as the patient', state.patient.given_name, undefined);
+}
+{
+  const state = createCallState('call-real-name');
+  recordMatch(state, {
+    patient_id: 'P00768',
+    given_name: 'Charlie',
+    first_surname: 'Lewis',
+    second_surname: 'Turner',
+  }, undefined, 'phone');
+  applyPatch(state, { patient: { given_name: 'Soledad', first_surname: 'Pérez' } }, 'my name is Soledad Pérez');
+  check('a genuine mismatching name still drops a phone match', state.matched, null);
+  check('the genuine mismatch is recorded', state.phone_match_rejected, 'Soledad Pérez');
 }
 
 // --- a name the caller never said -------------------------------------------

@@ -64,6 +64,11 @@ export const DEFAULT_TOOL_TIMEOUT_MS = 4_000;
 
 const SLOW = 'That is taking too long to come back. Tell them the system is slow, and either try again or take their number.';
 
+function alternateSpecialtyLabel(name: string): string {
+  if (name.toLowerCase() === 'dermatology') return 'dermatologist';
+  return `${name.replace(/\b\w/g, (letter) => letter.toUpperCase())} doctor`;
+}
+
 async function capped<T>(name: string, ms: number, work: Promise<T> | T): Promise<T | string> {
   let timer: NodeJS.Timeout | undefined;
   try {
@@ -310,6 +315,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           location_id: s.location_id,
           appointment_type_id: s.appointment_type_id,
           start_time: s.start_time,
+          for_patient_id: state.matched?.patient_id,
           payable_with: s.payable_with ?? undefined,
         }));
         recordQuote(state, quoted);
@@ -319,8 +325,11 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           (s, i) =>
             `${i + 1}. ${speakTime(s.start_time)} with ${s.provider_name ?? s.provider_id} at ${siteName(catalogue, s.location_id)}`,
         );
+        const soonestIntro = restrictionNote
+          ? `The soonest with another ${alternateSpecialtyLabel(namedProvider?.specialty_name ?? specialty ?? 'doctor')} is:`
+          : 'The soonest there is:';
         return restrictionNote + (window.earliest
-          ? `${moved}The soonest with another ${namedProvider?.specialty_name ?? 'doctor'} is: ${lines[0]}. Offer that one and no other. When they say yes, call accept_slot. Only if they turn it down, ask which day would suit and look again.`
+          ? `${moved}${soonestIntro} ${lines[0]}. Offer that one and no other. When they say yes, call accept_slot. Only if they turn it down, ask which day would suit and look again.`
           : `${moved}Offer these, and nothing else: ${lines.join('; ')}. When they pick one, call accept_slot.`) + specialtyNote;
       },
     }),
@@ -332,6 +341,10 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
       execute: async (args) => {
         let slot = state.quoted[args.choice - 1];
         if (!slot) return 'That is not one of the times you offered. Read the list again or call find_slots.';
+        if (state.matched && slot.for_patient_id !== state.matched.patient_id) {
+          clog.warn('[accept_slot] refused: slot was quoted before the patient was identified');
+          return 'That time was looked up before we knew who the patient is, so the appointment type may be wrong — call find_slots again now and offer what it returns.';
+        }
         if (!state.quoted_spoken) {
           clog.warn('[accept_slot] refused: the quoted time was not spoken');
           return 'You have not read that time to the caller yet — offer it first (day and time), then wait for their answer.';

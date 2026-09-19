@@ -61,6 +61,7 @@ export interface QuotedSlot {
   provider_name?: string;
   location_id: string;
   appointment_type_id: string;
+  for_patient_id?: string;
   /** ISO 8601 with offset, straight from /availability — never re-derived from speech. */
   start_time: string;
   payable_with?: string[];
