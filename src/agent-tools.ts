@@ -288,10 +288,12 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
 
         const moved = window.adjusted_from ? `The day they asked for is closed, so this is from ${window.adjusted_from}. ` : '';
         const partNote = elsewhere ? `Nothing in the ${wanted} that day, so say so before you offer these. ` : '';
-        const lines = quoted.map(
-          (s, i) =>
-            `${i + 1}. ${speakTime(s.start_time)} with ${s.provider_name ?? s.provider_id} at ${siteName(catalogue, s.location_id)}`,
-        );
+        // The warning is a sentence the model forgets two turns later; the half of the
+        // day rides on each time instead, so a slot read back out is still labelled.
+        const lines = quoted.map((s, i) => {
+          const half = elsewhere ? ` (${inPart(s.start_time, 'morning') ? 'morning' : 'afternoon'})` : '';
+          return `${i + 1}. ${speakTime(s.start_time)}${half} with ${s.provider_name ?? s.provider_id} at ${siteName(catalogue, s.location_id)}`;
+        });
         return (window.earliest
           ? `${moved}${partNote}The soonest there is: ${lines[0]}. Offer that one and no other. When they say yes, call accept_slot. Only if they turn it down, ask which day would suit and look again.`
           : `${moved}${partNote}Offer these, and nothing else: ${lines.join('; ')}. When they pick one, call accept_slot.`) + specialtyNote;
