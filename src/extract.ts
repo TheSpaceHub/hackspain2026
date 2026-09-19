@@ -234,7 +234,9 @@ export function parsePatch(raw: string): ExtractedPatch | null {
     else if (ch === '}' && --depth === 0) {
       try {
         const parsed = patchSchema.safeParse(
-          JSON.parse(raw.slice(start, i + 1), (_key, value) => (value === null ? undefined : value)),
+          liftPatientFields(
+            JSON.parse(raw.slice(start, i + 1), (_key, value) => (value === null ? undefined : value)),
+          ),
         );
         return parsed.success ? parsed.data : null;
       } catch {
@@ -243,6 +245,26 @@ export function parsePatch(raw: string): ExtractedPatch | null {
     }
   }
   return null;
+}
+
+/** The model often writes `{"given_name": …}` flat; the field belongs under `patient`. */
+function liftPatientFields(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  const obj = { ...(value as Record<string, unknown>) };
+  const nested =
+    typeof obj.patient === 'object' && obj.patient !== null && !Array.isArray(obj.patient)
+      ? { ...(obj.patient as Record<string, unknown>) }
+      : {};
+  let lifted = false;
+  for (const field of PATIENT_FIELDS) {
+    if (typeof obj[field] === 'string') {
+      if (nested[field] === undefined) nested[field] = obj[field];
+      delete obj[field];
+      lifted = true;
+    }
+  }
+  if (lifted) obj.patient = nested;
+  return obj;
 }
 
 function tight(text: string): string {

@@ -29,6 +29,16 @@ const replying =
 
 check('a fenced answer is still JSON', parsePatch('```json\n{"intent":"book"}\n```')?.intent, 'book');
 check('prose around it is ignored', parsePatch('Sure! {"intent":"cancel"} hope that helps')?.intent, 'cancel');
+check(
+  'flat patient fields are lifted under patient',
+  parsePatch('{"given_name":"Soledad","first_surname":"Domínguez","insurer":"Sonita"}')?.patient?.first_surname,
+  'Domínguez',
+);
+check(
+  'a flat field does not overwrite a nested one',
+  parsePatch('{"given_name":"X","patient":{"given_name":"Soledad"}}')?.patient?.given_name,
+  'Soledad',
+);
 check('nothing usable is null, never a guess', parsePatch('I could not find anything'), null);
 check('a key outside the schema is dropped, not fatal', parsePatch('{"intent":"book","mood":"cross"}')?.intent, 'book');
 check('an invalid enum voids the patch rather than writing junk', parsePatch('{"intent":"chat"}'), null);
