@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { FinishedCallsView } from '@/components/calls/finished-calls-view';
 import { ClinicView } from '@/components/clinic/clinic-view';
+import { ConnectAgent } from '@/components/layout/agent-origin';
 import { AppShell, type NavItem } from '@/components/layout/app-shell';
 import { LiveView } from '@/components/live/live-view';
 import { OverviewView } from '@/components/overview/overview-view';
@@ -10,7 +11,7 @@ import { useNow } from '@/hooks/use-now';
 import { useRoute, type View } from '@/hooks/use-route';
 import { SimContext, type SimContextValue } from '@/hooks/sim-context';
 import { useSimFeed } from '@/hooks/use-sim-feed';
-import { storedMode, storeMode, type AgentMode } from '@/lib/agent/origin';
+import { needsAgentOrigin, storedMode, storeMode, type AgentMode } from '@/lib/agent/origin';
 import { callStatus } from '@/lib/agent/model';
 import { consoleMode } from '@/lib/mode';
 import { liveHolds } from '@/lib/sim/model';
@@ -71,7 +72,9 @@ export function App() {
           setAgentModeState(m);
         }}
       >
-        {route.view === 'overview' ? (
+        {needsAgentOrigin(agentMode) ? (
+          <ConnectAgent mode={agentMode} />
+        ) : route.view === 'overview' ? (
           <OverviewView feed={feed} mode={agentMode} />
         ) : route.view === 'clinic' ? (
           <ClinicView

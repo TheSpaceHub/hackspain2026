@@ -1,11 +1,11 @@
 /**
  * Talking to one selected agent's console API. In dev Vite proxies each prefixed
- * path to its fixed-mode agent; production builds use the configured origins.
+ * path to its fixed-mode agent; deployed builds use the per-mode runtime origin
+ * (origin.ts), and the agent sends `Access-Control-Allow-Origin: *`.
  */
 import { type Call, fromDetail, fromRecentRecord } from './model';
 import { agentOrigin, type AgentMode } from './origin';
 import type { CallDetailResponse, FeedEvent, RecentCallsResponse } from './wire';
-
 export function listenUrl(mode: AgentMode, id: string): string {
   return `${agentOrigin(mode)}/calls/${encodeURIComponent(id)}/listen`;
 }
