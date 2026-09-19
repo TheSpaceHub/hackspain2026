@@ -28,11 +28,14 @@ export class MediaStreamAudioOutput extends voice.AudioOutput {
   #nextSendAt = 0;
   #closed = false;
 
-  constructor(streamSid: string, send: (data: string) => void) {
+  constructor(streamSid: string, send: (data: string) => void, onFrame?: (mulaw: Uint8Array) => void) {
     super(SAMPLE_RATE);
     this.#streamSid = streamSid;
     this.#send = send;
+    this.#onFrame = onFrame;
   }
+
+  #onFrame?: (mulaw: Uint8Array) => void;
 
   override async captureFrame(frame: AudioFrame): Promise<void> {
     if (this.#closed) return;
@@ -138,6 +141,7 @@ export class MediaStreamAudioOutput extends voice.AudioOutput {
       this.onPlaybackStarted(segment.createdAt);
     }
     this.#send(outboundMedia(this.#streamSid, Buffer.from(chunk).toString('base64')));
+    this.#onFrame?.(chunk);
     segment.sent++;
     return true;
   }

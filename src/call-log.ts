@@ -4,6 +4,7 @@ import { config } from './config.js';
 import type { DeciderResult } from './decider.js';
 import type { SubmitResult } from './submit.js';
 import type { TranscriptTurn } from './transcript.js';
+import type { RecordingSummary } from './recorder.js';
 
 /**
  * One JSON line per call. This is the evaluation harness: "why did it say that?" is a
@@ -42,6 +43,7 @@ export interface CallLog {
   submissions: SubmitResult[];
   errors: string[];
   ended_by: string;
+  recording?: RecordingSummary;
 }
 
 let dirReady: Promise<void> | null = null;
