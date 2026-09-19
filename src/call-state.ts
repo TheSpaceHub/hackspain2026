@@ -73,6 +73,7 @@ export interface CallState {
   patient: PatientDraft;
   /** The directory row we settled on. `patient_id` comes from here and nowhere else. */
   matched: Patient | null;
+  matched_by?: 'phone' | 'lookup';
   /** Problem 9: booking for the caller instead of the patient is the failure mode. */
   caller_is_patient: boolean;
   caller?: { name?: string; relationship?: string };
@@ -169,8 +170,15 @@ export function recordThirdParty(
 }
 
 /** The directory row. Everything downstream — patient_id, appointment type — reads this. */
-export function recordMatch(state: CallState, patient: Patient | null, note?: string): void {
+export function recordMatch(
+  state: CallState,
+  patient: Patient | null,
+  note?: string,
+  by?: 'phone' | 'lookup',
+): void {
   state.matched = patient;
+  if (patient) state.matched_by = by;
+  else delete state.matched_by;
   record(state, 'matched', patient?.patient_id ?? null, note);
 }
 
@@ -183,14 +191,18 @@ export function contradictsMatch(state: CallState, given?: string, surname?: str
   const present = pieces.filter((piece) => piece.spoken?.trim());
   if (present.length === 0) return false;
   return !present.some(({ spoken, record, prefix }) => {
-    if (!record) return false;
-    const needle = fuzzyFold(spoken!);
-    const haystack = fuzzyFold(record);
-    if (!needle) return false;
-    if (needle === haystack) return true;
-    if (prefix && (haystack.startsWith(needle) || needle.startsWith(haystack))) return true;
-    return distance(needle, haystack) <= tolerance(needle);
+    return namePartMatches(spoken!, record, prefix);
   });
+}
+
+function namePartMatches(spoken: string, record: string | null | undefined, prefix = false): boolean {
+  if (!record) return false;
+  const needle = fuzzyFold(spoken);
+  const haystack = fuzzyFold(record);
+  if (!needle) return false;
+  if (needle === haystack) return true;
+  if (prefix && (haystack.startsWith(needle) || needle.startsWith(haystack))) return true;
+  return distance(needle, haystack) <= tolerance(needle);
 }
 
 /** Slots we actually said out loud, so the submitted `slot` is the quoted string exactly. */
@@ -222,7 +234,7 @@ function clockFace(iso: string): { hour: number; minute: number } | undefined {
   return Number.isFinite(hour) && Number.isFinite(minute) ? { hour, minute } : undefined;
 }
 
-function saidTimes(turn: string): { hour: number; minute: number }[] {
+export function saidTimes(turn: string): { hour: number; minute: number }[] {
   const times: { hour: number; minute: number }[] = [];
   for (const m of turn.matchAll(/\b(\d{1,2})\s*[:.\s]\s*(\d{2})\b/g)) {
     times.push({ hour: Number(m[1]), minute: Number(m[2]) });
@@ -230,7 +242,7 @@ function saidTimes(turn: string): { hour: number; minute: number }[] {
   return times;
 }
 
-function sameClock(
+export function sameClock(
   slot: QuotedSlot,
   said: { hour: number; minute: number },
 ): boolean {

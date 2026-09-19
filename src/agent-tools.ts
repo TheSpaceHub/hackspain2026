@@ -30,6 +30,8 @@ import {
   recordQuote,
   recordRequest,
   retract,
+  saidTimes,
+  sameClock,
   type CallState,
   type QuotedSlot,
 } from './call-state.js';
@@ -44,6 +46,7 @@ export interface ToolDeps {
   /** Kept so the decider can name the standing rule that refused a booking. */
   onAvailability?: (availability: Availability) => void;
   now?: () => Date;
+  lastCallerText?: () => string | undefined;
   /** Per-tool wall clock. Past it the agent is told to move on, mid-flight or not. */
   timeoutMs?: number;
 }
@@ -138,7 +141,7 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
           return `${matches.length} people match that. Ask for their date of birth to tell them apart.`;
         }
         const patient = matches[0]!;
-        recordMatch(state, patient);
+        recordMatch(state, patient, undefined, 'lookup');
         const visited = patient.has_visited_before ? 'has been seen here before' : 'has never been seen here';
         return `Found ${[patient.given_name, patient.first_surname].filter(Boolean).join(' ')}, ${visited}, plan on record ${patient.insurer ?? 'none'}. Do not read this back.`;
       },
@@ -274,8 +277,35 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
       // The model sends "3" as often as 3, and a rejected call is a silent turn.
       parameters: z.object({ choice: z.coerce.number().int().describe('1, 2 or 3 as you read them out') }),
       execute: async (args) => {
-        const slot = state.quoted[args.choice - 1];
+        let slot = state.quoted[args.choice - 1];
         if (!slot) return 'That is not one of the times you offered. Read the list again or call find_slots.';
+        const callerText = deps.lastCallerText?.();
+        const spoken = callerText ? saidTimes(callerText) : [];
+        if (spoken.length > 0) {
+          const matches = [...new Set(
+            spoken.flatMap((said) =>
+              state.quoted.filter((quoted) => sameClock(quoted, said)),
+            ),
+          )];
+          if (matches.length === 1) {
+            if (matches[0] !== slot) {
+              clog.warn(
+                `[accept_slot] corrected choice ${args.choice} to ${state.quoted.indexOf(matches[0]!) + 1} for caller time ${formatClock(spoken[0]!)}`,
+              );
+              slot = matches[0]!;
+            }
+          } else if (matches.length === 0) {
+            const spokenText = spoken.map(formatClock).join(', ');
+            clog.warn(
+              `[accept_slot] refused: caller said ${spokenText}, choice ${args.choice} is ${formatClock(clockForLog(slot.start_time))}`,
+            );
+            return `The caller said ${spokenText} but that was never offered. The diary has only: ${state.quoted.map((quoted) => speakTime(quoted.start_time)).join('; ')}. Read them the real times and ask again.`;
+          } else {
+            const spokenText = spoken.map(formatClock).join(', ');
+            clog.warn(`[accept_slot] refused: caller said ${spokenText}, choice ${args.choice} is ambiguous`);
+            return `The caller said ${spokenText} but that was ambiguous. The diary has only: ${state.quoted.map((quoted) => speakTime(quoted.start_time)).join('; ')}. Read them the real times and ask again.`;
+          }
+        }
         recordAccepted(state, slot);
         const held = `Held ${speakTime(slot.start_time)}.`;
         // The diary priced this slot against the plans it knew about. None of them
@@ -367,7 +397,11 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
   type Executable = { execute: (args: never, ctx: never) => unknown };
   for (const [name, tool] of Object.entries(tools as Record<string, Executable>)) {
     const execute = tool.execute.bind(tool);
-    tool.execute = (args, ctx) => capped(name, timeoutMs, execute(args, ctx)) as never;
+    tool.execute = async (args, ctx) => {
+      const result = await capped(name, timeoutMs, execute(args, ctx));
+      clog.info(`[tool ${name}] → ${String(result).slice(0, 300)}`);
+      return result as never;
+    };
   }
   return tools;
 }
@@ -375,6 +409,23 @@ export function buildTools(deps: ToolDeps): llm.ToolContextLike {
 function siteName(catalogue: Catalogue | null, locationId: string): string {
   if (!catalogue) return locationId;
   return locationById(catalogue, locationId)?.name ?? locationId;
+}
+
+function clockForLog(startTime: string): { hour: number; minute: number } {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Madrid',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(startTime));
+  return {
+    hour: Number(parts.find((part) => part.type === 'hour')?.value ?? 0),
+    minute: Number(parts.find((part) => part.type === 'minute')?.value ?? 0),
+  };
+}
+
+function formatClock(time: { hour: number; minute: number }): string {
+  return `${String(time.hour).padStart(2, '0')}:${String(time.minute).padStart(2, '0')}`;
 }
 
 const MADRID_TIME = new Intl.DateTimeFormat('en-GB', {
