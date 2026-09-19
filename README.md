@@ -197,7 +197,8 @@ curl -N localhost:8788/__sim/events?since=0 # every hold, release, booking… as
   the top-right pill flips the mode.
 - **The Clinic tab** is the sim's diary: each provider's day as 15-minute cells (the
   clinic's own bookings, ones made by calls, slots on hold coloured per call), the live
-  holds with their countdown, Reset / Re-snapshot, and **Events** — the clinic's activity
+  holds with their countdown, **On the line** (the agent's open calls, each with a live
+  Listen button), Reset / Re-snapshot (Reset also clears the log), and **Events** — the clinic's activity
   log: calls opening and closing, every hold taken or refused (another call or an
   existing appointment had the slot), releases and expiries, bookings, reschedules,
   cancellations, new patients, no-action/escalation outcomes, resets and snapshots, each
