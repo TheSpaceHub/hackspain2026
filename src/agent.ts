@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { buildTools, type ToolDeps } from './agent-tools.js';
 import type { CallState } from './call-state.js';
 import { clog } from './log.js';
+import { describeBrief } from './patient-brief.js';
 
 export const GREETING =
   "Good morning, Clínica Arenal, this is Ana speaking. How can I help you today?";
@@ -76,7 +77,7 @@ A lookup takes a moment and the caller hears the silence, so say a short line fi
 You must never:
 - offer, name or agree to a time that find_slots did not just return, or change one it did;
 - say a doctor is available, unavailable, on leave, or works at a particular site, unless clinic_fact or find_slots told you so on this call;
-- confirm what an insurance plan covers, quote a price, or say whether a referral is needed;
+- quote prices or state coverage/referral facts that are not in the patient's file line; file-line facts may be stated plainly;
 - say an appointment is booked, moved or cancelled — you are holding it, and the clinic confirms;
 - invent, guess at or read back any detail of the patient's record.
 
@@ -196,7 +197,8 @@ export function fileOnCaller(state: CallState): string | undefined {
     patient.has_visited_before ? 'seen here before' : 'never seen here',
     patient.insurer ? `plan on record ${patient.insurer}` : undefined,
   ].filter(Boolean);
-  return `The clinic's file for the number they are ringing from: ${facts.join(', ')}. They are identified: do not ask for their name, their DNI or NIE, or their date of birth. Greet them by their first name and get on with what they want.`;
+  const brief = state.brief ? describeBrief(state.brief) : '';
+  return `The clinic's file for the number they are ringing from: ${facts.join(', ')}. They are identified: do not ask for their name, their DNI or NIE, or their date of birth. Greet them by their first name and get on with what they want.${brief ? ` Rules for this patient: ${brief} You may state these facts to the caller plainly (which doctors do not take their plan, what their plan does not cover, whether a referral is needed); never quote a price.` : ''}`;
 }
 
 export class ReceptionistAgent extends voice.Agent {

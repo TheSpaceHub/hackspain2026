@@ -19,7 +19,7 @@ import {
   recordRequest,
   setPlanVocabulary,
 } from '../src/call-state.js';
-import { enforcePolicy, overrideFlooredBooking } from '../src/guards.js';
+import { bookFromState, enforcePolicy, overrideFlooredBooking } from '../src/guards.js';
 import { applyPatch } from '../src/extract.js';
 import { ClinicApi, catalogueSchema } from '../src/clinic-api.js';
 import { FakeClinic, fakeCatalogue } from './fake-clinic.js';
@@ -35,6 +35,12 @@ function check(name: string, actual: unknown, expected: unknown): void {
 
 const catalogue = catalogueSchema.parse(fakeCatalogue);
 const NOW = new Date('2026-10-07T10:00:00+02:00');
+setPlanVocabulary([
+  ...catalogue.plans,
+  { id: 'cigna', name: 'Cigna' },
+  { id: 'nueva_mutua_sanitaria', name: 'Nueva Mutua Sanitaria' },
+  { id: 'mapfre', name: 'Mapfre Salud' },
+]);
 
 interface Harness {
   clinic: FakeClinic;
@@ -44,7 +50,10 @@ interface Harness {
   availability: () => unknown;
 }
 
-function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Harness {
+function harness(
+  options: ConstructorParameters<typeof FakeClinic>[0] = {},
+  lastCallerText?: string,
+): Harness {
   const clinic = new FakeClinic(options);
   const api = new ClinicApi({ baseUrl: 'https://fake.local', apiKey: 'k', fetch: clinic.fetch });
   const state = createCallState('call-test');
@@ -54,6 +63,7 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
     api,
     catalogue,
     now: () => NOW,
+    lastCallerText: () => lastCallerText,
     onAvailability: (a) => {
       availability = a;
     },
@@ -75,6 +85,42 @@ function harness(options: ConstructorParameters<typeof FakeClinic>[0] = {}): Har
       return String(result);
     },
   };
+}
+
+{
+  const refused = harness({}, 'Yes. Monday at 6 30 PM is fine');
+  refused.state.quoted = [{
+    provider_id: 'prov_gp',
+    location_id: 'loc_centro',
+    appointment_type_id: 'apt_review',
+    start_time: '2026-10-12T09:15:00+02:00',
+  }];
+  const response = await refused.call('accept_slot', { choice: 1 });
+  check('a spoken time that was not offered is refused', /caller said 06:30/.test(response), true);
+  check('a refused spoken time is not accepted', refused.state.accepted, null);
+
+  const corrected = harness({}, 'the 9 15 please');
+  corrected.state.quoted = [
+    {
+      provider_id: 'prov_gp',
+      location_id: 'loc_centro',
+      appointment_type_id: 'apt_review',
+      start_time: '2026-10-12T11:45:00+02:00',
+    },
+    {
+      provider_id: 'prov_gp',
+      location_id: 'loc_centro',
+      appointment_type_id: 'apt_review',
+      start_time: '2026-10-12T09:15:00+02:00',
+    },
+  ];
+  await corrected.call('accept_slot', { choice: 2 });
+  check('a matching spoken time accepts the matching quoted slot', corrected.state.accepted?.start_time, corrected.state.quoted[1]!.start_time);
+
+  const numeric = harness({}, 'Yes, that one');
+  numeric.state.quoted = [corrected.state.quoted[0]!];
+  await numeric.call('accept_slot', { choice: 1 });
+  check('without a spoken time the numeric choice is honored', numeric.state.accepted?.start_time, numeric.state.quoted[0]!.start_time);
 }
 
 // --- identification --------------------------------------------------------
@@ -299,11 +345,23 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
 // --- which plan the visit is billed to ---------------------------------------
 
 {
-  setPlanVocabulary(catalogue.plans);
+  setPlanVocabulary([
+    ...catalogue.plans,
+    { id: 'cigna', name: 'Cigna' },
+    { id: 'mapfre', name: 'Mapfre Salud' },
+  ]);
 
   check('a plan said out loud is written down as the clinic bills it', planId('Sanitas'), 'sanitas');
   check('accents and all', planId('ASISA'), 'asisa');
-  check('a plan nobody offers is kept as spoken, not swapped for a real one', planId('Wizard Cover'), 'wizard_cover');
+  check('a plan nobody offers is dropped', planId('Wizard Cover'), '');
+  check('a fuzzy ASISA is resolved to the real plan', planId('acisa'), 'asisa');
+  check('a fuzzy Sanitas is resolved to the real plan', planId('Fenitas'), 'sanitas');
+  check('a fuzzy Cigna is resolved to the real plan', planId('Signa'), 'cigna');
+  check('a fuzzy Mapfre is resolved to the real plan', planId('Mafre Salud'), 'mapfre');
+  check('a numeric placeholder plan is dropped', planId('1'), '');
+  const heard = createCallState('call-heard-insurer');
+  recordRequest(heard, { insurers: ['ACISA', '1'] });
+  check('a heard insurer keeps only real plans', heard.request.insurers, ['asisa']);
 
   const h = harness();
   await h.call('identify_patient', { national_id: '12345678Z' });
@@ -325,6 +383,51 @@ check('a slot is spoken as a person says it', speakTime('2026-10-08T16:30:00+02:
     h.state,
   );
   check('a placeholder never reaches the clinic', invented.action.policy_id, 'sanitas');
+}
+
+{
+  setPlanVocabulary([
+    { id: 'dkv', name: 'DKV' },
+    { id: 'sanitas', name: 'Sanitas' },
+  ]);
+  const state = createCallState('call-policy-order');
+  recordMatch(state, {
+    patient_id: 'pat-dkv',
+    insurer: 'dkv',
+  });
+  recordRequest(state, { insurers: ['Sanitas'] });
+  recordAccepted(state, {
+    provider_id: 'prov',
+    location_id: 'loc',
+    appointment_type_id: 'apt',
+    start_time: '2026-10-08T09:00:00+02:00',
+    payable_with: ['dkv', 'sanitas'],
+  });
+  check('the matched record plan is primary when both plans pay', choosePolicy(state), 'dkv');
+  state.accepted!.payable_with = ['sanitas'];
+  check('the heard plan wins when it is the only payable plan', choosePolicy(state), 'sanitas');
+}
+
+{
+  setPlanVocabulary(catalogue.plans);
+  const state = createCallState('call-phone-third-party');
+  recordMatch(state, {
+    patient_id: 'pat_001',
+    given_name: 'Marta',
+    first_surname: 'Ruiz',
+    has_visited_before: true,
+    insurer: 'sanitas',
+  }, undefined, 'phone');
+  state.caller_is_patient = false;
+  recordRequest(state, { insurers: ['sanitas'] });
+  recordAccepted(state, {
+    provider_id: 'prov_gp',
+    location_id: 'loc_centro',
+    appointment_type_id: 'apt_review',
+    start_time: '2026-10-08T09:00:00+02:00',
+    payable_with: ['sanitas'],
+  });
+  check('a third-party phone match cannot trigger fallback booking', bookFromState(state), undefined);
 }
 
 {

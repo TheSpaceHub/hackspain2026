@@ -15,7 +15,10 @@ import {
   normalizePhone,
   type Normalized,
 } from './normalize.js';
-import { distance, fold as fuzzyFold, tolerance } from './fuzzy.js';
+import { distance, fold as fuzzyFold, only, tolerance } from './fuzzy.js';
+import { describeBrief } from './patient-brief.js';
+import { clog } from './log.js';
+import type { PatientBrief } from './patient-brief.js';
 import type { Patient } from './schema.js';
 
 /** Everything the caller can tell us about the patient, before the directory confirms it. */
@@ -73,11 +76,15 @@ export interface CallState {
   patient: PatientDraft;
   /** The directory row we settled on. `patient_id` comes from here and nowhere else. */
   matched: Patient | null;
+  brief?: PatientBrief;
+  matched_by?: 'phone' | 'lookup';
   /** Problem 9: booking for the caller instead of the patient is the failure mode. */
   caller_is_patient: boolean;
   caller?: { name?: string; relationship?: string };
   request: CallRequest;
   quoted: QuotedSlot[];
+  turns_seen: number;
+  quoted_at?: number;
   accepted: QuotedSlot | null;
   phone_match_rejected?: string;
   /** Every write, in order, including the ones that were later retracted. */
@@ -92,6 +99,7 @@ export function createCallState(callId: string, fromNumber?: string): CallState 
     caller_is_patient: true,
     request: { insurers: [] },
     quoted: [],
+    turns_seen: 0,
     accepted: null,
     journal: [],
   };
@@ -135,6 +143,10 @@ export function recordPatientField(
   spoken: string,
 ): RecordResult {
   const { value, problem } = NORMALIZERS[field](spoken);
+  if (field === 'insurer' && !value) {
+    clog.warn(`[state] dropped insurer "${spoken}": not a plan the clinic bills`);
+    return { value: '', stored: false, problem: 'not a plan the clinic bills' };
+  }
   record(state, field, value, problem);
   state.patient[field] = value;
   return { value, stored: true, problem };
@@ -153,6 +165,8 @@ export function recordRequest(state: CallState, patch: Partial<CallRequest>): Ca
     if (id && !state.request.insurers.includes(id)) {
       state.request.insurers.push(id);
       record(state, 'request.insurer', id);
+    } else if (!id) {
+      clog.warn(`[state] dropped insurer "${insurer}": not a plan the clinic bills`);
     }
   }
   return state.request;
@@ -169,8 +183,15 @@ export function recordThirdParty(
 }
 
 /** The directory row. Everything downstream — patient_id, appointment type — reads this. */
-export function recordMatch(state: CallState, patient: Patient | null, note?: string): void {
+export function recordMatch(
+  state: CallState,
+  patient: Patient | null,
+  note?: string,
+  by?: 'phone' | 'lookup',
+): void {
   state.matched = patient;
+  if (patient) state.matched_by = by;
+  else delete state.matched_by;
   record(state, 'matched', patient?.patient_id ?? null, note);
 }
 
@@ -183,19 +204,24 @@ export function contradictsMatch(state: CallState, given?: string, surname?: str
   const present = pieces.filter((piece) => piece.spoken?.trim());
   if (present.length === 0) return false;
   return !present.some(({ spoken, record, prefix }) => {
-    if (!record) return false;
-    const needle = fuzzyFold(spoken!);
-    const haystack = fuzzyFold(record);
-    if (!needle) return false;
-    if (needle === haystack) return true;
-    if (prefix && (haystack.startsWith(needle) || needle.startsWith(haystack))) return true;
-    return distance(needle, haystack) <= tolerance(needle);
+    return namePartMatches(spoken!, record, prefix);
   });
+}
+
+function namePartMatches(spoken: string, record: string | null | undefined, prefix = false): boolean {
+  if (!record) return false;
+  const needle = fuzzyFold(spoken);
+  const haystack = fuzzyFold(record);
+  if (!needle) return false;
+  if (needle === haystack) return true;
+  if (prefix && (haystack.startsWith(needle) || needle.startsWith(haystack))) return true;
+  return distance(needle, haystack) <= tolerance(needle);
 }
 
 /** Slots we actually said out loud, so the submitted `slot` is the quoted string exactly. */
 export function recordQuote(state: CallState, slots: QuotedSlot[]): void {
   state.quoted = slots;
+  state.quoted_at = state.turns_seen;
   for (const slot of slots) record(state, 'quoted', `${slot.start_time} ${slot.provider_id}`);
 }
 
@@ -222,7 +248,7 @@ function clockFace(iso: string): { hour: number; minute: number } | undefined {
   return Number.isFinite(hour) && Number.isFinite(minute) ? { hour, minute } : undefined;
 }
 
-function saidTimes(turn: string): { hour: number; minute: number }[] {
+export function saidTimes(turn: string): { hour: number; minute: number }[] {
   const times: { hour: number; minute: number }[] = [];
   for (const m of turn.matchAll(/\b(\d{1,2})\s*[:.\s]\s*(\d{2})\b/g)) {
     times.push({ hour: Number(m[1]), minute: Number(m[2]) });
@@ -230,7 +256,7 @@ function saidTimes(turn: string): { hour: number; minute: number }[] {
   return times;
 }
 
-function sameClock(
+export function sameClock(
   slot: QuotedSlot,
   said: { hour: number; minute: number },
 ): boolean {
@@ -252,7 +278,9 @@ export function acceptFromTranscript(
   turns: { role: string; text: string }[],
 ): QuotedSlot | null {
   if (state.accepted || state.quoted.length === 0) return null;
-  const spoken = turns.filter((t) => t.role === 'user');
+  const spoken = turns
+    .map((turn, index) => ({ ...turn, index }))
+    .filter((turn) => turn.role === 'user' && turn.index >= (state.quoted_at ?? 0));
 
   for (let i = spoken.length - 1; i >= 0; i--) {
     const text = spoken[i]!.text.toLowerCase();
@@ -266,12 +294,12 @@ export function acceptFromTranscript(
     }
     if (byClock.length > 1) return null;
 
-    // "the soonest you have" is how the request itself is phrased, so an ordinal only
-    // counts as a choice when it comes after the list was read out.
-    const ordinals =
-      i < spoken.length - 2
-        ? []
-        : Object.keys(ORDINALS).filter((word) => new RegExp(`\\b${word}\\b`).test(text));
+    // Availability questions such as "what is the soonest" are requests, not choices.
+    const asksForOptions = /\b(?:what|which|when|do you have|is there)\b/.test(text) &&
+      Object.keys(ORDINALS).some((word) => new RegExp(`\\b${word}\\b`).test(text));
+    const ordinals = asksForOptions
+      ? []
+      : Object.keys(ORDINALS).filter((word) => new RegExp(`\\b${word}\\b`).test(text));
     if (ordinals.length === 1) {
       const at = ORDINALS[ordinals[0]!]!;
       const slot = at < 0 ? state.quoted[state.quoted.length - 1] : state.quoted[at];
@@ -308,6 +336,10 @@ export function readCallState(state: CallState): string {
     `Patient: ${patient}` +
       (!state.matched && state.phone_match_rejected ? ' · number on file belongs to someone else' : ''),
   );
+  if (state.brief) {
+    const described = describeBrief(state.brief);
+    if (described) lines.push(`Rules for this patient: ${described}`);
+  }
 
   const draft = Object.entries(state.patient)
     .map(([k, v]) => `${k}=${v}`)
@@ -369,21 +401,21 @@ export function setPlanVocabulary(plans: { id: string; name: string }[]): void {
 const fold = (text: string): string =>
   text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[_\s]+/g, ' ').trim();
 
+const planTolerance = (needle: string): number => Math.max(2, Math.floor(needle.length / 4));
+
 /** The clinic's id for a spoken plan, or the spoken plan tidied up when it knows none. */
 export function planId(spoken: string): string {
-  const said = fold(spoken);
-  if (!said) return '';
-  const match =
-    PLANS.find((plan) => fold(plan.id) === said || fold(plan.name) === said) ??
-    // "Sanitas" for "Sanitas Más": a prefix on a word boundary, never a substring, so
-    // "Mutua" cannot silently pick whichever mutua happens to be listed first.
-    PLANS.find((plan) => fold(plan.name).startsWith(`${said} `) || fold(plan.id).startsWith(`${said} `));
-  return match ? match.id : said.replace(/ /g, '_');
+  const match = only(
+    PLANS.map((plan) => ({ item: plan, aliases: [plan.id, plan.name] })),
+    spoken,
+    planTolerance,
+  );
+  return match?.id ?? '';
 }
 
 /** Every plan this call knows of, the ones the caller named first. */
 export function knownPlans(state: CallState): string[] {
-  return [...state.request.insurers, state.patient.insurer, state.matched?.insurer].filter(
+  return [state.matched?.insurer, ...state.request.insurers, state.patient.insurer].filter(
     (plan): plan is string => typeof plan === 'string' && plan.trim() !== '',
   );
 }
@@ -393,9 +425,8 @@ export function knownPlans(state: CallState): string[] {
  *
  * Not a judgement: /availability prices the slot against every plan we passed it and
  * returns `payable_with`, so the answer is the intersection of that with the plans this
- * call knows of. A plan named on the call outranks the one on the record — which is the
- * whole of the second policy: the caller volunteers it, the diary re-prices, and the
- * survivor is what we submit.
+ * call knows of. The record plan is primary; a plan named on the call is a second policy
+ * and wins only when it is the one the diary says the accepted slot can be billed against.
  */
 export function choosePolicy(state: CallState): string | undefined {
   const named = knownPlans(state);

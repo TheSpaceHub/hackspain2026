@@ -8,9 +8,10 @@
  */
 
 import { applyPatch, createExtractor, parsePatch, type Complete } from '../src/extract.js';
-import { createCallState, readCallState, recordMatch } from '../src/call-state.js';
+import { createCallState, readCallState, recordMatch, setPlanVocabulary } from '../src/call-state.js';
 
 let failed = 0;
+setPlanVocabulary([{ id: 'nueva_mutua_sanitaria', name: 'Nueva Mutua Sanitaria' }]);
 function check(name: string, actual: unknown, expected: unknown): void {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
@@ -28,6 +29,16 @@ const replying =
 
 check('a fenced answer is still JSON', parsePatch('```json\n{"intent":"book"}\n```')?.intent, 'book');
 check('prose around it is ignored', parsePatch('Sure! {"intent":"cancel"} hope that helps')?.intent, 'cancel');
+check(
+  'flat patient fields are lifted under patient',
+  parsePatch('{"given_name":"Soledad","first_surname":"Domínguez","insurer":"Sonita"}')?.patient?.first_surname,
+  'Domínguez',
+);
+check(
+  'a flat field does not overwrite a nested one',
+  parsePatch('{"given_name":"X","patient":{"given_name":"Soledad"}}')?.patient?.given_name,
+  'Soledad',
+);
 check('nothing usable is null, never a guess', parsePatch('I could not find anything'), null);
 check('a key outside the schema is dropped, not fatal', parsePatch('{"intent":"book","mood":"cross"}')?.intent, 'book');
 check('an invalid enum voids the patch rather than writing junk', parsePatch('{"intent":"chat"}'), null);
@@ -84,6 +95,41 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
   const state = createCallState('call-4');
   applyPatch(state, { caller_is_patient: false, caller_name: 'Ana', relationship: 'daughter' });
   check('the notes say whose appointment it is', /Caller is NOT the patient/.test(readCallState(state)), true);
+}
+
+{
+  const noRelationship = createCallState('call-caller-default');
+  applyPatch(noRelationship, { caller_is_patient: false, caller_name: 'Ana' });
+  check('caller_is_patient false without a relationship is ignored', noRelationship.caller_is_patient, true);
+
+  const different = createCallState('call-caller-third-party');
+  applyPatch(different, {
+    caller_is_patient: false,
+    caller_name: 'Ana',
+    relationship: 'mother',
+    patient: { given_name: 'Beatriz' },
+  });
+  check('a related caller with a different name is a third party', different.caller_is_patient, false);
+
+  // The number is on file for the mother; "it's for my child" must still demote her.
+  const phoneOwner = createCallState('call-caller-phone-owner');
+  recordMatch(phoneOwner, { patient_id: 'P9', given_name: 'Sara', first_surname: 'Ruiz' } as never, undefined, 'phone');
+  applyPatch(phoneOwner, { caller_is_patient: false, caller_name: 'Sara', relationship: 'mother' });
+  check('a kinship word demotes even the phone owner', phoneOwner.caller_is_patient, false);
+
+  const phoneMatch = createCallState('call-caller-phone-match');
+  recordMatch(phoneMatch, {
+    patient_id: 'P-phone',
+    given_name: 'Charlotte',
+    first_surname: 'Cooper',
+    second_surname: 'Roberts',
+  });
+  applyPatch(phoneMatch, {
+    caller_is_patient: false,
+    caller_name: 'Charlotte Cooper Roberts',
+    relationship: 'RNL Norte (other)',
+  });
+  check('an invalid relationship does not demote a matched patient', phoneMatch.caller_is_patient, true);
 }
 
 {
@@ -217,6 +263,26 @@ check('an invalid enum voids the patch rather than writing junk', parsePatch('{"
   await extractor.settle(1_000);
   check('a failed extraction is logged, not thrown into the call', errors.length, 1);
   check('and the notes are merely empty', state.request.intent, undefined);
+}
+
+{
+  const state = createCallState('call-final-pass');
+  state.request.intent = 'register';
+  const extractor = createExtractor({
+    state,
+    complete: () => Promise.resolve(
+      '{"patient":{"given_name":"Ana","first_surname":"Ruiz","national_id":"48064716Y","date_of_birth":"1990-03-14","phone":"600999888","email":"ana@example.com"}}',
+    ),
+  });
+  await extractor.finalPass([
+    { role: 'assistant', text: 'What is your full name and date of birth?' },
+    { role: 'user', text: 'Ana Ruiz, 14 March 1990.' },
+    { role: 'assistant', text: 'And your phone and email?' },
+    { role: 'user', text: 'My phone is 600999888 and my email is ana@example.com.' },
+  ]);
+  check('the final transcript pass fills registration notes', state.patient.given_name, 'Ana');
+  check('the final transcript pass fills the date', state.patient.date_of_birth, '1990-03-14');
+  check('the final transcript pass fills contact details', state.patient.phone, '600999888');
 }
 
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);

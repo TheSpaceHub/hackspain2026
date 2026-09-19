@@ -8,13 +8,14 @@ import { writeCallLog, type CallLog } from './call-log.js';
 import {
   acceptFromTranscript,
   createCallState,
+  missingForRegistration,
   readCallState,
   recordMatch,
   type CallState,
 } from './call-state.js';
-import { createExtractor, type Extractor } from './extract.js';
+import { createExtractor, DEFAULT_EXTRACT_TIMEOUT_MS, type Extractor } from './extract.js';
 import type { Availability, Catalogue, ClinicApi } from './clinic-api.js';
-import { config } from './config.js';
+import { config, SILENCE_NUDGE_MS } from './config.js';
 import { FLOOR_ACTION, decide, type DeciderResult } from './decider.js';
 import {
   applyEmergencyGuard,
@@ -23,7 +24,8 @@ import {
   overrideFlooredBooking,
 } from './guards.js';
 import { mulawToPcm16 } from './mulaw.js';
-import { callContext } from './log.js';
+import { callContext, clog } from './log.js';
+import { attachBrief } from './patient-brief.js';
 import { createLLM, createSTT, createTTS, type SharedVad } from './models.js';
 import type { Action } from './schema.js';
 import { submitActions, type SubmitResult } from './submit.js';
@@ -76,6 +78,7 @@ export class CallSession {
   #framesOut = 0;
   #errors: string[] = [];
   #finishing: Promise<void> | null = null;
+  #closing = false;
   #endedBy = 'unknown';
   #transcript: TranscriptTurn[] = [];
   #state: CallState | null = null;
@@ -85,6 +88,12 @@ export class CallSession {
   #availability: Availability | null = null;
   /** Turns already handed to the store, so a live flush never re-sends one. */
   #turnsWritten = 0;
+  #silenceTimer: NodeJS.Timeout | null = null;
+  #nudges = 0;
+  #greetingFinished = false;
+  #deadAir: { turn: number; ms: number }[] = [];
+  #pendingDeadAir: { turn: number; at: number }[] = [];
+  #deadAirTurn = 0;
 
   constructor(ws: WebSocket, shared: Shared) {
     this.#ws = ws;
@@ -153,7 +162,7 @@ export class CallSession {
       if (this.#state.from_number) this.#identifyByPhone(this.#state, this.#state.from_number);
 
       console.log(
-        `[call ${this.#callId}] start · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
+        `[call ${this.#callId}] start ${new Date().toISOString()} · stream=${this.#streamSid} from=${this.#fromNumber ?? '(withheld)'}`,
       );
 
       this.#shared.store.write({
@@ -224,6 +233,10 @@ export class CallSession {
         state: this.#state ?? createCallState(this.#callId, this.#fromNumber),
         api: this.#shared.api,
         catalogue: this.#shared.catalogue,
+        lastCallerText: () => {
+          const turns = this.#session ? buildCallTranscript(this.#session.history) : [];
+          return [...turns].reverse().find((turn) => turn.role === 'user')?.text;
+        },
         onAvailability: (availability) => {
           this.#availability = availability;
         },
@@ -231,17 +244,111 @@ export class CallSession {
       await session.start({ agent });
       this.#sessionStartMs = Date.now() - t0;
 
-      // Speak first: the harness cuts a call with no audible audio from us.
-      session.say(GREETING, { allowInterruptions: true });
-
       // A turn lands in the store as soon as it is final, so a crash mid-call still
       // leaves the conversation on disk. The write crosses to the worker thread.
       session.on(voice.AgentSessionEventTypes.ConversationItemAdded, () => this.#flushTurns());
+      session.on(voice.AgentSessionEventTypes.UserInputTranscribed, (event) => {
+        if (event.isFinal) {
+          this.#nudges = 0;
+          this.#pendingDeadAir.push({ turn: ++this.#deadAirTurn, at: Date.now() });
+        }
+        this.#clearSilenceTimer();
+      });
+      session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
+        if (event.newState === 'listening') {
+          this.#armSilenceTimer();
+        } else {
+          this.#clearSilenceTimer();
+        }
+        if (event.newState === 'speaking' && this.#pendingDeadAir.length > 0) {
+          const pending = this.#pendingDeadAir.shift()!;
+          const ms = Date.now() - pending.at;
+          this.#deadAir.push({ turn: pending.turn, ms });
+          clog.info(`[latency] caller→agent audio ${ms} ms`);
+        }
+      });
+      session.on(voice.AgentSessionEventTypes.UserStateChanged, (event) => {
+        if (event.newState === 'speaking') {
+          this.#clearSilenceTimer();
+        } else if (event.newState === 'listening') {
+          this.#armSilenceTimer();
+        }
+      });
+
+      // Speak first: the harness cuts a call with no audible audio from us.
+      const greeting = session.say(GREETING, { allowInterruptions: true });
+      void greeting.waitForPlayout().then(
+        () => {
+          this.#greetingFinished = true;
+          this.#armSilenceTimer();
+        },
+        (err: unknown) => this.#errors.push(`greeting playout: ${String(err)}`),
+      );
     } catch (err) {
       this.#errors.push(`session start: ${String(err)}`);
       console.error(`[call ${this.#callId}] session start failed: ${String(err)}`);
       // The call is lost; the submission is not.
       void this.finish('session_start_failed');
+    }
+  }
+
+  #clearSilenceTimer(): void {
+    if (this.#silenceTimer) clearTimeout(this.#silenceTimer);
+    this.#silenceTimer = null;
+  }
+
+  #armSilenceTimer(): void {
+    this.#clearSilenceTimer();
+    const session = this.#session;
+    if (
+      !session ||
+      this.#closing ||
+      !this.#greetingFinished ||
+      session.agentState !== 'listening'
+    ) return;
+    this.#silenceTimer = setTimeout(() => {
+      this.#silenceTimer = null;
+      void this.#handleSilence();
+    }, SILENCE_NUDGE_MS);
+  }
+
+  async #handleSilence(): Promise<void> {
+    try {
+      const session = this.#session;
+      if (
+        !session ||
+        this.#closing ||
+        session.agentState !== 'listening' ||
+        session.userState === 'speaking'
+      ) return;
+
+      this.#nudges++;
+      clog.info(`[silence] no caller speech for ${SILENCE_NUDGE_MS / 1000}s · nudge ${this.#nudges}`);
+      if (this.#nudges <= 2) {
+        try {
+          session.generateReply({
+            instructions:
+              'The caller has said nothing for several seconds since your last sentence. In one short sentence check they are still there and repeat your last question or the appointment you offered (with day and time), so they can answer with a yes.',
+            allowInterruptions: true,
+          });
+        } catch (err) {
+          this.#errors.push(`silence nudge: ${String(err)}`);
+        }
+        return;
+      }
+
+      try {
+        const goodbye = session.say(
+          "I'm sorry, I can't hear you. Please call us back at Clínica Arenal whenever suits you. Goodbye.",
+          { allowInterruptions: true },
+        );
+        await goodbye.waitForPlayout();
+      } catch (err) {
+        this.#errors.push(`silence goodbye: ${String(err)}`);
+      }
+      if (!this.#closing) void this.finish('caller_silent');
+    } catch (err) {
+      this.#errors.push(`silence timer: ${String(err)}`);
     }
   }
 
@@ -251,7 +358,10 @@ export class CallSession {
       .findPatient({ phone })
       .then((matches) => {
         // Two people on one landline is a household, not an identification.
-        if (matches.length === 1 && !state.matched) recordMatch(state, matches[0]!);
+        if (matches.length === 1 && !state.matched) {
+          recordMatch(state, matches[0]!, undefined, 'phone');
+          attachBrief(state, this.#shared.catalogue, new Date());
+        }
       })
       .catch((err: unknown) => this.#errors.push(`phone lookup: ${String(err)}`));
   }
@@ -265,6 +375,7 @@ export class CallSession {
     } catch {
       return;
     }
+    if (this.#state) this.#state.turns_seen = turns.length;
     const at = new Date().toISOString();
     for (let i = this.#turnsWritten; i < turns.length; i++) {
       const turn = turns[i]!;
@@ -297,6 +408,8 @@ export class CallSession {
   }
 
   async #finish(trigger: string): Promise<void> {
+    this.#closing = true;
+    this.#clearSilenceTimer();
     if (this.#endedBy === 'unknown') this.#endedBy = trigger;
     if (this.#wallClock) clearTimeout(this.#wallClock);
 
@@ -305,6 +418,7 @@ export class CallSession {
 
     try {
       this.#transcript = this.#session ? buildCallTranscript(this.#session.history) : [];
+      if (this.#state) this.#state.turns_seen = this.#transcript.length;
     } catch (err) {
       this.#errors.push(`transcript: ${String(err)}`);
     }
@@ -333,6 +447,28 @@ export class CallSession {
     // and the decider reads the notes. Give it a slice of the window, not the window.
     this.#flushTurns();
     await this.#extractor?.settle(Math.max(0, Math.min(EXTRACT_SETTLE_MS, budget - 2_000)));
+    if (this.#state?.request.intent === 'register' && this.#extractor) {
+      const missingBefore = missingForRegistration(this.#state);
+      if (missingBefore.length > 0 && budget > 2_000) {
+        const filled = new Promise<void>((resolve) => {
+          void this.#extractor!.finalPass(
+            this.#transcript.filter(
+              (turn): turn is { role: 'user' | 'assistant'; text: string } =>
+                turn.role === 'user' || turn.role === 'assistant',
+            ),
+          ).then(() => resolve(), () => resolve());
+        });
+        await Promise.race([
+          filled,
+          new Promise<void>((resolve) => setTimeout(resolve, Math.min(DEFAULT_EXTRACT_TIMEOUT_MS, budget - 2_000))),
+        ]);
+        const missingAfter = missingForRegistration(this.#state);
+        const added = missingBefore.filter((field) => !missingAfter.includes(field));
+        clog.info(added.length > 0
+          ? `[extract] final pass: filled ${added.join(', ')}`
+          : '[extract] final pass: filled nothing');
+      }
+    }
 
     // A slot the caller chose but the model never held: the ids are all in the quote.
     if (this.#state) {
@@ -381,7 +517,7 @@ export class CallSession {
 
     const verdict = submissions.map((s) => `${s.action}=${s.status}`).join(' ') || 'none';
     console.log(
-      `[call ${this.#callId}] end (${this.#endedBy}) · turns=${this.#transcript.length} · ${verdict}`,
+      `[call ${this.#callId}] end ${new Date().toISOString()} (${this.#endedBy}) · turns=${this.#transcript.length} · ${verdict}`,
     );
   }
 
@@ -502,6 +638,7 @@ export class CallSession {
         decider_ms: decided.durationMs,
         submit_ms: endedAt - submitStartedAt,
         close_to_submitted_ms: this.#closedAt ? endedAt - this.#closedAt : undefined,
+        dead_air: this.#deadAir,
       },
       audio: {
         frames_in: this.#framesIn,
