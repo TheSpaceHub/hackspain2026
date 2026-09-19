@@ -9,25 +9,15 @@
 
 import type { Action, Patient } from './schema.js';
 import type { Availability } from './clinic-api.js';
-import { callerAccepted, choosePolicy, saidTimes, sameClock, type CallState } from './call-state.js';
+import { choosePolicy, type CallState } from './call-state.js';
 
 export function bookFromState(state: CallState): Extract<Action, { action: 'book' }> | undefined {
-  let accepted = state.accepted;
+  // `accepted` is only set once accept_slot has checked the quote was read and the caller
+  // answered yes; the caller's last words at hang-up are usually "thanks, goodbye".
+  const accepted = state.accepted;
   const matched = state.matched;
   const policy_id = choosePolicy(state);
   if (!accepted || !matched || !policy_id) return undefined;
-  if (!state.quoted_spoken) return undefined;
-  const callerText = state.last_caller_text ?? '';
-  const callerDecision = callerAccepted(callerText);
-  if (callerDecision === 'no') return undefined;
-  const spokenMatches = [...new Set(
-    saidTimes(callerText).flatMap((said) =>
-      state.quoted.filter((quoted) => sameClock(quoted, said)),
-    ),
-  )];
-  if (spokenMatches.length > 1) return undefined;
-  if (spokenMatches.length === 1) accepted = spokenMatches[0]!;
-  else if (callerDecision !== 'yes') return undefined;
   if (!state.caller_is_patient && state.matched_by === 'phone') return undefined;
   return {
     action: 'book',
